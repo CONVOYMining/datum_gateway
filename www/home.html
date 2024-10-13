@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>DATUM Gateway Status</title>
+	<link rel="icon" type="image/x-icon" href="/assets/icons/favicon.ico">
+	<link rel="stylesheet" type="text/css" href="./assets/style.css">
+	<style type="text/css">
+		.table-wrapper {
+			justify-content: center;
+		}
+		
+		.table-container {
+			max-width: 800px;
+		}
+		
+		table {
+			border-collapse: collapse;
+		}
+		
+		td {
+			word-break: break-all;
+		}
+		
+		.leading_zeros {
+			color: gray;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<div class="header">
+			<h1><img src="/assets/icons/datum_logo.svg" alt="(DATUM Logo)" style="vertical-align: text-top" width="28" height="33"> DATUM <span>GATEWAY</span></h1>
+		</div>
+		<div class="menu-container">
+			<a href="/" style="background-color: darkslategrey;">Status</a>
+			<a href="/clients">Clients</a>
+			<a href="/threads">Threads</a>
+			<a href="/coinbaser">Coinbaser</a>
+		</div>
+	</div>
+	
+	<div class="tables-container">
+		<div class="table-wrapper">
+			<div class="table-container">
+				<h2>Decentralized Client Stats</h2>
+				<table>
+					<tr>
+						<td class="label">Shares Accepted:</td>
+						<td>${DATUM_SHARES_ACCEPTED}</td>
+					</tr>
+					<tr>
+						<td class="label">Shares Rejected:</td>
+						<td>${DATUM_SHARES_REJECTED}</td>
+					</tr>
+					<tr>
+						<td class="label">Status:</td>
+						<td>${DATUM_CONNECTION_STATUS}</td>
+					</tr>
+					<tr>
+						<td class="label">Pool Host:</td>
+						<td>${DATUM_POOL_HOST}</td>
+					</tr>
+					<tr>
+						<td class="label">Pool Tag:</td>
+						<td>${DATUM_POOL_TAG}</td>
+					</tr>
+					<tr>
+						<td class="label">Secondary/Miner Tag:</td>
+						<td>${DATUM_MINER_TAG}</td>
+					</tr>
+					<tr>
+						<td class="label">Pool Current MinDiff:</td>
+						<td>${DATUM_POOL_DIFF}</td>
+					</tr>
+					<tr>
+						<td class="label">Pool Pubkey:</td>
+						<td class="fixed-width">${DATUM_POOL_PUBKEY}</td>
+					</tr>
+				</table>
+			</div>
+			
+			<div class="table-container">
+				<h2>Stratum Server Info</h2>
+				<table>
+					<tr>
+						<td class="label">Active Threads:</td>
+						<td>${STRATUM_ACTIVE_THREADS}</td>
+					</tr>
+					<tr>
+						<td class="label">Total Connections:</td>
+						<td>${STRATUM_TOTAL_CONNECTIONS}</td>
+					</tr>
+					<tr>
+						<td class="label">Total Work Subscriptions:</td>
+						<td>${STRATUM_TOTAL_SUBSCRIPTIONS}</td>
+					</tr>
+					<tr>
+						<td class="label">Estimated Hashrate:</td>
+						<td>${STRATUM_HASHRATE_ESTIMATE}</td>
+					</tr>
+				</table>
+			</div>
+		</div>
+		<div class="table-wrapper">
+		<div class="table-container" style="min-width: fit-content;">
+			<h2>Current Stratum Job</h2>
+			<table>
+				<tr>
+					<td class="label">Job ID:</td>
+					<td>${STRATUM_JOB_INFO}</td> <!-- Job ID (Index) @ Timestamp -->
+				</tr>
+				<tr>
+					<td class="label">Block Height:</td>
+					<td>${STRATUM_JOB_BLOCK_HEIGHT}</td>
+				</tr>
+				<tr>
+					<td class="label">Block Value:</td>
+					<td>${STRATUM_JOB_BLOCK_VALUE}</td>
+				</tr>
+				<tr>
+					<td class="label">Previous Block:</td>
+					<td class="fixed-width">${STRATUM_JOB_PREVBLOCK}</td>
+				</tr>
+				<tr>
+					<td class="label">Block Target:</td>
+					<td class="fixed-width">${STRATUM_JOB_TARGET}</td>
+				</tr>
+				<tr>
+					<td class="label">Witness Commitment:</td>
+					<td class="fixed-width">${STRATUM_JOB_WITNESS}</td>
+				</tr>
+				<tr>
+					<td class="label">Block Difficulty:</td>
+					<td>${STRATUM_JOB_DIFF}</td>
+				</tr>
+				<tr>
+					<td class="label">Version:</td>
+					<td>${STRATUM_JOB_VERSION}</td>
+				</tr>
+				<tr>
+					<td class="label">Bits:</td>
+					<td>${STRATUM_JOB_BITS}</td>
+				</tr>
+				<tr>
+					<td class="label">Time:</td>
+					<td>${STRATUM_JOB_TIMEINFO}</td>
+				</tr>
+				<tr>
+					<td class="label">Limits:</td>
+					<td>${STRATUM_JOB_LIMITINFO}</td>
+				</tr>
+				<tr>
+					<td class="label">Size:</td>
+					<td>${STRATUM_JOB_SIZE}</td>
+				</tr>
+				<tr>
+					<td class="label">Weight:</td>
+					<td>${STRATUM_JOB_WEIGHT}</td>
+				</tr>
+				<tr>
+					<td class="label">Sigops:</td>
+					<td>${STRATUM_JOB_SIGOPS}</td>
+				</tr>
+				<tr>
+					<td class="label">Txn Count:</td>
+					<td>${STRATUM_JOB_TXNCOUNT}</td>
+				</tr>
+			</table>
+		</div>
+		</div>
+	</div>
+	<BR>
+	<CENTER><SMALL>Note: This page does not automatically refresh</SMALL></CENTER>
+</body>
+</html>

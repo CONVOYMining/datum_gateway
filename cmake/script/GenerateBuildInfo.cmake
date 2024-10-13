@@ -1,8 +1,34 @@
+# DATUM Gateway
+# Decentralized Alternative Templates for Universal Mining
+#
+# This file is part of OCEAN's Bitcoin mining decentralization
+# project, DATUM.
+#
+# https://ocean.xyz
+#
+# ---
+#
+# Copyright (c) 2024 Bitcoin Ocean, LLC & Luke Dashjr
 # Copyright (c) 2023-present The Bitcoin Core developers
-# Distributed under the MIT software license, see the accompanying
-# file COPYING or https://opensource.org/license/mit/.
-
-# This script is a multiplatform port of the share/genbuild.sh shell script.
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 macro(fatal_error)
   message(FATAL_ERROR "\n"
@@ -14,7 +40,7 @@ endmacro()
 
 if(DEFINED BUILD_INFO_HEADER_PATH AND IS_ABSOLUTE "${BUILD_INFO_HEADER_PATH}")
   if(EXISTS "${BUILD_INFO_HEADER_PATH}")
-    file(STRINGS ${BUILD_INFO_HEADER_PATH} INFO LIMIT_COUNT 1)
+    file(STRINGS ${BUILD_INFO_HEADER_PATH} INFO)
   endif()
 else()
   fatal_error()
@@ -40,7 +66,6 @@ if(NOT "$ENV{BITCOIN_GENBUILD_NO_GIT}" STREQUAL "1")
       WORKING_DIRECTORY ${WORKING_DIR}
       OUTPUT_VARIABLE IS_INSIDE_WORK_TREE
       OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
     )
     if(IS_INSIDE_WORK_TREE)
       # Clean 'dirty' status of touched files that haven't been modified.
@@ -101,12 +126,17 @@ if(NOT "$ENV{BITCOIN_GENBUILD_NO_GIT}" STREQUAL "1")
   endif()
 endif()
 
-if(GIT_TAG)
-  set(NEWINFO "#define BUILD_GIT_TAG \"${GIT_TAG}\"")
-elseif(GIT_COMMIT)
-  set(NEWINFO "#define BUILD_GIT_COMMIT \"${GIT_COMMIT}\"")
+if(HEAD_COMMIT)
+  if(IS_DIRTY)
+    string(APPEND HEAD_COMMIT "+")
+  endif()
 else()
-  set(NEWINFO "// No build information available")
+  set(HEAD_COMMIT UNKNOWN_GIT_HASH)
+endif()
+
+set(NEWINFO "#define GIT_COMMIT_HASH \"${HEAD_COMMIT}\"")
+if(GIT_TAG)
+  string(APPEND NEWINFO "\n#define BUILD_GIT_TAG \"${GIT_TAG}\"")
 endif()
 
 # Only update the header if necessary.

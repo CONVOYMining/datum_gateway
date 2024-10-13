@@ -2,29 +2,48 @@
  * Copyright 2012-2014 Luke Dashjr
  *
  * This program is free software; you can redistribute it and/or modify it
- * under the terms of the standard MIT license.  See COPYING for more details.
+ * under the terms of the standard MIT license.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
-#ifndef WIN32
-#include <arpa/inet.h>
-#else
-#include <winsock2.h>
-#endif
+/*
+	Combined and slightly modified from Luke's libblkmaker and libbase68
+*/
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "libbase58.h"
+#include "thirdparty_base58.h"
+#include "datum_utils.h"
+
+#define b58_sha256_impl my_sha256
 
 bool _blkmk_b58tobin(void *bin, size_t binsz, const char *b58, size_t b58sz) {
 	return b58tobin(bin, &binsz, b58, b58sz);
 }
 
 int _blkmk_b58check(void *bin, size_t binsz, const char *base58str) {
-	if (!b58_sha256_impl)
-		b58_sha256_impl = blkmk_sha256_impl;
 	return b58check(bin, binsz, base58str, 34);
 }
 
@@ -36,8 +55,6 @@ size_t blkmk_address_to_script(void *out, size_t outsz, const char *addr) {
 	size_t rv;
 	
 	rv = sizeof(addrbin);
-	if (!b58_sha256_impl)
-		b58_sha256_impl = blkmk_sha256_impl;
 	if (!b58tobin(addrbin, &rv, addr, b58sz))
 		return 0;
 	addrver = b58check(addrbin, sizeof(addrbin), addr, b58sz);
@@ -67,7 +84,6 @@ size_t blkmk_address_to_script(void *out, size_t outsz, const char *addr) {
 	}
 }
 
-bool (*b58_sha256_impl)(void *, const void *, size_t) = NULL;
 
 static const int8_t b58digits_map[] = {
 	-1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,

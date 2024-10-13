@@ -1,7 +1,76 @@
+/*
+ *
+ * DATUM Gateway
+ * Decentralized Alternative Templates for Universal Mining
+ *
+ * This file is part of OCEAN's Bitcoin mining decentralization
+ * project, DATUM.
+ *
+ * https://ocean.xyz
+ *
+ * ---
+ *
+ * Copyright (c) 2024 Bitcoin Ocean, LLC & Jason Hughes
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ */
+
 #ifndef _DATUM_UTILS_H_
 #define _DATUM_UTILS_H_
 
 #include <stdint.h>
+#include <stdbool.h>
+#include "datum_logger.h"
+
+void datum_utils_init(void);
+uint64_t current_time_millis(void);
+uint64_t current_time_nanos(void);
+uint64_t current_time_micros(void);
+unsigned char hex2bin_uchar(const char *in);
+void build_hex_lookup(void);
+bool my_sha256(void *digest, const void *buffer, size_t length);
+void nbits_to_target(uint32_t nbits, uint8_t *target);
+int compare_hashes(const uint8_t *hash1, const uint8_t *hash2);
+unsigned long long block_reward(unsigned int block_height);
+int append_bitcoin_varint_hex(uint64_t n, char *s);
+int append_UNum_hex(uint64_t n, char *s);
+void panic_from_thread(int a);
+bool double_sha256(void *out, const void *in, size_t length);
+void hex_to_bin_le(const char *hex, unsigned char *bin);
+void hex_to_bin(const char *hex, unsigned char *bin);
+void hash2hex(unsigned char *bytes, char *hexString);
+void get_target_from_diff(unsigned char *result, uint64_t diff);
+uint64_t roundDownToPowerOfTwo_64(uint64_t x);
+int addr_2_output_script(const char *addr, unsigned char *script, int max_len);
+int output_script_2_addr(const unsigned char *script, const int len, char *addr);
+int base64_decode(const char *in, size_t inLen, unsigned char *out, size_t *outLen);
+void uchar_to_hex(char *s, const unsigned char b);
+int get_bitcoin_varint_len_bytes(uint64_t n);
+bool strncpy_uachars(char *out, const char *in, size_t maxlen);
+bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
+long double calc_network_difficulty(const char *bits_hex);
+unsigned char floorPoT(uint64_t x);
+uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
+uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
+
 
 static inline
 uint8_t upk_u8(const void * const bufp, const int offset)
@@ -85,5 +154,8 @@ void pk_u64le(void * const bufp, const int offset, const uint64_t nv)
 	buf[offset+6] = (nv >> 0x30) & 0xff;
 	buf[offset+7] = (nv >> 0x38) & 0xff;
 }
+
+
+extern volatile int panic_mode;
 
 #endif

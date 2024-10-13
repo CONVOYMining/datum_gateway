@@ -1,0 +1,15 @@
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+
+git_version.h
+web_resources.h
+datum_gateway
+
+*.conf
+*.json
+.DS_Store
+*.orig
+*.rej
+*~

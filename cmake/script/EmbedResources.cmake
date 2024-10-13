@@ -1,0 +1,16 @@
+set(OUTPUT_CONTENT "#include <stddef.h>\n")
+foreach(INPUT_FILE ${INPUT_FILES})
+	file(READ ${SOURCE_DIR}/${INPUT_FILE} INPUT_DATA_HEX HEX)
+	
+	string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" OUTPUT_VAR ${INPUT_FILE})
+	
+	string(LENGTH ${INPUT_DATA_HEX} INPUT_DATA_LEN)
+	math(EXPR INPUT_DATA_LEN "${INPUT_DATA_LEN} / 2")
+	
+	string(REGEX REPLACE "................" "\\0\n" INPUT_DATA_C_ARRAY "${INPUT_DATA_HEX}")
+	string(REGEX REPLACE "[^\n][^\n]" "0x\\0," INPUT_DATA_C_ARRAY "${INPUT_DATA_C_ARRAY}")
+	
+	string(APPEND OUTPUT_CONTENT "\nstatic const char ${OUTPUT_VAR}[]={\n${INPUT_DATA_C_ARRAY}0};\nstatic const size_t ${OUTPUT_VAR}_sz=${INPUT_DATA_LEN};\n")
+endforeach()
+
+file(WRITE ${OUTPUT_FILE} "${OUTPUT_CONTENT}")

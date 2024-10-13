@@ -1,0 +1,140 @@
+body {
+	background-color: black;
+	color: white;
+	margin: 0;
+	font-family: Arial, sans-serif;
+}
+
+a {
+	color: lightblue;
+	text-decoration: none;
+}
+
+a:hover {
+	color: red;
+	text-decoration: underline;
+}
+
+.container {
+	max-width: 800px;
+	margin: 0 auto;
+}
+
+.header {
+	background-color: #222;
+	color: white;
+	text-align: center;
+	padding: 1px;
+	margin-bottom: 0;
+	border-top-left-radius: 10px;
+	border-top-right-radius: 10px;
+}
+
+.header-content img {
+	vertical-align: text-top;
+}
+
+.menu-container {
+	background-color: #222;
+	padding: 1px;
+	text-align: center;
+	border-bottom-left-radius: 10px;
+	border-bottom-right-radius: 10px;
+}
+
+.menu-container a {
+	display: inline-block;
+	background-color: #444;
+	color: #3498db;
+	padding: 10px 20px;
+	margin: 5px;
+	border-radius: 5px;
+	text-decoration: none;
+	transition: background-color 0.3s, color 0.3s;
+	font-weight: bold;
+	font-size: large;
+}
+
+.menu-container a:hover {
+	background-color: #012740;
+	color: red;
+	text-decoration: underline;
+}
+
+.content {
+	margin-bottom: 20px;
+}
+
+.tables-container {
+	width: 100%;
+	margin: 0 auto;
+}
+
+.table-wrapper {
+	display: flex;
+	flex-wrap: wrap;
+}
+
+.table-container {
+	background-color: #333;
+	padding: 20px;
+	margin-bottom: 20px;
+	border-radius: 10px;
+	flex: 1 1 100%;
+	box-sizing: border-box;
+	margin: 10px;
+}
+
+.table-container h2 {
+	color: white;
+	text-align: center;
+	margin-top: 0;
+}
+
+table {
+	width: 100%;
+	table-layout: auto;
+}
+
+tr {
+	border-bottom: 1px solid #444;
+}
+
+tr:last-child {
+	border-bottom: none;
+}
+
+td {
+	padding: 10px;
+	color: white;
+}
+
+td.label {
+	background-color: #2a2a3b;
+	width: 1%;
+	white-space: nowrap;
+}
+
+td:not(.label) {
+	background-color: black;
+}
+
+@media (min-width: 1100px) {
+	.table-wrapper {
+		flex-wrap: nowrap;
+	}
+	
+	.table-container {
+		flex: 1 1 800px;
+		margin: 20px;
+	}
+	
+	.table-wrapper + .table-container {
+		flex: 1 1 800px;
+		margin: 20px auto;
+	}
+}
+
+.fixed-width {
+	font-family: "Courier New", Courier, monospace;
+}
