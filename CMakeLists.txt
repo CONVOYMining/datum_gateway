@@ -21,6 +21,7 @@ add_executable(datum_gateway
 	src/thirdparty_segwit_addr.c
 	${CMAKE_CURRENT_BINARY_DIR}/web_resources.h
 )
+install(TARGETS datum_gateway DESTINATION bin)
 
 set(WEB_RESOURCES
 	www/home.html
