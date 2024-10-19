@@ -132,13 +132,6 @@ uint64_t current_time_micros(void) {
 	return microseconds;
 }
 
-uint64_t current_time_nanos(void) {
-	struct timespec te;
-	clock_gettime(CLOCK_REALTIME, &te);
-	uint64_t nanoseconds = te.tv_sec * 1000000000LL + te.tv_nsec; // calculate nanoseconds
-	return nanoseconds;
-}
-
 unsigned char hex_lookup[65536];
 unsigned short uchar_hex_lookup[256];
 

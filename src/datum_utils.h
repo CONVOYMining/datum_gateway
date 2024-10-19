@@ -42,7 +42,6 @@
 
 void datum_utils_init(void);
 uint64_t current_time_millis(void);
-uint64_t current_time_nanos(void);
 uint64_t current_time_micros(void);
 unsigned char hex2bin_uchar(const char *in);
 void build_hex_lookup(void);
