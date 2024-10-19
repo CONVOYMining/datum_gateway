@@ -26,7 +26,7 @@
  */
 
 /*
-	Combined and slightly modified from Luke's libblkmaker and libbase68
+	Combined and slightly modified from Luke's libblkmaker and libbase58
 */
 
 #include <stdbool.h>
