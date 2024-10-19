@@ -63,7 +63,7 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	{ .var_type = DATUM_CONF_BOOL,	 	.category = "bitcoind", 	.name = "notify_fallback",			.description = "Fall back to less efficient methods for new block notifications. Can disable if you use blocknotify.",
 		.required = false, .ptr = &datum_config.bitcoind_notify_fallback, .default_bool = true },
 	
-	// stratun v1 server configs
+	// stratum v1 server configs
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "listen_port",				.description = "Listening port for Stratum Gateway",
 		.required = false, .ptr = &datum_config.stratum_v1_listen_port, 				.default_int = 23334 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "max_clients_per_thread",	.description = "Maximum clients per Stratum server thread",
