@@ -39,7 +39,7 @@ The protocol is not specific to a pooled reward system, as the Gateway coordinat
  - Linux-based operating system. Other OSs will be supported in the future.
  - Bitcoin full node ([Bitcoin Knots](https://bitcoinknots.org/) recommended) fully synced with the Bitcoin network.
  - Fast storage recommended for the Bitcoin node.
- - Stable internet connection for both the Bitcoin node and Gateway's communication with pool.
+ - Stable internet connection for both the Bitcoin node and Gateway's communication with the pool.
  - CPU powerful enough to run the Bitcoin node without validation delays.
  - Approximately 1GB/RAM, plus 1GB/RAM per 1000 Stratum clients, plus Bitcoin node RAM requirements.
  - Bitcoin mining hardware able to reach the system running the DATUM Gateway.
@@ -54,7 +54,7 @@ The following external libraries are required:
  - libmicrohttpd
  - libsodium
 
-## Node Configuation
+## Node Configuration
 Your Bitcoin node must be configured to construct blocks as you desire.  Bitcoin Knots provides many options for configuring your node's policy and is highly recommended.
 
 At this time, you must also reserve some block space for the pool's generation transaction.  The following options are currently recommended:
