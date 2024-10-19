@@ -80,7 +80,7 @@ Install and fully sync your Bitcoin full node. Instructions for this are beyond 
 
 Configure your node to create block templates as you desire. Be sure to reserve some space for the generation transaction, otherwise your work will not be able to fit a reward split.  See node configuration recommendations above.
 
-Install the required libraries and development packages for dependencies: cmake, jansson, libmicrohttpd, libsodium, and libcurl.
+Install the required libraries and development packages for dependencies: cmake, pkg-config, jansson, libmicrohttpd, libsodium, and libcurl.
 
 Compile DATUM by running:
 
