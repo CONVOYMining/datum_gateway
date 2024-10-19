@@ -128,15 +128,15 @@ uint64_t current_time_millis(void) {
 uint64_t current_time_micros(void) {
 	struct timeval te;
 	gettimeofday(&te, NULL); // get current time
-	uint64_t microseconds = te.tv_sec * 1000000LL + te.tv_usec; // calculate nanoseconds
+	uint64_t microseconds = te.tv_sec * 1000000LL + te.tv_usec; // calculate microseconds
 	return microseconds;
 }
 
 uint64_t current_time_nanos(void) {
 	struct timespec te;
 	clock_gettime(CLOCK_REALTIME, &te);
-	uint64_t microseconds = te.tv_sec * 1000000000LL + te.tv_nsec; // calculate nanoseconds
-	return microseconds;
+	uint64_t nanoseconds = te.tv_sec * 1000000000LL + te.tv_nsec; // calculate nanoseconds
+	return nanoseconds;
 }
 
 unsigned char hex_lookup[65536];
