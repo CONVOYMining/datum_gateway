@@ -82,6 +82,10 @@ Configure your node to create block templates as you desire. Be sure to reserve 
 
 Install the required libraries and development packages for dependencies: cmake, pkg-config, jansson, libmicrohttpd, libsodium, and libcurl.
 
+For Debian/Ubuntu it would be:
+
+    sudo apt install cmake pkgconf libcurl4-openssl-dev libjansson-dev libmicrohttpd-dev libsodium-dev psmisc
+
 Compile DATUM by running:
 
     cmake . && make
