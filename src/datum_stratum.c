@@ -110,7 +110,7 @@ void datum_stratum_v1_shutdown_all(void) {
 		
 		ret = pthread_mutex_lock(&global_stratum_app->datum_threads[tid].thread_data_lock);
 		if (ret != 0) {
-			DLOG_FATAL("Could not lock mutex for thread data on TID %d: %s", strerror(ret));
+			DLOG_FATAL("Could not lock mutex for thread data on TID %d: %s", tid, strerror(ret));
 			panic_from_thread(__LINE__); // Is this panic worthy? should never happen
 			return;
 		}
@@ -2144,10 +2144,10 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 		userpass[511] = 0;
 		f = fopen(userpass, "w");
 		if (!f) {
-			DLOG_ERROR("Could not open %s for writing submitblock record to disk!");
+			DLOG_ERROR("Could not open %s for writing submitblock record to disk!", userpass);
 		} else {
 			if (!fwrite(submitblock_req, ptr-submitblock_req, 1, f)) {
-				DLOG_ERROR("Could not write to %s when writing submitblock record to disk!");
+				DLOG_ERROR("Could not write to %s when writing submitblock record to disk!", userpass);
 			}
 			fclose(f);
 		}

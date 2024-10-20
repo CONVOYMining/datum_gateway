@@ -447,7 +447,7 @@ int assign_to_thread(T_DATUM_SOCKET_APP *app, int fd) {
 	// lock the thread's data for a moment
 	ret = pthread_mutex_lock(&app->datum_threads[tid].thread_data_lock);
 	if (ret != 0) {
-		DLOG_FATAL("Could not lock mutex for thread data on TID %d: %s", strerror(ret));
+		DLOG_FATAL("Could not lock mutex for thread data on TID %d: %s", tid, strerror(ret));
 		panic_from_thread(__LINE__); // Is this panic worthy? should never happen
 		return 0;
 	}
