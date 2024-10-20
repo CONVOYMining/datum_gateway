@@ -141,7 +141,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	// Setup the socket "app" for Stratum V1
 	app = (T_DATUM_SOCKET_APP *)calloc(1,sizeof(T_DATUM_SOCKET_APP));
 	if (!app) {
-		DLOG_FATAL("Could not allocate memory for Stratum V1 server app metadata! (%d bytes)", sizeof(T_DATUM_SOCKET_APP));
+		DLOG_FATAL("Could not allocate memory for Stratum V1 server app metadata! (%lu bytes)", (unsigned long)sizeof(T_DATUM_SOCKET_APP));
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
@@ -172,7 +172,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	// allocate memory for DATUM socket thread data
 	app->datum_threads = (T_DATUM_THREAD_DATA *) calloc(app->max_threads + 1, sizeof(T_DATUM_THREAD_DATA));
 	if (!app->datum_threads) {
-		DLOG_FATAL("Could not allocate memory for Stratum V1 server thread pool data! (%d bytes)", (sizeof(T_DATUM_THREAD_DATA) * (app->max_threads + 1)));
+		DLOG_FATAL("Could not allocate memory for Stratum V1 server thread pool data! (%lu bytes)", (unsigned long)(sizeof(T_DATUM_THREAD_DATA) * (app->max_threads + 1)));
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
@@ -182,7 +182,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	// allocate once for the whole chunk, and set the pointers.  no need to do tons of calls for a static block of data
 	app->datum_threads[0].app_thread_data = calloc(app->max_threads + 1, sizeof(T_DATUM_STRATUM_THREADPOOL_DATA));
 	if (!app->datum_threads[0].app_thread_data) {
-		DLOG_FATAL("Could not allocate memory for Stratum V1 server thread pool app data! (%d bytes)", (sizeof(T_DATUM_STRATUM_THREADPOOL_DATA) * (app->max_threads + 1)));
+		DLOG_FATAL("Could not allocate memory for Stratum V1 server thread pool app data! (%lu bytes)", (unsigned long)(sizeof(T_DATUM_STRATUM_THREADPOOL_DATA) * (app->max_threads + 1)));
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
@@ -197,7 +197,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	// T_DATUM_MINER_DATA
 	app->datum_threads[0].client_data[0].app_client_data = calloc(((app->max_threads*app->max_clients_thread)+1), sizeof(T_DATUM_MINER_DATA));
 	if (!app->datum_threads[0].client_data[0].app_client_data) {
-		DLOG_FATAL("Could not allocate memory for Stratum V1 server per-client data! (%d bytes)", ((app->max_threads*app->max_clients_thread)+1) * sizeof(T_DATUM_MINER_DATA));
+		DLOG_FATAL("Could not allocate memory for Stratum V1 server per-client data! (%lu bytes)", (unsigned long)(((app->max_threads*app->max_clients_thread)+1) * sizeof(T_DATUM_MINER_DATA)));
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
@@ -258,10 +258,10 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	// TODO: If limits are too low, attempt to set our ulimits in case we're allowed to do so but it hasn't been done before executing.
 	if (!getrlimit(RLIMIT_NOFILE, &rlimit)) {
 		if (app->max_clients > rlimit.rlim_max) {
-			DLOG_WARN("*** NOTE *** Max Stratum clients (%d) exceeds hard open file limit (Soft: %d / Hard: %d)", app->max_clients, rlimit.rlim_cur, rlimit.rlim_max);
+			DLOG_WARN("*** NOTE *** Max Stratum clients (%llu) exceeds hard open file limit (Soft: %llu / Hard: %llu)", (unsigned long long)app->max_clients, (unsigned long long)rlimit.rlim_cur, (unsigned long long)rlimit.rlim_max);
 			DLOG_WARN("*** NOTE *** Adjust max open file hard limit or you WILL run into issues before reaching max clients!");
 		} else if (app->max_clients > rlimit.rlim_cur) {
-			DLOG_WARN("*** NOTE *** Max Stratum clients (%d) exceeds open file soft limit (Soft: %d / Hard: %d)", app->max_clients, rlimit.rlim_cur, rlimit.rlim_max);
+			DLOG_WARN("*** NOTE *** Max Stratum clients (%llu) exceeds open file soft limit (Soft: %llu / Hard: %llu)", (unsigned long long)app->max_clients, (unsigned long long)rlimit.rlim_cur, (unsigned long long)rlimit.rlim_max);
 			DLOG_WARN("*** NOTE *** You should increase the soft open file limit to prevent issues as you approach max clients!");
 		}
 	}
@@ -278,7 +278,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 			if (stratum_latest_empty_complete_count >= app->datum_active_threads) {
 				// we are done!
 				stratum_latest_empty_ready_for_full = true;
-				DLOG_INFO("Empty work send completed. Sent to %d clients across %d threads", stratum_latest_empty_sent_count, stratum_latest_empty_complete_count);
+				DLOG_INFO("Empty work send completed. Sent to %llu clients across %llu threads", (unsigned long long)stratum_latest_empty_sent_count, (unsigned long long)stratum_latest_empty_complete_count);
 			}
 		}
 		pthread_rwlock_unlock(&stratum_global_latest_empty_stat);

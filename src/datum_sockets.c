@@ -651,7 +651,7 @@ void *datum_gateway_listener_thread(void *arg) {
 				if (rejecting_now) {
 					reject_count++;
 					if ((curtime_tsms - last_reject_msg_tsms) > 5000) {
-						DLOG_INFO("DATUM not connected and configured for pooled mining only! Rejecting connection. (%d connections rejected since last noted)", reject_count);
+						DLOG_INFO("DATUM not connected and configured for pooled mining only! Rejecting connection. (%llu connections rejected since last noted)", (unsigned long long)reject_count);
 						last_reject_msg_tsms = curtime_tsms;
 						reject_count = 0;
 					}

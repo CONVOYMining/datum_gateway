@@ -52,7 +52,7 @@ void datum_stratum_dupes_init(void *sdata_v) {
 	T_DATUM_STRATUM_DUPES *dupes = NULL;
 	sdata->dupes = calloc(  sizeof(T_DATUM_STRATUM_DUPES) + 16, 1 );
 	if (!sdata->dupes) {
-		DLOG_FATAL("Could not allocate RAM for dupe struct (small one, %d bytes)",sizeof(T_DATUM_STRATUM_DUPES) + 16);
+		DLOG_FATAL("Could not allocate RAM for dupe struct (small one, %lu bytes)", (unsigned long)sizeof(T_DATUM_STRATUM_DUPES) + 16);
 		panic_from_thread(__LINE__);
 		return;
 	}
@@ -61,7 +61,7 @@ void datum_stratum_dupes_init(void *sdata_v) {
 	
 	dupes->ptr = calloc((datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16), sizeof(T_DATUM_STRATUM_DUPE_ITEM) );
 	if (!dupes->ptr) {
-		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %d bytes)",(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16) * sizeof(T_DATUM_STRATUM_DUPE_ITEM));
+		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %lu bytes)",(unsigned long)(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16) * sizeof(T_DATUM_STRATUM_DUPE_ITEM));
 		panic_from_thread(__LINE__);
 		return;
 	}
