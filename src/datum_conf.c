@@ -347,8 +347,9 @@ int datum_read_config(const char *conffile) {
 	}
 	
 	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
-		DLOG_WARN("stratum.stratum_v1_vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min));
-		datum_config.stratum_v1_vardiff_min = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
+		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
+		DLOG_WARN("stratum.stratum_v1_vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
+		datum_config.stratum_v1_vardiff_min = nv;
 	}
 	
 	if (datum_config.stratum_v1_vardiff_min < 1) {

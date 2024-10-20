@@ -58,7 +58,7 @@ typedef struct {
 #define DLOG_LEVEL_FATAL 5
 
 void datum_logger(const char *func, int level, const char *format, ...);
-int datum_logger_queue_msg(const char *func, int level, const char *format, ...);
+int datum_logger_queue_msg(const char *func, int level, const char *format, ...) __attribute__((format(printf, 3, 4)));
 
 // Generic for dynamic log level messages
 #define DLOG(level, format, ...) datum_logger_queue_msg(__func__, level, format __VA_OPT__(,) __VA_ARGS__)

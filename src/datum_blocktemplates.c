@@ -460,7 +460,7 @@ void *datum_gateway_template_thread(void *args) {
 						// use this template to setup for a coinbaser wait job while the empty + full w/blank jobs are blasted
 						// then this job will get blasted when its ready.
 						i = datum_stratum_v1_global_subscriber_count();
-						DLOG_INFO("Updating priority stratum job for block %d: %.8f BTC, %d txns, %d bytes (Sent to %d stratum client%s)", t->height, (double)t->coinbasevalue / (double)100000000.0, t->txn_count, t->txn_total_size, i, (i!=1)?"s":"");
+						DLOG_INFO("Updating priority stratum job for block %lu: %.8f BTC, %lu txns, %lu bytes (Sent to %llu stratum client%s)", (unsigned long)t->height, (double)t->coinbasevalue / (double)100000000.0, (unsigned long)t->txn_count, (unsigned long)t->txn_total_size, (unsigned long long)i, (i!=1)?"s":"");
 						update_stratum_job(t,false,JOB_STATE_FULL_PRIORITY_WAIT_COINBASER);
 					} else {
 						if (was_notified) {
@@ -513,7 +513,7 @@ void *datum_gateway_template_thread(void *args) {
 										t->curtime += 1200;
 									}
 									
-									DLOG_DEBUG("t->curtime = %d",t->curtime);
+									DLOG_DEBUG("t->curtime = %llu", (unsigned long long)t->curtime);
 									
 									update_stratum_job(t,true,JOB_STATE_FULL_PRIORITY_WAIT_COINBASER);
 									new_notify_blockhash[0] = 0;
@@ -522,7 +522,7 @@ void *datum_gateway_template_thread(void *args) {
 							}
 						} else {
 							i = datum_stratum_v1_global_subscriber_count();
-							DLOG_INFO("Updating standard stratum job for block %d: %.8f BTC, %d txns, %d bytes (Sent to %d stratum client%s)", t->height, (double)t->coinbasevalue / (double)100000000.0, t->txn_count, t->txn_total_size, i, (i!=1)?"s":"");
+							DLOG_INFO("Updating standard stratum job for block %lu: %.8f BTC, %lu txns, %lu bytes (Sent to %llu stratum client%s)", (unsigned long)t->height, (double)t->coinbasevalue / (double)100000000.0, (unsigned long)t->txn_count, (unsigned long)t->txn_total_size, (unsigned long long)i, (i!=1)?"s":"");
 							update_stratum_job(t,false,JOB_STATE_FULL_NORMAL_WAIT_COINBASER);
 						}
 					}

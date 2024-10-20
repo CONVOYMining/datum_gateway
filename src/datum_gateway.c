@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
 	// Try to connect to the DATUM server, if setup to do so.
 	if (datum_config.datum_pool_host[0] != 0) {
 		while((current_time_millis()-15000 < last_datum_protocol_connect_tsms) && (!datum_protocol_is_active())) {
-			DLOG_INFO("Waiting on DATUM server... %d", (last_datum_protocol_connect_tsms-(current_time_millis()-15000))/1000);
+			DLOG_INFO("Waiting on DATUM server... %d", (int)((last_datum_protocol_connect_tsms-(current_time_millis()-15000))/1000));
 			sleep(1);
 			if ((datum_config.datum_pool_host[0] != 0) && (!datum_protocol_thread_is_active())) {
 				datum_protocol_start_connector();
