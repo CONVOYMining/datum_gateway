@@ -401,12 +401,7 @@ void datum_gateway_help(void) {
 		if (p < 0) p = 0;
 		if (p > 62) p = 62;
 		paddots[p] = 0;
-		if (datum_config_options[i].var_type == DATUM_CONF_STRING_ARRAY) {
-			paddots[p-2] = 0;
-			printf("        [\"%s\"]: %s %s (%s", datum_config_options[i].name, paddots, datum_config_options[i].description, (datum_config_options[i].var_type<DATUM_CONF_TYPES)?datum_conf_var_type_text[datum_config_options[i].var_type]:"UNKNOWN");
-		} else {
-			printf("        \"%s\": %s %s (%s", datum_config_options[i].name, paddots, datum_config_options[i].description, (datum_config_options[i].var_type<DATUM_CONF_TYPES)?datum_conf_var_type_text[datum_config_options[i].var_type]:"UNKNOWN");
-		}
+		printf("        \"%s\": %s %s (%s", datum_config_options[i].name, paddots, datum_config_options[i].description, (datum_config_options[i].var_type<DATUM_CONF_TYPES)?datum_conf_var_type_text[datum_config_options[i].var_type]:"UNKNOWN");
 		paddots[p] = '.';
 		if (datum_config_options[i].required) {
 			printf(", REQUIRED)\n");
