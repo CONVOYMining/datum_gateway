@@ -65,14 +65,17 @@ int datum_queue_free(DATUM_QUEUE *q) {
 	if (q->buffer[0]) {
 		free(q->buffer[0]);
 	}
+	if (q->buffer[1]) {
+		free(q->buffer[1]);
+	}
 	
 	q->initialized = false;
 	q->buffer[0] = 0;
-	q->buffer[0] = 0;
+	q->buffer[1] = 0;
 	
-	pthread_rwlock_unlock(&q->active_buffer_rwlock);
-	pthread_rwlock_unlock(&q->buffer_rwlock[0]);
 	pthread_rwlock_unlock(&q->buffer_rwlock[1]);
+	pthread_rwlock_unlock(&q->buffer_rwlock[0]);
+	pthread_rwlock_unlock(&q->active_buffer_rwlock);
 	
 	pthread_rwlock_destroy(&q->active_buffer_rwlock);
 	pthread_rwlock_destroy(&q->buffer_rwlock[0]);
