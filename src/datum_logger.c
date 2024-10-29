@@ -232,12 +232,13 @@ int datum_logger_queue_msg(const char *func, int level, const char *format, ...)
 
 time_t get_midnight_timestamp(void) {
 	time_t now = time(NULL);
-	struct tm *tm_now = localtime(&now);
-	tm_now->tm_hour = 0;
-	tm_now->tm_min = 0;
-	tm_now->tm_sec = 0;
-	tm_now->tm_mday += 1;
-	time_t midnight = mktime(tm_now);
+	struct tm tm_now;
+	localtime_r(&now, &tm_now);
+	tm_now.tm_hour = 0;
+	tm_now.tm_min = 0;
+	tm_now.tm_sec = 0;
+	tm_now.tm_mday += 1;
+	time_t midnight = mktime(&tm_now);
 	return midnight;
 }
 
