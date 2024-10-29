@@ -2144,10 +2144,10 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 		userpass[511] = 0;
 		f = fopen(userpass, "w");
 		if (!f) {
-			DLOG_ERROR("Could not open %s for writing submitblock record to disk!", userpass);
+			DLOG_ERROR("Could not open %s for writing submitblock record to disk: %s!", userpass, strerror(errno));
 		} else {
 			if (!fwrite(submitblock_req, ptr-submitblock_req, 1, f)) {
-				DLOG_ERROR("Could not write to %s when writing submitblock record to disk!", userpass);
+				DLOG_ERROR("Could not write to %s when writing submitblock record to disk: %s!", userpass, strerror(errno));
 			}
 			fclose(f);
 		}

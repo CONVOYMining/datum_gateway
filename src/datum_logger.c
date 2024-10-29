@@ -49,6 +49,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <errno.h>
 
 #include "datum_logger.h"
 #include "datum_utils.h"
@@ -275,7 +276,7 @@ void * datum_logger_thread(void *ptr) {
 	if ((log_to_file) && (log_file[0] != 0)) {
 		log_handle = fopen(log_file,"a");
 		if (!log_handle) {
-			DLOG(DLOG_LEVEL_FATAL, "Could not open log file!");
+			DLOG(DLOG_LEVEL_FATAL, "Could not open log file (%s): %s!", log_file, strerror(errno));
 			panic_from_thread(__LINE__);
 		}
 	}
@@ -392,13 +393,14 @@ void * datum_logger_thread(void *ptr) {
 				log_line[1199] = 0;
 				
 				fclose(log_handle);
+
 				if (rename(log_file, log_line) != 0) {
-					DLOG(DLOG_LEVEL_ERROR, "Could not rename log file for rotation!");
+					DLOG(DLOG_LEVEL_ERROR, "Could not rename log file (%s) for rotation: %s!", log_file, strerror(errno));
 				}
 				
 				log_handle = fopen(log_file,"a");
 				if (!log_handle) {
-					DLOG(DLOG_LEVEL_FATAL, "Could not open log file after rotation!");
+					DLOG(DLOG_LEVEL_FATAL, "Could not open log file (%s) after rotation: %s!", log_file, strerror(errno));
 					panic_from_thread(__LINE__);
 				}
 				
