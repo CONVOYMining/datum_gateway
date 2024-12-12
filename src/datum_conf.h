@@ -65,6 +65,9 @@ typedef struct {
 	bool required;
 } T_DATUM_CONFIG_ITEM;
 
+const T_DATUM_CONFIG_ITEM *datum_config_get_option_info(const char *category, size_t category_len, const char *name, size_t name_len);
+const T_DATUM_CONFIG_ITEM *datum_config_get_option_info2(const char *category, const char *name);
+
 // Globally accessable config options
 typedef struct {
 	char bitcoind_rpcuser[256];
