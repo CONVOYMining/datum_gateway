@@ -727,6 +727,19 @@ int datum_atoi_strict(const char * const s, const size_t size) {
 	return (ret == UINT64_MAX || ret > INT_MAX) ? -1 : ret;
 }
 
+// Currently accepts 0 and 1 only, but may add more later
+// Returns true if valid, actual value in *out
+bool datum_str_to_bool_strict(const char * const s, bool * const out) {
+	if (0 == strcmp(s, "0")) {
+		*out = false;
+		return true;
+	} else if (0 == strcmp(s, "1")) {
+		*out = true;
+		return true;
+	}
+	return false;
+}
+
 bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess) {
 	const size_t guess_len = strlen(guess);
 	size_t acc = secret_len ^ guess_len;
