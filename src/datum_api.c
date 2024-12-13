@@ -365,6 +365,31 @@ static void http_resp_prevent_caching(struct MHD_Response * const response) {
 	MHD_add_response_header(response, "Expires", "0");
 }
 
+static enum MHD_Result datum_api_formdata_to_json_cb(void * const cls, const enum MHD_ValueKind kind, const char * const key, const char * const filename, const char * const content_type, const char * const transfer_encoding, const char * const data, const uint64_t off, const size_t size) {
+	if (!key) return MHD_YES;
+	if (off) return MHD_YES;
+	
+	assert(cls);
+	json_t * const j = cls;
+	
+	json_object_set_new(j, key, json_stringn(data, size));
+	
+	return MHD_YES;
+}
+
+bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char * const post, const int len, json_t * const j) {
+	struct MHD_PostProcessor * const pp = MHD_create_post_processor(connection, 32768, datum_api_formdata_to_json_cb, j);
+	if (!pp) {
+		return false;
+	}
+	if (MHD_YES != MHD_post_process(pp, post, len)) {
+		MHD_destroy_post_processor(pp);
+		return false;
+	}
+	MHD_destroy_post_processor(pp);
+	return true;
+}
+
 int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
 	struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
 	http_resp_prevent_caching(response);
