@@ -86,6 +86,10 @@ For Debian/Ubuntu it would be:
 
     sudo apt install cmake pkgconf libcurl4-openssl-dev libjansson-dev libmicrohttpd-dev libsodium-dev psmisc
 
+For RedHat/Fedora it would be:
+
+    sudo dnf install cmake pkgconf libcurl-devel jansson-devel libmicrohttpd-devel libsodium-devel psmisc
+
 Compile DATUM by running:
 
     cmake . && make
