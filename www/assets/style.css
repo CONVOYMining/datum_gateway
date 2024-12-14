@@ -138,3 +138,8 @@ td:not(.label) {
 .fixed-width {
 	font-family: "Courier New", Courier, monospace;
 }
+
+.note {
+	text-align: center;
+	font-size: small;
+}
