@@ -262,7 +262,7 @@ int datum_read_config(const char *conffile) {
 	
 	config = load_json_from_file(conffile);
 	
-	if (!config) {
+	if (!json_is_object(config)) {
 		DLOG_FATAL("Could not read configuration JSON file!");
 		return -1;
 	}
@@ -270,10 +270,10 @@ int datum_read_config(const char *conffile) {
 	for (i=0;i<NUM_CONFIG_ITEMS;i++) {
 		item = NULL; cat = NULL;
 		cat = json_object_get(config, datum_config_options[i].category);
-		if (cat) {
+		if (json_is_object(cat)) {
 			item = json_object_get(cat, datum_config_options[i].name);
 		}
-		if ((!cat) || (!item)) {
+		if ((!item) || json_is_null(item)) {
 			if (datum_config_options[i].required) {
 				DLOG_ERROR("Required configuration option (%s.%s) not found in config file:", datum_config_options[i].category, datum_config_options[i].name);
 				DLOG_ERROR("--- Config description: \"%s\"", datum_config_options[i].description);
