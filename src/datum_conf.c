@@ -362,6 +362,16 @@ int datum_read_config(const char *conffile) {
 		return 0;
 	}
 	
+	if (datum_config.stratum_v1_share_stale_seconds < 60) {
+		DLOG_FATAL("Stratum server stratum.stratum_v1_share_stale_seconds must be at least 60 (suggest 120)");
+		return 0;
+	}
+	
+	if (datum_config.stratum_v1_share_stale_seconds > 150) {
+		DLOG_FATAL("Stratum server stratum.stratum_v1_share_stale_seconds must not exceed 150 (suggest 120)");
+		return 0;
+	}
+	
 	if (datum_config.datum_protocol_global_timeout < (datum_config.bitcoind_work_update_seconds+5)) {
 		DLOG_FATAL("DATUM protocol global timeout must be at least the work update interval plus 5 seconds.");
 		return 0;
