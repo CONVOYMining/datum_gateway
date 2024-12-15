@@ -2071,7 +2071,6 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	size_t i;
 	json_t *r;
 	CURL *tcurl;
-	char userpass[1024];
 	int ret = 0;
 	bool free_submitblock_req = false;
 	char *s = NULL;
@@ -2139,16 +2138,22 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	// for added security.  The thread above should already be submitting this block anyway.
 	if (datum_config.mining_save_submitblocks_dir[0] != 0) {
 		// save the block submission to a file named by the block's hash
-		FILE *f;
-		snprintf(userpass, sizeof(userpass), "%s/datum_submitblock_%s.json", datum_config.mining_save_submitblocks_dir, block_hash_hex);
-		f = fopen(userpass, "w");
-		if (!f) {
-			DLOG_ERROR("Could not open %s for writing submitblock record to disk: %s!", userpass, strerror(errno));
+		char submitblockpath[384];
+		int n = snprintf(submitblockpath, sizeof(submitblockpath), "%s/datum_submitblock_%s.json", datum_config.mining_save_submitblocks_dir, block_hash_hex);
+		
+		if (n >= sizeof(submitblockpath)) {
+			DLOG_ERROR("Overflow in construction of submitblock path!");
 		} else {
-			if (!fwrite(submitblock_req, ptr-submitblock_req, 1, f)) {
-				DLOG_ERROR("Could not write to %s when writing submitblock record to disk: %s!", userpass, strerror(errno));
+			FILE *f;
+			f = fopen(submitblockpath, "w");
+			if (!f) {
+				DLOG_ERROR("Could not open %s for writing submitblock record to disk: %s!", submitblockpath, strerror(errno));
+			} else {
+				if (!fwrite(submitblock_req, ptr-submitblock_req, 1, f)) {
+					DLOG_ERROR("Could not write to %s when writing submitblock record to disk: %s!", submitblockpath, strerror(errno));
+				}
+				fclose(f);
 			}
-			fclose(f);
 		}
 	}
 	
@@ -2160,8 +2165,6 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 		usleep(100000);
 		return 0;
 	}
-	
-	snprintf(userpass, sizeof(userpass), "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
 	
 	// make the call!
 	r = json_rpc_call(tcurl, datum_config.bitcoind_rpcurl, userpass, submitblock_req);

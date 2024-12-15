@@ -331,7 +331,6 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 
 void *datum_gateway_fallback_notifier(void *args) {
 	CURL *tcurl = NULL;
-	char userpass[1024];
 	char req[512];
 	char p1[72];
 	p1[0] = 0;
@@ -344,8 +343,6 @@ void *datum_gateway_fallback_notifier(void *args) {
 		panic_from_thread(__LINE__);
 	}
 	DLOG_DEBUG("Fallback notifier thread ready.");
-	
-	snprintf(userpass, sizeof(userpass), "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
 	
 	while(1) {
 		snprintf(req, sizeof(req), "{\"jsonrpc\":\"1.0\",\"id\":\"%"PRIu64"\",\"method\":\"getbestblockhash\",\"params\":[]}", current_time_millis());
@@ -383,7 +380,6 @@ void *datum_gateway_template_thread(void *args) {
 	uint64_t i = 0;
 	char gbt_req[1024];
 	int j;
-	char userpass[1024];
 	T_DATUM_TEMPLATE_DATA *t;
 	bool was_notified = false;
 	int wnc = 0;
@@ -410,8 +406,6 @@ void *datum_gateway_template_thread(void *args) {
 	
 	char p1[72];
 	p1[0] = 0;
-	
-	snprintf(userpass, sizeof(userpass), "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
 	
 	while(1) {
 		i++;
