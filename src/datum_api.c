@@ -629,7 +629,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	tsms = current_time_millis();
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_clients_top_html);
-	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd'><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>");
+	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>");
 	
 	for(j=0;j<global_stratum_app->max_threads;j++) {
 		for(ii=0;ii<global_stratum_app->max_clients_thread;ii++) {
