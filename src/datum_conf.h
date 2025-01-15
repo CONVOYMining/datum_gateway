@@ -71,6 +71,7 @@ const T_DATUM_CONFIG_ITEM *datum_config_get_option_info2(const char *category, c
 // Globally accessable config options
 typedef struct {
 	char bitcoind_rpcuserpass[256];
+	char bitcoind_rpccookiefile[1024];
 	char bitcoind_rpcuser[128];
 	char bitcoind_rpcpassword[128];
 	char bitcoind_rpcurl[256];
