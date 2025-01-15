@@ -41,6 +41,7 @@
 #include <jansson.h>
 #include <stdbool.h>
 
+#include "datum_conf.h"
 #include "datum_jsonrpc.h"
 #include "datum_utils.h"
 
@@ -231,4 +232,10 @@ err_out:
 
 json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass, const char *rpc_req) {
 	return json_rpc_call_full(curl, url, userpass, rpc_req, NULL);
+}
+
+json_t *bitcoind_json_rpc_call(CURL * const curl, global_config_t * const cfg, const char * const rpc_req) {
+	char userpass[sizeof(cfg->bitcoind_rpcuser) + sizeof(cfg->bitcoind_rpcpassword)];
+	sprintf(userpass, "%s:%s", cfg->bitcoind_rpcuser, cfg->bitcoind_rpcpassword);
+	return json_rpc_call(curl, cfg->bitcoind_rpcurl, userpass, rpc_req);
 }

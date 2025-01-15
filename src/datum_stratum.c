@@ -2087,7 +2087,7 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	size_t i;
 	json_t *r;
 	CURL *tcurl;
-	char userpass[512];
+	char submitblockpath[512];
 	int ret = 0;
 	bool free_submitblock_req = false;
 	char *s = NULL;
@@ -2156,14 +2156,14 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	if (datum_config.mining_save_submitblocks_dir[0] != 0) {
 		// save the block submission to a file named by the block's hash
 		FILE *f;
-		snprintf(userpass, 511, "%s/datum_submitblock_%s.json", datum_config.mining_save_submitblocks_dir, block_hash_hex);
-		userpass[511] = 0;
-		f = fopen(userpass, "w");
+		snprintf(submitblockpath, 511, "%s/datum_submitblock_%s.json", datum_config.mining_save_submitblocks_dir, block_hash_hex);
+		submitblockpath[511] = 0;
+		f = fopen(submitblockpath, "w");
 		if (!f) {
-			DLOG_ERROR("Could not open %s for writing submitblock record to disk: %s!", userpass, strerror(errno));
+			DLOG_ERROR("Could not open %s for writing submitblock record to disk: %s!", submitblockpath, strerror(errno));
 		} else {
 			if (!fwrite(submitblock_req, ptr-submitblock_req, 1, f)) {
-				DLOG_ERROR("Could not write to %s when writing submitblock record to disk: %s!", userpass, strerror(errno));
+				DLOG_ERROR("Could not write to %s when writing submitblock record to disk: %s!", submitblockpath, strerror(errno));
 			}
 			fclose(f);
 		}
@@ -2178,10 +2178,8 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 		return 0;
 	}
 	
-	sprintf(userpass, "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
-	
 	// make the call!
-	r = json_rpc_call(tcurl, datum_config.bitcoind_rpcurl, userpass, submitblock_req);
+	r = bitcoind_json_rpc_call(tcurl, &datum_config, submitblock_req);
 	curl_easy_cleanup(tcurl);
 	if (!r) {
 		// oddly, this means success here.
