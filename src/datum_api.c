@@ -807,6 +807,22 @@ int datum_api_OK(struct MHD_Connection *connection) {
 	return ret;
 }
 
+int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
+	const char *time_str;
+	
+	// Get the time parameter from the URL query
+	time_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "ts");
+	
+	uint32_t t = -1000;
+	if (time_str != NULL) {
+		// Convert the time parameter to uint32_t
+		t = (int)strtoul(time_str, NULL, 10);
+	}
+	
+	datum_blocktemplates_notifynew("T", t);
+	return datum_api_OK(connection);
+}
+
 struct ConnectionInfo {
 	char *data;
 	size_t data_size;
@@ -830,7 +846,6 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	struct ConnectionInfo *con_info = *con_cls;
 	int int_method = 0;
 	int uds = 0;
-	const char *time_str;
 	
 	if (strcmp(method, "GET") == 0) {
 		int_method = 1;
@@ -971,17 +986,7 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 				return datum_api_thread_dashboard(connection);
 			}
 			if (!strcmp(url, "/testnet_fastforward")) {
-				// Get the time parameter from the URL query
-				time_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "ts");
-				
-				uint32_t t = -1000;
-				if (time_str != NULL) {
-					// Convert the time parameter to uint32_t
-					t = (int)strtoul(time_str, NULL, 10);
-				}
-				
-				datum_blocktemplates_notifynew("T", t);
-				return datum_api_OK(connection);
+				return datum_api_testnet_fastforward(connection);
 			}
 			break;
 		}
