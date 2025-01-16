@@ -719,3 +719,12 @@ int datum_atoi_strict(const char * const s, const size_t size) {
 	}
 	return ret;
 }
+
+bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess) {
+	const size_t guess_len = strlen(guess);
+	size_t acc = secret_len ^ guess_len;
+	for (size_t i = 0; i < guess_len; ++i) {
+		acc |= ((size_t)guess[i]) ^ ((size_t)secret[i % guess_len]);
+	}
+	return !acc;
+}
