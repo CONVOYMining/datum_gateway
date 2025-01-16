@@ -472,6 +472,45 @@ void datum_api_cmd_kill_client(int tid, int cid) {
 	}
 }
 
+void datum_api_cmd_kill_client2(const char * const data, const size_t size, const char ** const redirect_p) {
+	const char * const end = &data[size];
+	const char *underscore_pos = memchr(data, '_', size);
+	if (!underscore_pos) return;
+	const size_t tid_size = underscore_pos - data;
+	const int tid = datum_atoi_strict(data, tid_size);
+	const char *p = &underscore_pos[1];
+	underscore_pos = memchr(p, '_', end - p);
+	if (!underscore_pos) underscore_pos = end;
+	const int cid = datum_atoi_strict(p, underscore_pos - p);
+	
+	// Valid input; unconditionally redirect back to clients dashboard
+	*redirect_p = "/clients";
+	
+	if (tid < 0 || tid >= global_stratum_app->max_threads || cid < 0 || cid >= global_stratum_app->max_clients_thread) {
+		return;
+	}
+	
+	if (underscore_pos != end) {
+		// Check it's the same client intended
+		p = &underscore_pos[1];
+		underscore_pos = memchr(p, '_', end - p);
+		if (!underscore_pos) underscore_pos = end;
+		const uint64_t connect_tsms = datum_atoi_strict_u64(p, underscore_pos - p);
+		const T_DATUM_MINER_DATA * const m = global_stratum_app->datum_threads[tid].client_data[cid].app_client_data;
+		if (connect_tsms != m->connect_tsms) {
+			DLOG_WARN("API Request to disconnect FORMER stratum client %d/%d (ignored; connect tsms req=%lu vs cur=%lu)", tid, cid, (unsigned long)connect_tsms, (unsigned long)m->connect_tsms);
+			return;
+		}
+		p = &underscore_pos[1];
+		const uint64_t unique_id = datum_atoi_strict_u64(p, end - p);
+		if (unique_id != m->unique_id) {
+			DLOG_WARN("API Request to disconnect FORMER stratum client %d/%d (ignored; unique id req=%lu vs cur=%lu)", tid, cid, (unsigned long)unique_id, (unsigned long)m->unique_id);
+			return;
+		}
+	}
+	datum_api_cmd_kill_client(tid, cid);
+}
+
 int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 	struct MHD_Response *response;
 	char output[1024];
@@ -555,14 +594,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 			if (param) {
 				const char * const data = json_string_value(param);
 				const size_t size = json_string_length(param);
-				const char * const underscore_pos = memchr(data, '_', size);
-				if (underscore_pos) {
-					const size_t tid_size = underscore_pos - data;
-					const int tid = datum_atoi_strict(data, tid_size);
-					const int cid = datum_atoi_strict(&underscore_pos[1], size - tid_size - 1);
-					datum_api_cmd_kill_client(tid, cid);
-					redirect = "/clients";
-				}
+				datum_api_cmd_kill_client2(data, size, &redirect);
 			}
 			
 			response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
@@ -785,7 +817,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 				
 				sz += snprintf(&output[sz], max_sz-1-sz, "<TD><button ");
 				if (have_admin) {
-					sz += snprintf(&output[sz], max_sz-1-sz, "name='kill_client' value='%d_%d' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d}); return false;\"", j, ii, j, ii);
+					sz += snprintf(&output[sz], max_sz-1-sz, "name='kill_client' value='%d_%d_%lu_%lu' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d,t:%lu,id:%lu}); return false;\"", j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id, j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id);
 				} else {
 					sz += snprintf(&output[sz], max_sz-1-sz, "disabled");
 				}
