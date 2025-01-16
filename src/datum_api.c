@@ -423,30 +423,6 @@ void datum_api_cmd_kill_client(int tid, int cid) {
 	}
 }
 
-static enum MHD_Result datum_api_cmd_formdata(void * const cls, const enum MHD_ValueKind kind, const char * const key, const char * const filename, const char * const content_type, const char * const transfer_encoding, const char * const data, const uint64_t off, const size_t size) {
-	assert(cls);
-	const char * * const redirect_p = cls;
-	if (!key) return MHD_YES;
-	if (off) return MHD_YES;
-	
-	if (!strcmp(key, "empty_thread")) {
-		const int tid = datum_atoi_strict(data, size);
-		if (tid == -1) return MHD_YES;
-		datum_api_cmd_empty_thread(tid);
-		*redirect_p = "/threads";
-	} else if (!strcmp(key, "kill_client")) {
-		const char * const underscore_pos = memchr(data, '_', size);
-		if (!underscore_pos) return MHD_YES;
-		const size_t tid_size = underscore_pos - data;
-		const int tid = datum_atoi_strict(data, tid_size);
-		const int cid = datum_atoi_strict(&underscore_pos[1], size - tid_size - 1);
-		datum_api_cmd_kill_client(tid, cid);
-		*redirect_p = "/clients";
-	}
-	
-	return MHD_YES;
-}
-
 int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 	struct MHD_Response *response;
 	char output[1024];
@@ -499,17 +475,36 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 				}
 			}
 		} else {
-			const char *redirect;
-			struct MHD_PostProcessor * const cmd_pp = MHD_create_post_processor(connection, 32768, datum_api_cmd_formdata, &redirect);
-			if (!cmd_pp) {
-err:
+			root = json_object();
+			if (!datum_api_formdata_to_json(connection, post, len, root)) {
+				json_decref(root);
 				return datum_api_do_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR);
 			}
-			if (MHD_YES != MHD_post_process(cmd_pp, post, len) || !redirect) {
-				MHD_destroy_post_processor(cmd_pp);
-				goto err;
+			
+			const char *redirect = "/";
+			
+			param = json_object_get(root, "empty_thread");
+			if (param) {
+				const int tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
+				if (tid != -1) {
+					datum_api_cmd_empty_thread(tid);
+					redirect = "/threads";
+				}
 			}
-			MHD_destroy_post_processor(cmd_pp);
+			
+			param = json_object_get(root, "kill_client");
+			if (param) {
+				const char * const data = json_string_value(param);
+				const size_t size = json_string_length(param);
+				const char * const underscore_pos = memchr(data, '_', size);
+				if (underscore_pos) {
+					const size_t tid_size = underscore_pos - data;
+					const int tid = datum_atoi_strict(data, tid_size);
+					const int cid = datum_atoi_strict(&underscore_pos[1], size - tid_size - 1);
+					datum_api_cmd_kill_client(tid, cid);
+					redirect = "/clients";
+				}
+			}
 			
 			response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
 			http_resp_prevent_caching(response);
