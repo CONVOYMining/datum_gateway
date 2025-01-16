@@ -365,6 +365,14 @@ static void http_resp_prevent_caching(struct MHD_Response * const response) {
 	MHD_add_response_header(response, "Expires", "0");
 }
 
+int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
+	struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+	http_resp_prevent_caching(response);
+	int ret = MHD_queue_response(connection, status_code, response);
+	MHD_destroy_response(response);
+	return ret;
+}
+
 static int datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz) {
 	struct MHD_Response * const response = MHD_create_response_from_buffer(datasz, (void*)data, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", mimetype);
@@ -470,11 +478,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 			struct MHD_PostProcessor * const cmd_pp = MHD_create_post_processor(connection, 32768, datum_api_cmd_formdata, &redirect);
 			if (!cmd_pp) {
 err:
-				response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
-				http_resp_prevent_caching(response);
-				ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
-				MHD_destroy_response(response);
-				return ret;
+				return datum_api_do_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR);
 			}
 			if (MHD_YES != MHD_post_process(cmd_pp, post, len) || !redirect) {
 				MHD_destroy_post_processor(cmd_pp);
