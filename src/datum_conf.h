@@ -38,7 +38,7 @@
 
 #define DATUM_CONFIG_MAX_ARRAY_ENTRIES 32
 #define DATUM_MAX_BLOCK_SUBMITS DATUM_CONFIG_MAX_ARRAY_ENTRIES
-#define DATUM_CONFIG_MAX_STRING_ARRAY_LEN 1024
+#define DATUM_MAX_SUBMIT_URL_LEN 512
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -96,7 +96,7 @@ typedef struct {
 	int api_listen_port;
 	
 	int extra_block_submissions_count;
-	char extra_block_submissions_urls[DATUM_MAX_BLOCK_SUBMITS][DATUM_CONFIG_MAX_STRING_ARRAY_LEN];
+	char extra_block_submissions_urls[DATUM_MAX_BLOCK_SUBMITS][DATUM_MAX_SUBMIT_URL_LEN];
 	
 	bool clog_to_file;
 	bool clog_to_console;
