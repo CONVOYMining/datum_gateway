@@ -88,8 +88,8 @@ typedef struct {
 	int stratum_v1_idle_timeout_max_last_work;
 	
 	char mining_pool_address[256];
-	char mining_coinbase_tag_primary[256];
-	char mining_coinbase_tag_secondary[256];
+	char mining_coinbase_tag_primary[64];
+	char mining_coinbase_tag_secondary[64];
 	char mining_save_submitblocks_dir[256];
 	int coinbase_unique_id;
 	
