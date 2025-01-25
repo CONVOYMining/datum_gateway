@@ -111,7 +111,7 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	
 	// extra block submissions list
 	{ .var_type = DATUM_CONF_STRING_ARRAY, 	.category = "extra_block_submissions", 	.name = "urls",		.description = "Array of bitcoind RPC URLs to submit our blocks to directly.  Include auth info: http://user:pass@IP",
-		.required = false, .ptr = datum_config.extra_block_submissions_urls[0],		.max_string_len = sizeof(datum_config.extra_block_submissions_urls[0]) },
+		.required = false, .ptr = datum_config.extra_block_submissions_urls[0],		.max_string_len = sizeof(*datum_config.extra_block_submissions_urls) },
 	
 	// logger
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "logger", 		.name = "log_to_console",			.description = "Enable logging of messages to the console",
