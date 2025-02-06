@@ -48,16 +48,14 @@
 
 global_config_t datum_config;
 
-char bitcoind_rpcuser[128];
-char bitcoind_rpcpassword[128];
 const char *datum_conf_var_type_text[] = { "N/A", "boolean", "integer", "string", "string_array" };
 
 const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	// Bitcoind configs
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcuser",					.description = "RPC username for communication with local bitcoind.",
-		.required = true, .ptr = bitcoind_rpcuser, .max_string_len = sizeof(bitcoind_rpcuser) },
+		.required = true, .ptr = datum_config.bitcoind_rpcuser, .max_string_len = sizeof(datum_config.bitcoind_rpcuser) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcpassword",				.description = "RPC password for communication with local bitcoind.",
-		.required = true, .ptr = bitcoind_rpcpassword, .max_string_len = sizeof(bitcoind_rpcpassword) },
+		.required = true, .ptr = datum_config.bitcoind_rpcpassword, .max_string_len = sizeof(datum_config.bitcoind_rpcpassword) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcurl",					.description = "RPC URL for communication with local bitcoind. (GBT Template Source)",
 		.required = true, .ptr = datum_config.bitcoind_rpcurl, .max_string_len = sizeof(datum_config.bitcoind_rpcurl) },
 	{ .var_type = DATUM_CONF_INT,	 	.category = "bitcoind", 	.name = "work_update_seconds",		.description = "How many seconds between normal work updates?  (5-120, 40 suggested)",
@@ -305,7 +303,7 @@ int datum_read_config(const char *conffile) {
 	}
 	
 	// populate userpass for further reuse
-	snprintf(datum_config.bitcoind_rpcuserpass, sizeof(datum_config.bitcoind_rpcuserpass), "%s:%s", bitcoind_rpcuser, bitcoind_rpcpassword);
+	snprintf(datum_config.bitcoind_rpcuserpass, sizeof(datum_config.bitcoind_rpcuserpass), "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
 	
 	// pass configuration options to the logger
 	datum_logger_config(datum_config.clog_to_file, datum_config.clog_to_console, datum_config.clog_level_console, datum_config.clog_level_file, datum_config.clog_calling_function, datum_config.clog_to_stderr, datum_config.clog_rotate_daily, datum_config.clog_file);

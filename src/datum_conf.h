@@ -68,6 +68,8 @@ typedef struct {
 // Globally accessable config options
 typedef struct {
 	char bitcoind_rpcuserpass[256];
+	char bitcoind_rpcuser[128];
+	char bitcoind_rpcpassword[128];
 	char bitcoind_rpcurl[256];
 	int bitcoind_work_update_seconds;
 	bool bitcoind_notify_fallback;
