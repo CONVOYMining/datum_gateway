@@ -139,6 +139,26 @@ void datum_api_var_STRATUM_TOTAL_SUBSCRIPTIONS(char *buffer, size_t buffer_size,
 void datum_api_var_STRATUM_HASHRATE_ESTIMATE(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	snprintf(buffer, buffer_size, "%.2f Th/sec", vardata->STRATUM_HASHRATE_ESTIMATE);
 }
+void datum_api_var_DATUM_PROCESS_UPTIME(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+	uint64_t uptime_seconds = get_process_uptime_seconds();
+	uint16_t days = uptime_seconds / (24 * 3600);
+	uint8_t hours = (uptime_seconds % (24 * 3600)) / 3600;
+	uint8_t minutes = (uptime_seconds % 3600) / 60;
+	uint8_t seconds = uptime_seconds % 60;
+	
+	if (days > 0) {
+		snprintf(buffer, buffer_size, "%u days, %u hours, %u minutes, %u seconds",
+			days, hours, minutes, seconds);
+	} else if (hours > 0) {
+		snprintf(buffer, buffer_size, "%u hours, %u minutes, %u seconds",
+			hours, minutes, seconds);
+	} else if (minutes > 0) {
+		snprintf(buffer, buffer_size, "%u minutes, %u seconds",
+			minutes, seconds);
+	} else {
+		snprintf(buffer, buffer_size, "%u seconds", seconds);
+	}
+}
 void datum_api_var_STRATUM_JOB_INFO(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	if (!vardata->sjob) return;
 	snprintf(buffer, buffer_size, "%s (%d) @ %.3f", vardata->sjob->job_id, vardata->sjob->global_index, (double)vardata->sjob->tsms / 1000.0);
@@ -196,6 +216,7 @@ DATUM_API_VarEntry var_entries[] = {
 	{"DATUM_MINER_TAG", datum_api_var_DATUM_MINER_TAG},
 	{"DATUM_POOL_DIFF", datum_api_var_DATUM_POOL_DIFF},
 	{"DATUM_POOL_PUBKEY", datum_api_var_DATUM_POOL_PUBKEY},
+	{"DATUM_PROCESS_UPTIME", datum_api_var_DATUM_PROCESS_UPTIME},
 	
 	{"STRATUM_ACTIVE_THREADS", datum_api_var_STRATUM_ACTIVE_THREADS},
 	{"STRATUM_TOTAL_CONNECTIONS", datum_api_var_STRATUM_TOTAL_CONNECTIONS},
