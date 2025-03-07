@@ -94,6 +94,9 @@ typedef struct {
 	char mining_save_submitblocks_dir[256];
 	int coinbase_unique_id;
 	
+	char api_admin_password[64];
+	size_t api_admin_password_len;
+	char api_csrf_token[65];
 	int api_listen_port;
 	
 	int extra_block_submissions_count;

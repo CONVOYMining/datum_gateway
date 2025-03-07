@@ -104,6 +104,8 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = datum_config.mining_save_submitblocks_dir,			.default_string[0] = "", .max_string_len = 256 },
 	
 	// API/dashboard
+	{ .var_type = DATUM_CONF_STRING, 	.category = "api",	 		.name = "admin_password",			.description = "API password for actions/changes (username 'admin'; disabled if blank)",
+		.required = false, .ptr = datum_config.api_admin_password,						.default_string[0] = "", .max_string_len = sizeof(datum_config.api_admin_password) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "api",	 		.name = "listen_port",				.description = "Port to listen for API/dashboard requests (0=disabled)",
 		.required = false, .ptr = &datum_config.api_listen_port, 						.default_int = 0 },
 	
@@ -309,6 +311,20 @@ int datum_read_config(const char *conffile) {
 	}
 	if (datum_config.bitcoind_work_update_seconds > 120) {
 		datum_config.bitcoind_work_update_seconds = 120;
+	}
+	
+	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
+	if (datum_config.api_admin_password_len) {
+		static const char hash_tag[] = "DATUM Anti-CSRF Token";
+		const size_t data_max_sz = sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + sizeof(datum_config.api_admin_password);
+		const size_t data_sz = sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + datum_config.api_admin_password_len;
+		char data[data_max_sz];
+		strcpy(data, hash_tag);
+		memcpy(&data[sizeof(hash_tag)], &datum_config.api_listen_port, sizeof(datum_config.api_listen_port));
+		strcpy(&data[sizeof(hash_tag)+sizeof(datum_config.api_listen_port)], datum_config.api_admin_password);
+		unsigned char hash[32];
+		my_sha256(hash, data, data_sz);
+		hash2hex(hash, datum_config.api_csrf_token);
 	}
 	
 	if (datum_config.stratum_v1_max_threads > MAX_THREADS) {
