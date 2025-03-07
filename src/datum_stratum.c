@@ -352,6 +352,9 @@ void datum_stratum_v1_socket_thread_client_new(T_DATUM_CLIENT_DATA *c) {
 	m->sdata = (T_DATUM_STRATUM_THREADPOOL_DATA *)c->datum_thread->app_thread_data;
 	m->stats.last_swap_tsms = m->stats.last_share_tsms;
 	
+	static uint64_t unique_id_ctr = 0;
+	m->unique_id = unique_id_ctr++;
+	
 	// set initial connection time
 	// if this is the first client on the thread, we won't have a loop_tsms yet
 	if (m->sdata->loop_tsms > 0) {
