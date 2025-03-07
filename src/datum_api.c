@@ -141,13 +141,13 @@ void datum_api_var_STRATUM_HASHRATE_ESTIMATE(char *buffer, size_t buffer_size, c
 }
 void datum_api_var_DATUM_PROCESS_UPTIME(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	uint64_t uptime_seconds = get_process_uptime_seconds();
-	uint16_t days = uptime_seconds / (24 * 3600);
-	uint8_t hours = (uptime_seconds % (24 * 3600)) / 3600;
-	uint8_t minutes = (uptime_seconds % 3600) / 60;
-	uint8_t seconds = uptime_seconds % 60;
+	uint64_t days = uptime_seconds / (24 * 3600);
+	unsigned int hours = (uptime_seconds % (24 * 3600)) / 3600;
+	unsigned int minutes = (uptime_seconds % 3600) / 60;
+	unsigned int seconds = uptime_seconds % 60;
 	
 	if (days > 0) {
-		snprintf(buffer, buffer_size, "%u days, %u hours, %u minutes, %u seconds",
+		snprintf(buffer, buffer_size, "%lu days, %u hours, %u minutes, %u seconds",
 			days, hours, minutes, seconds);
 	} else if (hours > 0) {
 		snprintf(buffer, buffer_size, "%u hours, %u minutes, %u seconds",

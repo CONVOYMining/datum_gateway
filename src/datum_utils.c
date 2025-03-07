@@ -85,7 +85,7 @@ uint64_t get_process_uptime_seconds() {
 
 void datum_utils_init(void) {
 	build_hex_lookup();
-	process_start_time = current_time_seconds();
+	process_start_time = monotonic_time_seconds();
 }
 
 #ifdef __GNUC__
@@ -127,9 +127,9 @@ unsigned char floorPoT(uint64_t x) {
 }
 #endif
 
-uint64_t current_time_seconds(void) {
+uint64_t monotonic_time_seconds(void) {
 	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts); // SAFE from timezone changes
+	clock_gettime(CLOCK_MONOTONIC, &ts); // SAFE from system time changes (e.g., NTP adjustments, manual clock changes)
 	return (uint64_t)ts.tv_sec;
 }
 
