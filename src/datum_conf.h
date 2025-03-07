@@ -38,7 +38,7 @@
 
 #define DATUM_CONFIG_MAX_ARRAY_ENTRIES 32
 #define DATUM_MAX_BLOCK_SUBMITS DATUM_CONFIG_MAX_ARRAY_ENTRIES
-#define DATUM_CONFIG_MAX_STRING_ARRAY_LEN 1024
+#define DATUM_MAX_SUBMIT_URL_LEN 512
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -67,8 +67,9 @@ typedef struct {
 
 // Globally accessable config options
 typedef struct {
-	char bitcoind_rpcuser[256];
-	char bitcoind_rpcpassword[256];
+	char bitcoind_rpcuserpass[256];
+	char bitcoind_rpcuser[128];
+	char bitcoind_rpcpassword[128];
 	char bitcoind_rpcurl[256];
 	int bitcoind_work_update_seconds;
 	bool bitcoind_notify_fallback;
@@ -89,15 +90,15 @@ typedef struct {
 	int stratum_v1_idle_timeout_max_last_work;
 	
 	char mining_pool_address[256];
-	char mining_coinbase_tag_primary[256];
-	char mining_coinbase_tag_secondary[256];
+	char mining_coinbase_tag_primary[64];
+	char mining_coinbase_tag_secondary[64];
 	char mining_save_submitblocks_dir[256];
 	int coinbase_unique_id;
 	
 	int api_listen_port;
 	
 	int extra_block_submissions_count;
-	char extra_block_submissions_urls[DATUM_MAX_BLOCK_SUBMITS][DATUM_CONFIG_MAX_STRING_ARRAY_LEN];
+	char extra_block_submissions_urls[DATUM_MAX_BLOCK_SUBMITS][DATUM_MAX_SUBMIT_URL_LEN];
 	
 	bool clog_to_file;
 	bool clog_to_console;
