@@ -43,6 +43,7 @@
 #include <jansson.h>
 
 #include "datum_conf.h"
+#include "datum_jsonrpc.h"
 #include "datum_utils.h"
 #include "datum_sockets.h"
 
@@ -52,10 +53,12 @@ const char *datum_conf_var_type_text[] = { "N/A", "boolean", "integer", "string"
 
 const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	// Bitcoind configs
+	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpccookiefile",			.description = "Path to file to read RPC cookie from, for communication with local bitcoind.",
+		.required = false, .ptr = datum_config.bitcoind_rpccookiefile,			.default_string[0] = "", .max_string_len = sizeof(datum_config.bitcoind_rpccookiefile) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcuser",					.description = "RPC username for communication with local bitcoind.",
-		.required = true, .ptr = datum_config.bitcoind_rpcuser, .max_string_len = sizeof(datum_config.bitcoind_rpcuser) },
+		.required = false, .ptr = datum_config.bitcoind_rpcuser,			.default_string[0] = "", .max_string_len = sizeof(datum_config.bitcoind_rpcuser) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcpassword",				.description = "RPC password for communication with local bitcoind.",
-		.required = true, .ptr = datum_config.bitcoind_rpcpassword, .max_string_len = sizeof(datum_config.bitcoind_rpcpassword) },
+		.required = false, .ptr = datum_config.bitcoind_rpcpassword,			.default_string[0] = "", .max_string_len = sizeof(datum_config.bitcoind_rpcpassword) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcurl",					.description = "RPC URL for communication with local bitcoind. (GBT Template Source)",
 		.required = true, .ptr = datum_config.bitcoind_rpcurl, .max_string_len = sizeof(datum_config.bitcoind_rpcurl) },
 	{ .var_type = DATUM_CONF_INT,	 	.category = "bitcoind", 	.name = "work_update_seconds",		.description = "How many seconds between normal work updates?  (5-120, 40 suggested)",
@@ -149,6 +152,21 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 };
 
 #define NUM_CONFIG_ITEMS (sizeof(datum_config_options) / sizeof(datum_config_options[0]))
+
+const T_DATUM_CONFIG_ITEM *datum_config_get_option_info(const char * const category, const size_t category_len, const char * const name, const size_t name_len) {
+	for (size_t i = 0; i < NUM_CONFIG_ITEMS; ++i) {
+		if (strncmp(category, datum_config_options[i].category, category_len)) continue;
+		if (datum_config_options[i].category[category_len]) continue;
+		if (strncmp(name, datum_config_options[i].name, name_len)) continue;
+		if (datum_config_options[i].name[name_len]) continue;
+		return &datum_config_options[i];
+	}
+	return NULL;
+}
+
+const T_DATUM_CONFIG_ITEM *datum_config_get_option_info2(const char * const category, const char * const name) {
+	return datum_config_get_option_info(category, strlen(category), name, strlen(name));
+}
 
 json_t *load_json_from_file(const char *file_path) {
 	json_error_t error;
@@ -254,6 +272,11 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 	return -1;
 }
 
+static void datum_config_opt_missing_error(const T_DATUM_CONFIG_ITEM * const opt) {
+	DLOG_ERROR("Required configuration option (%s.%s) not found in config file:", opt->category, opt->name);
+	DLOG_ERROR("--- Config description: \"%s\"", opt->description);
+}
+
 int datum_read_config(const char *conffile) {
 	json_t *config = NULL;
 	json_t *cat, *item;
@@ -278,8 +301,7 @@ int datum_read_config(const char *conffile) {
 		}
 		if ((!item) || json_is_null(item)) {
 			if (datum_config_options[i].required) {
-				DLOG_ERROR("Required configuration option (%s.%s) not found in config file:", datum_config_options[i].category, datum_config_options[i].name);
-				DLOG_ERROR("--- Config description: \"%s\"", datum_config_options[i].description);
+				datum_config_opt_missing_error(&datum_config_options[i]);
 				return 0;
 			} else {
 				datum_config_set_default(&datum_config_options[i]);
@@ -319,6 +341,24 @@ int datum_read_config(const char *conffile) {
 	}
 	if (datum_config.bitcoind_work_update_seconds > 120) {
 		datum_config.bitcoind_work_update_seconds = 120;
+	}
+	
+	if (datum_config.bitcoind_rpcuser[0]) {
+		if (!datum_config.bitcoind_rpcpassword[0]) {
+			datum_config_opt_missing_error(datum_config_get_option_info2("bitcoind", "rpcpassword"));
+			return 0;
+		}
+		snprintf(datum_config.bitcoind_rpcuserpass, sizeof(datum_config.bitcoind_rpcuserpass), "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
+	} else if (datum_config.bitcoind_rpccookiefile[0]) {
+		update_rpc_cookie(&datum_config);
+	} else {
+		const T_DATUM_CONFIG_ITEM *opt;
+		DLOG_ERROR("Either bitcoind.rpcuser (and bitcoind.rpcpassword) or bitcoind.rpccookiefile is required.");
+		opt = datum_config_get_option_info2("bitcoind", "rpcuser");
+		DLOG_ERROR("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
+		opt = datum_config_get_option_info2("bitcoind", "rpccookiefile");
+		DLOG_ERROR("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
+		return 0;
 	}
 	
 	if (datum_config.stratum_v1_max_threads > MAX_THREADS) {
