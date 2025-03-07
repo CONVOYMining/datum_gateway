@@ -407,6 +407,28 @@ bool datum_api_check_admin_password_only(struct MHD_Connection * const connectio
 	return false;
 }
 
+bool datum_api_check_admin_password_httponly(struct MHD_Connection * const connection) {
+	int ret;
+	
+	char * const username = MHD_digest_auth_get_username(connection);
+	const char * const realm = "DATUM Gateway";
+	if (username) {
+		ret = MHD_digest_auth_check2(connection, realm, username, datum_config.api_admin_password, 300, MHD_DIGEST_ALG_SHA256);
+		free(username);
+	} else {
+		ret = MHD_NO;
+	}
+	if (ret != MHD_YES) {
+		DLOG_DEBUG("Wrong password in HTTP authentication");
+		struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, (ret == MHD_INVALID_NONCE) ? MHD_YES : MHD_NO, MHD_DIGEST_ALG_SHA256);
+		MHD_destroy_response(response);
+		return false;
+	}
+	
+	return true;
+}
+
 bool datum_api_check_admin_password(struct MHD_Connection * const connection, const json_t * const j) {
 	int ret;
 	
@@ -428,23 +450,7 @@ bool datum_api_check_admin_password(struct MHD_Connection * const connection, co
 		return false;
 	}
 	
-	char * const username = MHD_digest_auth_get_username(connection);
-	const char * const realm = "DATUM Gateway";
-	if (username) {
-		ret = MHD_digest_auth_check2(connection, realm, username, datum_config.api_admin_password, 300, MHD_DIGEST_ALG_SHA256);
-		free(username);
-	} else {
-		ret = MHD_NO;
-	}
-	if (ret != MHD_YES) {
-		DLOG_DEBUG("Wrong password in HTTP authentication");
-		struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
-		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, (ret == MHD_INVALID_NONCE) ? MHD_YES : MHD_NO, MHD_DIGEST_ALG_SHA256);
-		MHD_destroy_response(response);
-		return false;
-	}
-	
-	return true;
+	return datum_api_check_admin_password_httponly(connection);
 }
 
 static int datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz) {
@@ -719,11 +725,25 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 		return MHD_NO;
 	}
 	
-	const bool have_admin = datum_config.api_admin_password_len;
-	
 	tsms = current_time_millis();
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_clients_top_html);
+	
+	if (!datum_config.api_admin_password_len) {
+		sz += snprintf(&output[sz], max_sz-1-sz, "This page requires admin access (not configured)");
+		sz += snprintf(&output[sz], max_sz-1-sz, "%s", www_foot_html);
+		
+		response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+		MHD_add_response_header(response, "Content-Type", "text/html");
+		http_resp_prevent_caching(response);
+		ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+		MHD_destroy_response(response);
+		return ret;
+	}
+	if (!datum_api_check_admin_password_httponly(connection)) {
+		return MHD_YES;
+	}
+	
 	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
 	
 	for(j=0;j<global_stratum_app->max_threads;j++) {
@@ -783,21 +803,12 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 					sz += snprintf(&output[sz], max_sz-1-sz, "<TD COLSPAN=\"8\">Not Subscribed</TD>");
 				}
 				
-				sz += snprintf(&output[sz], max_sz-1-sz, "<TD><button ");
-				if (have_admin) {
-					sz += snprintf(&output[sz], max_sz-1-sz, "name='kill_client' value='%d_%d' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d}); return false;\"", j, ii, j, ii);
-				} else {
-					sz += snprintf(&output[sz], max_sz-1-sz, "disabled");
-				}
-				sz += snprintf(&output[sz], max_sz-1-sz, ">Kick</button></TD></TR>");
+				sz += snprintf(&output[sz], max_sz-1-sz, "<TD><button name='kill_client' value='%d_%d' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d}); return false;\">Kick</button></TD></TR>", j, ii, j, ii);
 			}
 		}
 	}
 	
-	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE></form><p class=\"table-footer\">Total active hashrate estimate: %.2f Th/s</p>", thr);
-	if (have_admin) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "<script>function sendPostRequest(url, data){data.csrf='%s';fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});}</script>", datum_config.api_csrf_token);
-	}
+	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE></form><p class=\"table-footer\">Total active hashrate estimate: %.2f Th/s</p><script>function sendPostRequest(url, data){data.csrf='%s';fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});}</script>", thr, datum_config.api_csrf_token);
 	sz += snprintf(&output[sz], max_sz-1-sz, "%s", www_foot_html);
 	
 	// return the home page with some data and such
