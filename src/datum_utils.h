@@ -70,6 +70,7 @@ unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
 int datum_atoi_strict(const char *s, size_t size);
+bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess);
 
 
 static inline
