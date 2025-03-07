@@ -348,7 +348,7 @@ int datum_read_config(const char *conffile) {
 			datum_config_opt_missing_error(datum_config_get_option_info2("bitcoind", "rpcpassword"));
 			return 0;
 		}
-		sprintf(datum_config.bitcoind_rpcuserpass, "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
+		snprintf(datum_config.bitcoind_rpcuserpass, sizeof(datum_config.bitcoind_rpcuserpass), "%s:%s", datum_config.bitcoind_rpcuser, datum_config.bitcoind_rpcpassword);
 	} else if (datum_config.bitcoind_rpccookiefile[0]) {
 		update_rpc_cookie(&datum_config);
 	} else {
