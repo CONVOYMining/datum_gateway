@@ -121,7 +121,7 @@ void datum_stratum_v1_shutdown_all(void) {
 		pthread_mutex_unlock(&global_stratum_app->datum_threads[tid].thread_data_lock);
 	}
 	
-	DLOG_INFO("Sent disconnect request for all stratum clients to %d threads.", shutdown_threads);
+	DLOG_INFO("Sent disconnect request for all stratum clients to %u threads.", shutdown_threads);
 	return;
 }
 
@@ -1428,7 +1428,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	T_DATUM_STRATUM_COINBASE *cb;
 	char cb1[STRATUM_COINBASE1_MAX_LEN+2];
-	int cbselect = 0;
+	unsigned int cbselect = 0;
 	bool full_coinbase = false;
 	char s[512];
 	unsigned char tdiff = 0xFF;
