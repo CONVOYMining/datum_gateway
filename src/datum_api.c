@@ -47,6 +47,7 @@
 #include <jansson.h>
 
 #include "datum_api.h"
+#include "datum_blocktemplates.h"
 #include "datum_conf.h"
 #include "datum_utils.h"
 #include "datum_stratum.h"
@@ -86,8 +87,16 @@ void datum_api_var_DATUM_SHARES_REJECTED(char *buffer, size_t buffer_size, const
 }
 void datum_api_var_DATUM_CONNECTION_STATUS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	const char *colour = "lime";
-	const char *s;
-	if (datum_protocol_is_active()) {
+	const char *s, *s2 = "";
+	const char * const bt_err = datum_blocktemplates_error;
+	if (bt_err) {
+		colour = "red";
+		s = "ERROR: ";
+		s2 = bt_err;
+	} else if (!vardata->sjob) {
+		colour = "silver";
+		s = "Initialising...";
+	} else if (datum_protocol_is_active()) {
 		s = "Connected and Ready";
 	} else if (datum_config.datum_pooled_mining_only && datum_config.datum_pool_host[0]) {
 		colour = "red";
@@ -98,7 +107,7 @@ void datum_api_var_DATUM_CONNECTION_STATUS(char *buffer, size_t buffer_size, con
 		}
 		s = "Non-Pooled Mode";
 	}
-	snprintf(buffer, buffer_size, "<svg viewBox='0 0 100 100' role='img' style='width:1em;height:1em'><circle cx='50' cy='60' r='35' style='fill:%s' /></svg> %s", colour, s);
+	snprintf(buffer, buffer_size, "<svg viewBox='0 0 100 100' role='img' style='width:1em;height:1em'><circle cx='50' cy='60' r='35' style='fill:%s' /></svg> %s%s", colour, s, s2);
 }
 void datum_api_var_DATUM_POOL_HOST(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	if (datum_config.datum_pool_host[0]) {
@@ -268,13 +277,18 @@ void datum_api_fill_vars(const char *input, char *output, size_t max_output_size
 			
 			DATUM_API_VarFunc func = datum_api_find_var_func(var_name);
 			if (func) {
-				replacement[0] = 0;
-				func(replacement, sizeof(replacement), vardata);
-				replacement_len = strlen(replacement);
-				if (replacement_len) {
-					to_copy = (replacement_len < max_output_size - output_len - 1) ? replacement_len : max_output_size - output_len - 1;
-					strncpy(&output[output_len], replacement, to_copy);
-					output_len += to_copy;
+				// Skip running STRATUM_JOB functions if there's no sjob
+				if (var_name[8] == 'J' && !vardata->sjob) {
+					// Leave blank for now
+				} else {
+					replacement[0] = 0;
+					func(replacement, sizeof(replacement), vardata);
+					replacement_len = strlen(replacement);
+					if (replacement_len) {
+						to_copy = (replacement_len < max_output_size - output_len - 1) ? replacement_len : max_output_size - output_len - 1;
+						strncpy(&output[output_len], replacement, to_copy);
+						output_len += to_copy;
+					}
 				}
 				output[output_len] = 0;
 			} else {
@@ -462,14 +476,14 @@ static int datum_api_asset(struct MHD_Connection * const connection, const char 
 }
 
 void datum_api_cmd_empty_thread(int tid) {
-	if ((tid >= 0) && (tid < global_stratum_app->max_threads)) {
+	if (global_stratum_app && (tid >= 0) && (tid < global_stratum_app->max_threads)) {
 		DLOG_WARN("API Request to empty stratum thread %d!", tid);
 		global_stratum_app->datum_threads[tid].empty_request = true;
 	}
 }
 
 void datum_api_cmd_kill_client(int tid, int cid) {
-	if ((tid >= 0) && (tid < global_stratum_app->max_threads)) {
+	if (global_stratum_app && (tid >= 0) && (tid < global_stratum_app->max_threads)) {
 		if ((cid >= 0) && (cid < global_stratum_app->max_clients_thread)) {
 			DLOG_WARN("API Request to disconnect stratum client %d/%d!", tid, cid);
 			global_stratum_app->datum_threads[tid].client_data[cid].kill_request = true;
@@ -635,9 +649,7 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 	sjob = (j >= 0 && j < MAX_STRATUM_JOBS) ? global_cur_stratum_jobs[j] : NULL;
 	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
 	
-	if (!sjob) return MHD_NO;
-	
-	max_sz = www_coinbaser_top_html_sz + www_foot_html_sz + (sjob->available_coinbase_outputs_count * 512) + 2048; // approximate max size of each row
+	max_sz = www_coinbaser_top_html_sz + www_foot_html_sz + (sjob ? (sjob->available_coinbase_outputs_count * 512) : 0) + 2048; // approximate max size of each row
 	output = calloc(max_sz+16,1);
 	if (!output) {
 		return MHD_NO;
@@ -646,15 +658,17 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 	sz = snprintf(output, max_sz-1-sz, "%s", www_coinbaser_top_html);
 	sz += snprintf(&output[sz], max_sz-1-sz, "<TABLE><TR><TD><U>Value</U></TD>  <TD><U>Address</U></TD></TR>");
 	
-	for(i=0;i<sjob->available_coinbase_outputs_count;i++) {
-		output_script_2_addr(sjob->available_coinbase_outputs[i].output_script, sjob->available_coinbase_outputs[i].output_script_len, tempaddr);
-		sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)sjob->available_coinbase_outputs[i].value_sats / (double)100000000.0, tempaddr);
-		tv += sjob->available_coinbase_outputs[i].value_sats;
-	}
-	
-	if (tv < sjob->coinbase_value) {
-		output_script_2_addr(sjob->pool_addr_script, sjob->pool_addr_script_len, tempaddr);
-		sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)(sjob->coinbase_value - tv) / (double)100000000.0, tempaddr);
+	if (sjob) {
+		for(i=0;i<sjob->available_coinbase_outputs_count;i++) {
+			output_script_2_addr(sjob->available_coinbase_outputs[i].output_script, sjob->available_coinbase_outputs[i].output_script_len, tempaddr);
+			sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)sjob->available_coinbase_outputs[i].value_sats / (double)100000000.0, tempaddr);
+			tv += sjob->available_coinbase_outputs[i].value_sats;
+		}
+		
+		if (tv < sjob->coinbase_value) {
+			output_script_2_addr(sjob->pool_addr_script, sjob->pool_addr_script_len, tempaddr);
+			sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)(sjob->coinbase_value - tv) / (double)100000000.0, tempaddr);
+		}
 	}
 	
 	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE>");
@@ -679,7 +693,9 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	double thr = 0.0;
 	int subs,conns;
 	
-	max_sz = www_threads_top_html_sz + www_foot_html_sz + (global_stratum_app->max_threads * 512) + 2048; // approximate max size of each row
+	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
+	
+	max_sz = www_threads_top_html_sz + www_foot_html_sz + (max_threads * 512) + 2048; // approximate max size of each row
 	output = calloc(max_sz+16,1);
 	if (!output) {
 		return MHD_NO;
@@ -691,7 +707,7 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_threads_top_html);
 	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
-	for(j=0;j<global_stratum_app->max_threads;j++) {
+	for (j = 0; j < max_threads; ++j) {
 		thr = 0.0;
 		subs = 0;
 		conns = 0;
@@ -748,7 +764,9 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	unsigned char astat;
 	double thr = 0.0;
 	
-	for(i=0;i<global_stratum_app->max_threads;i++) {
+	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
+	
+	for (i = 0; i < max_threads; ++i) {
 		connected_clients+=global_stratum_app->datum_threads[i].connected_clients;
 	}
 	
@@ -779,7 +797,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	
 	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
 	
-	for(j=0;j<global_stratum_app->max_threads;j++) {
+	for (j = 0; j < max_threads; ++j) {
 		for(ii=0;ii<global_stratum_app->max_clients_thread;ii++) {
 			if (global_stratum_app->datum_threads[j].client_data[ii].fd > 0) {
 				m = (T_DATUM_MINER_DATA *)global_stratum_app->datum_threads[j].client_data[ii].app_client_data;
@@ -1054,10 +1072,6 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	
 	if (user) MHD_free(user);
 	if (pass) MHD_free(pass);
-	
-	while (!global_stratum_app) {
-		sleep(1);
-	}
 	
 	if (int_method == 1 && url[0] == '/' && url[1] == 0) {
 		// homepage
