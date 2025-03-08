@@ -578,7 +578,7 @@ void *datum_gateway_listener_thread(void *arg) {
 	app->datum_active_threads = 0;
 	
 	listen_sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (!listen_sock) {
+	if (-1 == listen_sock) {
 		DLOG_FATAL("Could get socket: %s", strerror(errno));
 		panic_from_thread(__LINE__);
 		return NULL;
