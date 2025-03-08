@@ -537,10 +537,32 @@ int assign_to_thread(T_DATUM_SOCKET_APP *app, int fd) {
 	return 1;
 }
 
+const char *datum_sockets_setup_listen_sock(const int listen_sock, const struct sockaddr * const sa, const size_t sa_len) {
+	if (-1 == listen_sock) {
+		return "Could not create listening socket";
+	}
+	
+	datum_socket_setoptions(listen_sock);
+	
+	static const int reuse = 1;
+	if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0) {
+		return "setsockopt(SO_REUSEADDR) failed";
+	}
+	
+	if (bind(listen_sock, sa, sa_len) < 0) {
+		return "bind failed";
+	}
+	
+	if (listen(listen_sock, 10) < 0) {
+		return "listen failed";
+	}
+	
+	return NULL;
+}
+
 void *datum_gateway_listener_thread(void *arg) {
 	struct sockaddr_in serveraddr;
 	int i, ret;
-	int reuse = 1;
 	bool rejecting_now = false;
 	uint64_t last_reject_msg_tsms = 0, curtime_tsms = 0;
 	uint64_t reject_count = 0;
@@ -578,13 +600,7 @@ void *datum_gateway_listener_thread(void *arg) {
 	app->datum_active_threads = 0;
 	
 	listen_sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (-1 == listen_sock) {
-		DLOG_FATAL("Could not create listening socket: %s", strerror(errno));
-		panic_from_thread(__LINE__);
-		return NULL;
-	}
 	
-	datum_socket_setoptions(listen_sock);
 	memset(&serveraddr, 0, sizeof(serveraddr));
 	serveraddr.sin_family = AF_INET;
 	serveraddr.sin_port = htons(app->listen_port);
@@ -592,20 +608,9 @@ void *datum_gateway_listener_thread(void *arg) {
 	// TODO: Add option to bind to specific IP per configuration!
 	serveraddr.sin_addr.s_addr = INADDR_ANY;
 	
-	if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0) {
-		DLOG_FATAL("setsockopt(SO_REUSEADDR) failed: %s", strerror(errno));
-		panic_from_thread(__LINE__);
-		return NULL;
-	}
-	
-	if(bind(listen_sock, (struct sockaddr*)&serveraddr, sizeof(serveraddr)) < 0) {
-		DLOG_FATAL("bind failed: %s", strerror(errno));
-		panic_from_thread(__LINE__);
-		return NULL;
-	}
-	
-	if (listen(listen_sock, 10) < 0) {
-		DLOG_FATAL("listen failed: %s", strerror(errno));
+	const char *errstr = datum_sockets_setup_listen_sock(listen_sock, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
+	if (errstr) {
+		DLOG_FATAL("%s: %s", errstr, strerror(errno));
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
