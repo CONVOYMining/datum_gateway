@@ -147,7 +147,7 @@ void datum_api_var_DATUM_PROCESS_UPTIME(char *buffer, size_t buffer_size, const 
 	unsigned int seconds = uptime_seconds % 60;
 	
 	if (days > 0) {
-		snprintf(buffer, buffer_size, "%lu days, %u hours, %u minutes, %u seconds",
+		snprintf(buffer, buffer_size, "%"PRIu64" days, %u hours, %u minutes, %u seconds",
 			days, hours, minutes, seconds);
 	} else if (hours > 0) {
 		snprintf(buffer, buffer_size, "%u hours, %u minutes, %u seconds",
