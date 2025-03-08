@@ -444,8 +444,6 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 }
 
 bool datum_api_check_admin_password(struct MHD_Connection * const connection, const json_t * const j) {
-	int ret;
-	
 	const json_t * const j_password = json_object_get(j, "password");
 	if (json_is_string(j_password)) {
 		return datum_api_check_admin_password_only(connection, json_string_value(j_password));
@@ -604,7 +602,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 			
 			param = json_object_get(root, "empty_thread");
 			if (param) {
-				const int tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
+				tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
 				if (tid != -1) {
 					datum_api_cmd_empty_thread(tid);
 					redirect = "/threads";

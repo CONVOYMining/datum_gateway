@@ -435,7 +435,7 @@ void *datum_gateway_template_thread(void *args) {
 				
 				if (t) {
 					datum_blocktemplates_error = NULL;
-					DLOG_DEBUG("height: %d / value: %"PRIu64,t->height, t->coinbasevalue);
+					DLOG_DEBUG("height: %lu / value: %"PRIu64, (unsigned long)t->height, t->coinbasevalue);
 					DLOG_DEBUG("--- prevhash: %s", t->previousblockhash);
 					DLOG_DEBUG("--- txn_count: %u / sigops: %u / weight: %u / size: %u", t->txn_count, t->txn_total_sigops, t->txn_total_weight, t->txn_total_size);
 					
@@ -445,7 +445,7 @@ void *datum_gateway_template_thread(void *args) {
 						update_stratum_job(t,true,JOB_STATE_EMPTY_PLUS);
 						strcpy(p1, t->previousblockhash);
 						was_notified = false;
-						DLOG_INFO("NEW NETWORK BLOCK: %s (%d)",t->previousblockhash,t->height);
+						DLOG_INFO("NEW NETWORK BLOCK: %s (%lu)", t->previousblockhash, (unsigned long)t->height);
 						
 						// sleep for a milisecond
 						// this will let other threads churn for a moment.  we wont get all the empty jobs blasted out in a milisecond anyway
@@ -484,7 +484,7 @@ void *datum_gateway_template_thread(void *args) {
 							if (!was_notified) {
 								DLOG_DEBUG("Multi notified for block we knew details about. (%s)", new_notify_blockhash);
 							} else {
-								DLOG_DEBUG("Notified, however new = %s, t->previousblockhash = %s, t->height = %d, new_notify_height = %d", new_notify_blockhash, t->previousblockhash, t->height, new_notify_height);
+								DLOG_DEBUG("Notified, however new = %s, t->previousblockhash = %s, t->height = %lu, new_notify_height = %d", new_notify_blockhash, t->previousblockhash, (unsigned long)t->height, new_notify_height);
 								
 								// Sometimes we call GBT before we get the signal from a blocknotify.  It's a bit of a race condition.
 								// Instead of freaking out, we'll just ignore things when we get a signal that results in the same block if it was
