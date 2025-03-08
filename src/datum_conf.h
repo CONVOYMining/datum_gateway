@@ -98,6 +98,7 @@ typedef struct {
 	char api_admin_password[64];
 	size_t api_admin_password_len;
 	char api_csrf_token[65];
+	char api_listen_addr[128];
 	int api_listen_port;
 	
 	int extra_block_submissions_count;

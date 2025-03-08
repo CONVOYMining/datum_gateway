@@ -598,6 +598,12 @@ bool datum_sockets_setup_listening_sockets(const char * const purpose, const cha
 			.sin6_addr = IN6ADDR_ANY_INIT,
 		};
 		out_socks[0] = socket(AF_INET6, SOCK_STREAM, 0);
+#if defined(IPPROTO_IPV6) && defined(IPV6_V6ONLY)
+		if (out_socks[0] != -1) {
+			static const int zero = 0;
+			setsockopt(out_socks[0], IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof(zero));
+		}
+#endif
 		const char * const errstr6 = datum_sockets_setup_listen_sock(out_socks[0], (const struct sockaddr *)&anyaddr6, sizeof(anyaddr6));
 		const int errno6 = errno;
 		unsigned int socks_n = 1;
