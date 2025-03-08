@@ -41,8 +41,10 @@
 #include "datum_logger.h"
 
 void datum_utils_init(void);
+uint64_t monotonic_time_seconds(void);
 uint64_t current_time_millis(void);
 uint64_t current_time_micros(void);
+uint64_t get_process_uptime_seconds(void);
 unsigned char hex2bin_uchar(const char *in);
 void build_hex_lookup(void);
 bool my_sha256(void *digest, const void *buffer, size_t length);

@@ -55,6 +55,7 @@
 #include "datum_logger.h"
 
 volatile int panic_mode = 0;
+static uint64_t process_start_time = 0;
 
 void get_target_from_diff(unsigned char *result, uint64_t diff) {
 	uint64_t dividend_parts[4] = {0, 0, 0, 0x00000000FFFF0000};
@@ -76,8 +77,15 @@ void get_target_from_diff(unsigned char *result, uint64_t diff) {
 	}
 }
 
+uint64_t get_process_uptime_seconds() {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec - process_start_time;
+}
+
 void datum_utils_init(void) {
 	build_hex_lookup();
+	process_start_time = monotonic_time_seconds();
 }
 
 #ifdef __GNUC__
@@ -118,6 +126,12 @@ unsigned char floorPoT(uint64_t x) {
 	return pos;
 }
 #endif
+
+uint64_t monotonic_time_seconds(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts); // SAFE from system time changes (e.g., NTP adjustments, manual clock changes)
+	return (uint64_t)ts.tv_sec;
+}
 
 uint64_t current_time_millis(void) {
 	struct timeval te;
