@@ -572,6 +572,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 						}
 					}
 				}
+				json_decref(root);
 			}
 		} else {
 			root = json_object();
