@@ -37,7 +37,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -577,7 +579,7 @@ void *datum_gateway_listener_thread(void *arg) {
 		return NULL;
 	}
 	
-	DLOG_DEBUG("Setting up app '%s' on port %d. (T:%d/TC:%d/C:%d)", app->name, app->listen_port, app->max_threads, app->max_clients_thread, app->max_clients);
+	DLOG_DEBUG("Setting up app '%s' on address %s port %d. (T:%d/TC:%d/C:%d)", app->name, datum_config.stratum_v1_listen_addr[0] ? datum_config.stratum_v1_listen_addr : "(any)", app->listen_port, app->max_threads, app->max_clients_thread, app->max_clients);
 	
 	// we assume the caller sets up the thread data in some way
 	// don't clobber those pointers
@@ -598,36 +600,64 @@ void *datum_gateway_listener_thread(void *arg) {
 	
 	app->datum_active_threads = 0;
 	
-	const struct sockaddr_in6 anyaddr6 = {
-		.sin6_family = AF_INET6,
-		.sin6_port = htons(app->listen_port),
-		.sin6_addr = IN6ADDR_ANY_INIT,
-	};
-	listen_socks[0] = socket(AF_INET6, SOCK_STREAM, 0);
-	const char * const errstr6 = datum_sockets_setup_listen_sock(listen_socks[0], (const struct sockaddr *)&anyaddr6, sizeof(anyaddr6));
-	const int errno6 = errno;
-	if (errstr6 && listen_socks[0] != -1) {
-		close(listen_socks[0]);
-		listen_socks[0] = -1;
-	}
-	
-	const struct sockaddr_in anyaddr4 = {
-		.sin_family = AF_INET,
-		.sin_port = htons(app->listen_port),
-		.sin_addr.s_addr = INADDR_ANY,
-	};
-	listen_socks[1] = socket(AF_INET, SOCK_STREAM, 0);
-	const char *errstr = datum_sockets_setup_listen_sock(listen_socks[1], (const struct sockaddr *)&anyaddr4, sizeof(anyaddr4));
-	if (errstr && errstr6) {
-		const int errno4 = errno;
-		DLOG_FATAL("%s (IPv6): %s", errstr6, strerror(errno6));
-		DLOG_FATAL("%s (IPv4): %s", errstr, strerror(errno4));
-		panic_from_thread(__LINE__);
-		return NULL;
-	}
-	if (errstr && listen_socks[1] != -1) {
-		close(listen_socks[1]);
+	if (datum_config.stratum_v1_listen_addr[0]) {
+		char port_str[6];
+		snprintf(port_str, sizeof(port_str), "%d", datum_config.stratum_v1_listen_port);
+		const struct addrinfo hints = {
+			.ai_family = AF_UNSPEC,
+			.ai_socktype = SOCK_STREAM,
+			.ai_protocol = 0,
+			.ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV,
+		};
+		struct addrinfo *res;
+		int err = getaddrinfo(datum_config.stratum_v1_listen_addr, port_str, &hints, &res);
+		if (err) {
+			DLOG_FATAL("Failed to resolve listen address '%s': %s", datum_config.stratum_v1_listen_addr, gai_strerror(err));
+			panic_from_thread(__LINE__);
+			return NULL;
+		}
+		listen_socks[0] = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		const char *errstr = datum_sockets_setup_listen_sock(listen_socks[0], res->ai_addr, res->ai_addrlen);
+		const int errno_saved = errno;
+		freeaddrinfo(res);
+		if (errstr) {
+			DLOG_FATAL("%s: %s", errstr, strerror(errno_saved));
+			panic_from_thread(__LINE__);
+			return NULL;
+		}
 		listen_socks[1] = -1;
+	} else {
+		const struct sockaddr_in6 anyaddr6 = {
+			.sin6_family = AF_INET6,
+			.sin6_port = htons(app->listen_port),
+			.sin6_addr = IN6ADDR_ANY_INIT,
+		};
+		listen_socks[0] = socket(AF_INET6, SOCK_STREAM, 0);
+		const char * const errstr6 = datum_sockets_setup_listen_sock(listen_socks[0], (const struct sockaddr *)&anyaddr6, sizeof(anyaddr6));
+		const int errno6 = errno;
+		if (errstr6 && listen_socks[0] != -1) {
+			close(listen_socks[0]);
+			listen_socks[0] = -1;
+		}
+		
+		const struct sockaddr_in anyaddr4 = {
+			.sin_family = AF_INET,
+			.sin_port = htons(app->listen_port),
+			.sin_addr.s_addr = INADDR_ANY,
+		};
+		listen_socks[1] = socket(AF_INET, SOCK_STREAM, 0);
+		const char *errstr = datum_sockets_setup_listen_sock(listen_socks[1], (const struct sockaddr *)&anyaddr4, sizeof(anyaddr4));
+		if (errstr && errstr6) {
+			const int errno4 = errno;
+			DLOG_FATAL("%s (IPv6): %s", errstr6, strerror(errno6));
+			DLOG_FATAL("%s (IPv4): %s", errstr, strerror(errno4));
+			panic_from_thread(__LINE__);
+			return NULL;
+		}
+		if (errstr && listen_socks[1] != -1) {
+			close(listen_socks[1]);
+			listen_socks[1] = -1;
+		}
 	}
 	
 	epollfd = epoll_create1(0);
