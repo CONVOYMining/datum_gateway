@@ -579,7 +579,7 @@ void *datum_gateway_listener_thread(void *arg) {
 	
 	listen_sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (-1 == listen_sock) {
-		DLOG_FATAL("Could get socket: %s", strerror(errno));
+		DLOG_FATAL("Could not create listening socket: %s", strerror(errno));
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
