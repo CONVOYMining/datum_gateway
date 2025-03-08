@@ -1150,7 +1150,8 @@ void *datum_api_thread(void *ptr) {
 		return NULL;
 	}
 	
-	daemon = datum_api_try_start(0);
+	daemon = datum_api_try_start(MHD_USE_DUAL_STACK);
+	if (!daemon) daemon = datum_api_try_start(0);
 	
 	if (!daemon) {
 		DLOG_FATAL("Unable to start daemon for API");
