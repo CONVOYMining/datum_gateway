@@ -1163,7 +1163,7 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	return ret;
 }
 
-static struct MHD_Daemon *datum_api_try_start(unsigned int flags) {
+static struct MHD_Daemon *datum_api_try_start(unsigned int flags, const int sock) {
 	flags |= MHD_USE_AUTO;  // event loop API
 	flags |= MHD_USE_INTERNAL_POLLING_THREAD;
 	return MHD_start_daemon(
@@ -1171,6 +1171,7 @@ static struct MHD_Daemon *datum_api_try_start(unsigned int flags) {
 	                          datum_config.api_listen_port,
 	                          NULL, NULL,  // accept policy filter
 	                          &datum_api_answer, NULL,  // default URI handler
+	                          MHD_OPTION_LISTEN_SOCKET, sock,
 	                          MHD_OPTION_CONNECTION_LIMIT, 128,
 	                          MHD_OPTION_NOTIFY_COMPLETED, datum_api_request_completed, NULL,
 	                          MHD_OPTION_LISTENING_ADDRESS_REUSE, (unsigned int)1,
@@ -1185,8 +1186,13 @@ void *datum_api_thread(void *ptr) {
 		return NULL;
 	}
 	
-	daemon = datum_api_try_start(MHD_USE_DUAL_STACK);
-	if (!daemon) daemon = datum_api_try_start(0);
+	int listen_socks[1];
+	size_t listen_socks_len = 1;
+	if (!datum_sockets_setup_listening_sockets("API", datum_config.api_listen_addr, datum_config.api_listen_port, listen_socks, &listen_socks_len)) {
+		return NULL;
+	}
+	
+	daemon = datum_api_try_start(0, listen_socks[0]);
 	
 	if (!daemon) {
 		DLOG_FATAL("Unable to start daemon for API");
@@ -1194,7 +1200,7 @@ void *datum_api_thread(void *ptr) {
 		return NULL;
 	}
 	
-	DLOG_INFO("API listening on port %d", datum_config.api_listen_port);
+	DLOG_INFO("API listening on address %s port %d", datum_config.api_listen_addr[0] ? datum_config.api_listen_addr : "(any)", datum_config.api_listen_port);
 	
 	while(1) {
 		sleep(3);
