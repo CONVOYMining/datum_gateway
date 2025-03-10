@@ -135,7 +135,7 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="reward_sharing" class="label">Collaborative reward sharing (pooled mining):</label>
-						<select name="reward_sharing" id="reward_sharing"${*ro}>
+						<select name="reward_sharing" id="reward_sharing"${*ro} onchange="reward_sharing_changed()">
 							<option value="require"${selected:datum_pooled_mining_only}${disabled:*ro}>require (pooled mining only)</option>
 							<option value="prefer"${selected:*reward_sharing_prefer}${disabled:*ro}>prefer (failover to non-pooled)</option>
 							<option value="never"${selected:*reward_sharing_never}${disabled:*ro}>never (non-pooled only)</option>
@@ -147,7 +147,7 @@
 		</div>
 		
 		<div class="table-wrapper">
-			<div class="table-container">
+			<div class="table-container" id="pool_settings">
 				<h2>Pool</h2>
 				<div class="setting-row">
 					<div class="flex-row">
@@ -220,5 +220,21 @@
 		</div>
 	</div>
 	</form>
+	<script>
+		function reward_sharing_changed() {
+			var newvalue = document.getElementById('reward_sharing').value;
+			var fields = document.getElementById('pool_settings').getElementsByTagName('input');
+			if (newvalue == 'never') {
+				for (var i = 0; i < fields.length; ++i) {
+					fields[i].setAttribute('disabled', true);
+				}
+			} else {
+				for (var i = 0; i < fields.length; ++i) {
+					fields[i].removeAttribute('disabled');
+				}
+			}
+		}
+		reward_sharing_changed();
+	</script>
 </body>
 </html>
