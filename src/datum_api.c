@@ -68,6 +68,10 @@ const char *cbnames[] = {
 	"Antmain2"
 };
 
+static struct MHD_Response *datum_api_create_empty_mhd_response() {
+	return MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+}
+
 static void html_leading_zeros(char * const buffer, const size_t buffer_size, const char * const numstr) {
 	int zeros = 0;
 	while (numstr[zeros] == '0') {
@@ -398,7 +402,7 @@ int datum_api_submit_uncached_response(struct MHD_Connection * const connection,
 }
 
 int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
-	struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+	struct MHD_Response *response = datum_api_create_empty_mhd_response();
 	return datum_api_submit_uncached_response(connection, status_code, response);
 }
 
@@ -424,7 +428,7 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 	}
 	if (ret != MHD_YES) {
 		DLOG_DEBUG("Wrong password in HTTP authentication");
-		struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+		struct MHD_Response *response = datum_api_create_empty_mhd_response();
 		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, (ret == MHD_INVALID_NONCE) ? MHD_YES : MHD_NO, MHD_DIGEST_ALG_SHA256);
 		MHD_destroy_response(response);
 		return false;
@@ -606,7 +610,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 				datum_api_cmd_kill_client2(data, size, &redirect);
 			}
 			
-			response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+			response = datum_api_create_empty_mhd_response();
 			MHD_add_response_header(response, "Location", redirect);
 			return datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
 		}
