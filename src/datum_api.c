@@ -1039,7 +1039,7 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 			return attr_len;
 		} else if (0 == strncmp(var_start, "msg:", 4)) {
 			if (val) {
-				static const char * const msg = "<br/><em>Config file disallows editing</em>";
+				static const char * const msg = "<br /><em>Config file disallows editing (set \"admin_password\" and \"modify_conf\" in \"api\" section of config file)</em>";
 				const size_t len = strlen(msg);
 				memcpy(replacement, msg, len);
 				return len;
