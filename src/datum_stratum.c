@@ -1531,7 +1531,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		if (!new_block) {
 			snprintf(s, 511, "\"%s%2.2x\",\"%s\",\"", j->job_id, cbselect, j->prevhash);
 		} else {
-			snprintf(s, 511, "\"N%s%2.2x\",\"%s\",\"", j->job_id, 255, j->prevhash); // empty coinbase for new block
+			snprintf(s, 511, "\"N%s%2.2x\",\"%s\",\"", j->job_id, (unsigned int)255, j->prevhash); // empty coinbase for new block
 			cb = &j->subsidy_only_coinbase;
 		}
 	}
@@ -2073,7 +2073,7 @@ void update_stratum_job(T_DATUM_TEMPLATE_DATA *block_template, bool new_block, i
 	}
 	
 	s->global_index = global_latest_stratum_job_index;
-	snprintf(s->job_id, 23, "%8.8x%2.2x%4.4x", (uint32_t)time(NULL), (uint8_t)stratum_job_next, (uint16_t)s->global_index ^ STRATUM_JOB_INDEX_XOR);
+	snprintf(s->job_id, 23, "%8.8x%2.2x%4.4x", (uint32_t)time(NULL), (uint8_t)stratum_job_next, (unsigned int)((uint16_t)s->global_index ^ STRATUM_JOB_INDEX_XOR));
 	
 	global_cur_stratum_jobs[global_latest_stratum_job_index] = s;
 	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
