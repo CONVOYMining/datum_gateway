@@ -390,12 +390,16 @@ bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char *
 	return true;
 }
 
-int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
-	struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+int datum_api_submit_uncached_response(struct MHD_Connection * const connection, const unsigned int status_code, struct MHD_Response * const response) {
 	http_resp_prevent_caching(response);
 	int ret = MHD_queue_response(connection, status_code, response);
 	MHD_destroy_response(response);
 	return ret;
+}
+
+int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
+	struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+	return datum_api_submit_uncached_response(connection, status_code, response);
 }
 
 bool datum_api_check_admin_password_only(struct MHD_Connection * const connection, const char * const password) {
@@ -518,7 +522,7 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 	struct MHD_Response *response;
 	char output[1024];
-	int ret, sz=0;
+	int sz = 0;
 	json_t *root, *cmd, *param;
 	json_error_t error;
 	const char *cstr;
@@ -603,27 +607,21 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 			}
 			
 			response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
-			http_resp_prevent_caching(response);
 			MHD_add_response_header(response, "Location", redirect);
-			ret = MHD_queue_response(connection, MHD_HTTP_FOUND, response);
-			MHD_destroy_response(response);
-			return ret;
+			return datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
 		}
 	}
 	
 	sprintf(output, "{}");
 	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_COPY);
 	MHD_add_response_header(response, "Content-Type", "application/json");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-	MHD_destroy_response (response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 int datum_api_coinbaser(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	T_DATUM_STRATUM_JOB *sjob;
-	int j,i,max_sz = 0,sz=0,ret;
+	int j, i, max_sz = 0, sz = 0;
 	char tempaddr[256];
 	uint64_t tv = 0;
 	char *output = NULL;
@@ -660,15 +658,12 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 	
 	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-	MHD_destroy_response (response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
-	int sz=0, ret, max_sz = 0, j, ii;
+	int sz=0, max_sz = 0, j, ii;
 	char *output = NULL;
 	T_DATUM_MINER_DATA *m = NULL;
 	uint64_t tsms;
@@ -729,16 +724,13 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	
 	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-	MHD_destroy_response (response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	int connected_clients = 0;
-	int i,sz=0,ret,max_sz = 0,j,ii;
+	int i, sz = 0, max_sz = 0, j, ii;
 	char *output = NULL;
 	T_DATUM_MINER_DATA *m = NULL;
 	uint64_t tsms;
@@ -766,10 +758,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 		
 		response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
 		MHD_add_response_header(response, "Content-Type", "text/html");
-		http_resp_prevent_caching(response);
-		ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
-		MHD_destroy_response(response);
-		return ret;
+		return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 	}
 	if (!datum_api_check_admin_password_httponly(connection)) {
 		return MHD_YES;
@@ -845,16 +834,13 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	// return the home page with some data and such
 	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-	MHD_destroy_response (response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 int datum_api_homepage(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	char output[DATUM_API_HOMEPAGE_MAX_SIZE];
-	int j, k = 0, kk = 0, ii, ret;
+	int j, k = 0, kk = 0, ii;
 	T_DATUM_MINER_DATA *m;
 	T_DATUM_API_DASH_VARS vardata;
 	unsigned char astat;
@@ -910,22 +896,15 @@ int datum_api_homepage(struct MHD_Connection *connection) {
 	// return the home page with some data and such
 	response = MHD_create_response_from_buffer (strlen(output), (void *) output, MHD_RESPMEM_MUST_COPY);
 	MHD_add_response_header(response, "Content-Type", "text/html");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-	MHD_destroy_response (response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 int datum_api_OK(struct MHD_Connection *connection) {
-	enum MHD_Result ret;
 	struct MHD_Response *response;
 	const char *ok_response = "OK";
 	response = MHD_create_response_from_buffer(strlen(ok_response), (void *)ok_response, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", "text/html");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-	MHD_destroy_response (response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
