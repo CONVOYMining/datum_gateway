@@ -770,10 +770,10 @@ char **datum_deepcopy_charpp(const char * const * const p) {
 	char *p3 = (void*)(&out[n + 1]);
 	out[n] = NULL;
 	for (size_t i = 0; i < n; ++i) {
-		const size_t sz = strlen(p[i]) + 1;
-		memcpy(p3, p[i], sz);
+		const size_t item_sz = strlen(p[i]) + 1;
+		memcpy(p3, p[i], item_sz);
 		out[i] = p3;
-		p3 += sz;
+		p3 += item_sz;
 	}
 	assert(p3 - (char*)out == sz);
 	return out;
