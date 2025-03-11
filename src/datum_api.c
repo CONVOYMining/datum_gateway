@@ -507,6 +507,27 @@ static struct MHD_Response *datum_api_create_response_authfail_clients() {
 	return datum_api_create_response_authfail(www_clients_top_html, www_clients_top_html_sz);
 }
 
+size_t datum_api_fill_authfail_error(const char * const var_start, const size_t var_name_len, char * const replacement, const size_t replacement_max_len, const T_DATUM_API_DASH_VARS * const vardata) {
+	assert(replacement_max_len >= www_auth_failed_html_sz);
+	memcpy(replacement, www_auth_failed_html, www_auth_failed_html_sz);
+	return www_auth_failed_html_sz;
+}
+
+static struct MHD_Response *datum_api_create_response_authfail_config() {
+	const size_t max_sz = www_config_errors_html_sz + www_auth_failed_html_sz;
+	
+	char * const output = malloc(max_sz);
+	if (!output) {
+		return datum_api_create_empty_mhd_response();
+	}
+	
+	const size_t sz = datum_api_fill_vars(www_config_errors_html, output, max_sz, datum_api_fill_authfail_error, NULL);
+	
+	struct MHD_Response * const response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+	MHD_add_response_header(response, "Content-Type", "text/html");
+	return response;
+}
+
 static struct MHD_Response *datum_api_create_response_authfail_threads() {
 	return datum_api_create_response_authfail(www_threads_top_html, www_threads_top_html_sz);
 }
@@ -1368,7 +1389,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 		return datum_api_do_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR);
 	}
 	
-	if (!datum_api_check_admin_password(connection, j, datum_api_create_empty_mhd_response)) {
+	if (!datum_api_check_admin_password(connection, j, datum_api_create_response_authfail_config)) {
 		json_decref(j);
 		return MHD_YES;
 	}
