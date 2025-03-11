@@ -514,7 +514,7 @@ static struct MHD_Response *datum_api_create_response_authfail_threads() {
 static int datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz, const char * const etag) {
 	const char * const if_none_match_header = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, "If-None-Match");
 	if (if_none_match_header && 0 == strcmp(if_none_match_header, etag)) {
-		struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+		struct MHD_Response *response = datum_api_create_empty_mhd_response();
 		MHD_add_response_header(response, "Etag", etag);
 		int ret = MHD_queue_response(connection, MHD_HTTP_NOT_MODIFIED, response);
 		MHD_destroy_response(response);
