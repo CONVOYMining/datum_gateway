@@ -1037,7 +1037,6 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 int datum_api_config_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	size_t sz = 0, max_sz = 0;
-	int ret;
 	char *output = NULL;
 	
 	max_sz = www_config_html_sz * 2;
@@ -1050,10 +1049,7 @@ int datum_api_config_dashboard(struct MHD_Connection *connection) {
 	
 	response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
-	http_resp_prevent_caching(response);
-	ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
-	MHD_destroy_response(response);
-	return ret;
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
 #ifndef JSON_PRESERVE_ORDER
@@ -1443,20 +1439,16 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 		
 		response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
 		MHD_add_response_header(response, "Content-Type", "text/html");
-		http_resp_prevent_caching(response);
 	} else if (status.need_restart) {
 		response = MHD_create_response_from_buffer(www_config_restart_html_sz, (void*)www_config_restart_html, MHD_RESPMEM_PERSISTENT);
 		MHD_add_response_header(response, "Content-Type", "text/html");
-		http_resp_prevent_caching(response);
 	} else {
-		response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
-		http_resp_prevent_caching(response);
+		response = datum_api_create_empty_mhd_response();
 		MHD_add_response_header(response, "Location", "/config");
 	}
 	json_decref(errors);
 
-	ret = MHD_queue_response(connection, MHD_HTTP_FOUND, response);
-	MHD_destroy_response(response);
+	ret = datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
 	
 	if (status.need_restart) {
 		DLOG_INFO("Config change requires restarting gateway, proceeding");
