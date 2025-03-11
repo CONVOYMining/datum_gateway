@@ -461,6 +461,34 @@ bool datum_api_check_admin_password(struct MHD_Connection * const connection, co
 	return datum_api_check_admin_password_httponly(connection, auth_failure_response_creator);
 }
 
+static struct MHD_Response *datum_api_create_response_authfail(const char * const head, const size_t head_sz) {
+	const size_t max_sz = head_sz + www_auth_failed_html_sz + www_foot_html_sz + 1;
+	size_t sz = 0;
+	char * const output = malloc(max_sz);
+	if (!output) {
+		return datum_api_create_empty_mhd_response();
+	}
+	
+	memcpy(&output[sz], head, head_sz);
+	sz += head_sz;
+	memcpy(&output[sz], www_auth_failed_html, www_auth_failed_html_sz);
+	sz += www_auth_failed_html_sz;
+	memcpy(&output[sz], www_foot_html, www_foot_html_sz);
+	sz += www_foot_html_sz;
+	
+	struct MHD_Response * const response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+	MHD_add_response_header(response, "Content-Type", "text/html");
+	return response;
+}
+
+static struct MHD_Response *datum_api_create_response_authfail_clients() {
+	return datum_api_create_response_authfail(www_clients_top_html, www_clients_top_html_sz);
+}
+
+static struct MHD_Response *datum_api_create_response_authfail_threads() {
+	return datum_api_create_response_authfail(www_threads_top_html, www_threads_top_html_sz);
+}
+
 static int datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz) {
 	struct MHD_Response * const response = MHD_create_response_from_buffer(datasz, (void*)data, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", mimetype);
@@ -589,14 +617,15 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 				return datum_api_do_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR);
 			}
 			
-			if (!datum_api_check_admin_password(connection, root, datum_api_create_empty_mhd_response)) {
+			param = json_object_get(root, "empty_thread");
+			if (!datum_api_check_admin_password(connection, root, param ? datum_api_create_response_authfail_threads : datum_api_create_response_authfail_clients)) {
 				json_decref(root);
 				return MHD_YES;
 			}
 			
 			const char *redirect = "/";
 			
-			param = json_object_get(root, "empty_thread");
+			// param set for "empty_thread" above
 			if (param) {
 				tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
 				if (tid != -1) {
@@ -766,7 +795,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 		MHD_add_response_header(response, "Content-Type", "text/html");
 		return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 	}
-	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_empty_mhd_response)) {
+	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
 		return MHD_YES;
 	}
 	
