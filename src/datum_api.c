@@ -1176,7 +1176,7 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 				strcpy(datum_config.datum_pool_host, cfginfo->default_string[0]);
 				
 				// Avoiding using null here because older versions handled it poorly
-				json_t *j = json_object_get(config, "datum");
+				j = json_object_get(config, "datum");
 				if (j) json_object_del(j, "pool_host");
 			}
 		}
