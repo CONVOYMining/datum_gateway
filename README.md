@@ -33,6 +33,8 @@ With the current version of the protocol, the pool does block validation after c
 
 The protocol is not specific to a pooled reward system, as the Gateway coordinates the appropriate generation transaction with the pool.  However, in the spirit of maximum decentralization, the pool should implement rewarding miners directly from generated payouts, such as with OCEAN's TIDES reward system.
 
+![DATUM v0 2-beta recommended setup - network diagram](doc/DATUM_recommended_setup-network_diagram.svg)
+
 ## Requirements
 
  - 64-bit AMD or Intel system. Other systems may work, but at this time it is at your own risk.
@@ -85,6 +87,10 @@ Install the required libraries and development packages for dependencies: cmake,
 For Debian/Ubuntu it would be:
 
     sudo apt install cmake pkgconf libcurl4-openssl-dev libjansson-dev libmicrohttpd-dev libsodium-dev psmisc
+
+For RedHat/Fedora it would be:
+
+    sudo dnf install cmake pkgconf libcurl-devel jansson-devel libmicrohttpd-devel libsodium-devel psmisc
 
 Compile DATUM by running:
 
