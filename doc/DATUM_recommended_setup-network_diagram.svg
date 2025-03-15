@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="681px" height="471px" viewBox="-0.5 -0.5 681 471" style="background-color: rgb(255, 255, 255);">
-	<defs/>
+	<defs>
+		<svg id="mining_device" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+			<!-- https://github.com/BitcoinDesign/Bitcoin-Icons/blob/main/svg/outline/mining-device.svg MIT licensed by Christoph Ono -->
+			<rect x="5.5" y="5.5" width="13" height="13" stroke="black"/>
+			<circle cx="12" cy="12" r="4" stroke="black"/>
+			<path d="M7.50002 7.49998L16.5 16.5" stroke="black" stroke-linecap="round" stroke-linejoin="round"/>
+			<path d="M16.5 7.49998L7.50002 16.5" stroke="black" stroke-linecap="round" stroke-linejoin="round"/>
+		</svg>
+	</defs>
 	<rect fill="#ffffff" width="100%" height="100%" x="0" y="0"/>
 	<g>
 		<g>
@@ -197,32 +205,14 @@
 						</g>
 					</g>
 				</g>
+				<use x="387" y="372" href="#mining_device" width="90" height="90"/>
 				<g>
-					<g>
-						<g>
-							<!-- FIXME -->
-						</g>
-					</g>
-					<g>
-						<g fill="rgb(0, 0, 0)" font-family="&quot;Helvetica&quot;" text-anchor="middle" font-size="12px">
-							<text x="432.5" y="458.5">ASIC miners</text>
-						</g>
+					<g fill="rgb(0, 0, 0)" font-family="&quot;Helvetica&quot;" text-anchor="middle" font-size="12px">
+						<text x="432.5" y="458.5">ASIC miners</text>
 					</g>
 				</g>
-				<g>
-					<g>
-						<g>
-							<!-- FIXME -->
-						</g>
-					</g>
-				</g>
-				<g>
-					<g>
-						<g>
-							<!-- FIXME -->
-						</g>
-					</g>
-				</g>
+				<use x="449" y="372" href="#mining_device" width="90" height="90"/>
+				<use x="511" y="372" href="#mining_device" width="90" height="90"/>
 				<g>
 					<g>
 						<path d="M 0 65 L 180 65 L 180 245 L 0 245 L 0 65 Z" fill="#fff2cc" stroke="none" pointer-events="all"/>
