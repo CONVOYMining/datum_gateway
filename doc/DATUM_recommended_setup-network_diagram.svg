@@ -334,6 +334,7 @@
 					</g>
 					<g>
 						<g fill="rgb(0, 0, 0)" font-family="&quot;Helvetica&quot;" text-anchor="middle" font-size="12px">
+							<rect fill="#fff2cc" stroke="none" x="442" y="154" width="58.64" height="28" stroke-width="0"/>
 							<text x="471.32" y="165">DATUM</text>
 							<text x="471.32" y="179">Gateway</text>
 						</g>
