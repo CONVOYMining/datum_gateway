@@ -83,7 +83,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 	struct arguments *arguments = state->input;
 	switch (key) {
 		case '?': {
-			datum_gateway_help();
+			datum_gateway_help(state->argv[0]);
 			exit(0);
 			break;
 		}

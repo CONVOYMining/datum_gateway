@@ -146,6 +146,6 @@ typedef struct {
 extern global_config_t datum_config;
 
 int datum_read_config(const char *conffile);
-void datum_gateway_help(void);
+void datum_gateway_help(const char *argv0);
 
 #endif

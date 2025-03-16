@@ -461,58 +461,54 @@ int datum_read_config(const char *conffile) {
 	return 1;
 }
 
-void datum_gateway_help(void) {
-	unsigned int i;
+void datum_gateway_help(const char * const argv0) {
 	int p;
-	char lastcat[512] = { 0 };
-	char paddots[64];
+	const char *lastcat = "";
 	
-	strcpy(paddots, "...............................................................");
+	static const char * const paddots = "..............................................................";
 	
-	printf("usage: datum_gateway [OPTION...]\n\n");
-	printf("Command line options:\n\n");
-	printf("    -c, --config=FILE ..................... Path to configuration JSON file (default: ./datum_gateway_config.json)\n");
-	printf("    -?, --help ............................ Print this help\n");
-	printf("    --version ............................. Print this software's name and version\n");
+	printf("Usage: %s [OPTION]...\n\n", argv0);
+	puts("Command line options:\n");
+	puts("    -c, --config=FILE ..................... Path to configuration JSON file (default: ./datum_gateway_config.json)");
+	puts("    -?, --help ............................ Print this help");
+	puts("    --version ............................. Print this software's name and version");
 	puts("");
-	printf("Configuration file options:\n\n{\n");
-	for (i=0;i<NUM_CONFIG_ITEMS;i++) {
-		if (strcmp(datum_config_options[i].category, lastcat)) {
-			if (i) { printf("    },\n"); }
-			printf("    \"%s\": {\n", datum_config_options[i].category);
-			strcpy(lastcat, datum_config_options[i].category);
+	puts("Configuration file options:\n\n{");
+	for (unsigned int i = 0; i < NUM_CONFIG_ITEMS; ++i) {
+		const T_DATUM_CONFIG_ITEM * const opt = &datum_config_options[i];
+		if (strcmp(opt->category, lastcat)) {
+			if (i) { puts("    },"); }
+			printf("    \"%s\": {\n", opt->category);
+			lastcat = opt->category;
 		}
-		p = 30 - strlen(datum_config_options[i].name);
+		p = 30 - strlen(opt->name);
 		if (p < 0) p = 0;
-		if (p > 62) p = 62;
-		paddots[p] = 0;
-		printf("        \"%s\": %s %s (%s", datum_config_options[i].name, paddots, datum_config_options[i].description, datum_conf_var_type_text[datum_config_options[i].var_type]);
-		paddots[p] = '.';
-		if (datum_config_options[i].required) {
-			printf(", REQUIRED)\n");
+		printf("        \"%s\": %.*s %s (%s", opt->name, p, paddots, opt->description, datum_conf_var_type_text[opt->var_type]);
+		if (opt->required) {
+			puts(", REQUIRED)");
 		} else {
-			switch(datum_config_options[i].var_type) {
+			switch (opt->var_type) {
 				case DATUM_CONF_INT: {
-					printf(", default: %d)\n",datum_config_options[i].default_int);
+					printf(", default: %d)\n", opt->default_int);
 					break;
 				}
 				
 				case DATUM_CONF_BOOL: {
-					printf(", default: %s)\n",datum_config_options[i].default_bool?"true":"false");
+					printf(", default: %s)\n", opt->default_bool ? "true" : "false");
 					break;
 				}
 				
 				case DATUM_CONF_STRING: {
-					printf(", default: \"%s\")\n",datum_config_options[i].default_string[0]);
+					printf(", default: \"%s\")\n", opt->default_string[0]);
 					break;
 				}
 				
 				default: {
-					printf(")\n");
+					puts(")");
 					break;
 				}
 			}
 		}
 	}
-	printf("    }\n}\n\n");
+	puts("    }\n}\n");
 }
