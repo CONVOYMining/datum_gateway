@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 
 project(DATUM VERSION 0.2 LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
+
+include(GNUInstallDirs)
+
 add_executable(datum_gateway
 	src/datum_api.c
 	src/datum_blocktemplates.c
@@ -98,3 +101,18 @@ target_compile_options(datum_gateway
 	${JANSSON_CFLAGS} ${JANSSON_CFLAGS_OTHER}
 	${SODIUM_CFLAGS} ${SODIUM_CFLAGS_OTHER}
 )
+
+set(PREGEN_DOC ${CMAKE_SOURCE_DIR}/doc/example_datum_gateway_config.json)
+install(FILES ${PREGEN_DOC} DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+if(NOT CMAKE_CROSSCOMPILING)
+	set(GENERATED_DOC ${CMAKE_BINARY_DIR}/CMakeFiles/generated_example_datum_gateway_config.json)
+	
+	add_custom_command(
+		TARGET datum_gateway
+		POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -DDATUM_GATEWAY=$<TARGET_FILE:datum_gateway> -DGENERATED_DOC=${GENERATED_DOC} -DPREGEN_DOC=${PREGEN_DOC} -P ${PROJECT_SOURCE_DIR}/cmake/script/VerifyExample.cmake
+		COMMENT "Verifying pre-generated documentation is up-to-date"
+		VERBATIM
+	)
+endif()
