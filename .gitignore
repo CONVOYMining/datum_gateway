@@ -9,6 +9,7 @@ datum_gateway
 
 *.conf
 *.json
+!doc/example_datum_gateway_config.json
 .DS_Store
 *.orig
 *.rej

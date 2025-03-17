@@ -1,0 +1,15 @@
+execute_process(
+	COMMAND ${DATUM_GATEWAY} --example-conf
+	OUTPUT_VARIABLE CURRENT_EXAMPLE
+	RESULT_VARIABLE _result
+)
+if (_result)
+	message(FATAL_ERROR "${DATUM_GATEWAY} exited with code ${_result}")
+endif()
+file(WRITE ${GENERATED_DOC} ${CURRENT_EXAMPLE})
+file(READ ${PREGEN_DOC} PREGEN_EXAMPLE)
+# string(STRIP ${PREGEN_EXAMPLE} PREGEN_EXAMPLE)
+# string(STRIP ${CURRENT_EXAMPLE} CURRENT_EXAMPLE)
+if(NOT "${CURRENT_EXAMPLE}" STREQUAL "${PREGEN_EXAMPLE}")
+	message(FATAL_ERROR "${PREGEN_DOC} is outdated. Update it with ${GENERATED_DOC}")
+endif()

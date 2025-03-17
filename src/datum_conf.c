@@ -49,27 +49,32 @@
 
 global_config_t datum_config;
 
-const char *datum_conf_var_type_text[] = { "N/A", "boolean", "integer", "string", "string_array" };
+const char *datum_conf_var_type_text[] = { "boolean", "integer", "string", "string_array" };
 
 const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	// Bitcoind configs
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpccookiefile",			.description = "Path to file to read RPC cookie from, for communication with local bitcoind.",
 		.required = false, .ptr = datum_config.bitcoind_rpccookiefile,			.default_string[0] = "", .max_string_len = sizeof(datum_config.bitcoind_rpccookiefile) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcuser",					.description = "RPC username for communication with local bitcoind.",
+		.example = "\"datum\"",
 		.required = false, .ptr = datum_config.bitcoind_rpcuser,			.default_string[0] = "", .max_string_len = sizeof(datum_config.bitcoind_rpcuser) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcpassword",				.description = "RPC password for communication with local bitcoind.",
+		.example = "\"something only you know\"",
 		.required = false, .ptr = datum_config.bitcoind_rpcpassword,			.default_string[0] = "", .max_string_len = sizeof(datum_config.bitcoind_rpcpassword) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "bitcoind", 	.name = "rpcurl",					.description = "RPC URL for communication with local bitcoind. (GBT Template Source)",
+		.example = "\"http://localhost:8332\"",
 		.required = true, .ptr = datum_config.bitcoind_rpcurl, .max_string_len = sizeof(datum_config.bitcoind_rpcurl) },
 	{ .var_type = DATUM_CONF_INT,	 	.category = "bitcoind", 	.name = "work_update_seconds",		.description = "How many seconds between normal work updates?  (5-120, 40 suggested)",
 		.required = false, .ptr = &datum_config.bitcoind_work_update_seconds, .default_int = 40 },
 	{ .var_type = DATUM_CONF_BOOL,	 	.category = "bitcoind", 	.name = "notify_fallback",			.description = "Fall back to less efficient methods for new block notifications. Can disable if you use blocknotify.",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.bitcoind_notify_fallback, .default_bool = true },
 	
 	// stratum v1 server configs
 	{ .var_type = DATUM_CONF_STRING, 	.category = "stratum", 		.name = "listen_addr",					.description = "IP address to listen for Stratum Gateway connections",
 		.required = false, .ptr = datum_config.stratum_v1_listen_addr,				.default_string[0] = "", .max_string_len = sizeof(datum_config.stratum_v1_listen_addr) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "listen_port",				.description = "Listening port for Stratum Gateway",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.stratum_v1_listen_port, 				.default_int = 23334 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "max_clients_per_thread",	.description = "Maximum clients per Stratum server thread",
 		.required = false, .ptr = &datum_config.stratum_v1_max_clients_per_thread, 		.default_int = 128 },
@@ -98,10 +103,13 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	
 	// mining settings
 	{ .var_type = DATUM_CONF_STRING, 	.category = "mining", 		.name = "pool_address",				.description = "Bitcoin address used for mining rewards.",
+		.example = "\"put your own Bitcoin invoice address here\"",
 		.required = true, .ptr = datum_config.mining_pool_address, .max_string_len = sizeof(datum_config.mining_pool_address) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "mining", 		.name = "coinbase_tag_primary",		.description = "Text to have in the primary coinbase tag when not using pool (overridden by DATUM Pool)",
+		.example_default = true,
 		.required = false, .ptr = datum_config.mining_coinbase_tag_primary,				.default_string[0] = "DATUM Gateway", .max_string_len = sizeof(datum_config.mining_coinbase_tag_primary) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "mining", 		.name = "coinbase_tag_secondary",	.description = "Text to have in the secondary coinbase tag (Short name/identifier)",
+		.example_default = true,
 		.required = false, .ptr = datum_config.mining_coinbase_tag_secondary,			.default_string[0] = "DATUM User", .max_string_len = sizeof(datum_config.mining_coinbase_tag_secondary) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "mining", 		.name = "coinbase_unique_id",		.description = "A unique ID between 1 and 65535. This is appended to the coinbase. Make unique per instance of datum with the same coinbase tags.",
 		.required = false, .ptr = &datum_config.coinbase_unique_id, 		.default_int = 4242 },
@@ -110,13 +118,16 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	
 	// API/dashboard
 	{ .var_type = DATUM_CONF_STRING, 	.category = "api",	 		.name = "admin_password",			.description = "API password for actions/changes (username 'admin'; disabled if blank)",
+		.example = "\"\"",
 		.required = false, .ptr = datum_config.api_admin_password,						.default_string[0] = "", .max_string_len = sizeof(datum_config.api_admin_password) },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "api", 			.name = "listen_addr",					.description = "IP address to listen for API/dashboard requests",
 		.required = false, .ptr = datum_config.api_listen_addr,				.default_string[0] = "", .max_string_len = sizeof(datum_config.api_listen_addr) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "api",	 		.name = "listen_port",				.description = "Port to listen for API/dashboard requests (0=disabled)",
+		.example = "7152",
 		.required = false, .ptr = &datum_config.api_listen_port, 						.default_int = 0 },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "api",	 		.name = "modify_conf",				.description = "Enable modifying the config file from API/dashboard",
-		.required = false, .ptr = &datum_config.api_modify_conf, 						.default_int = 0 },
+		.example_default = true,
+		.required = false, .ptr = &datum_config.api_modify_conf, 						.default_bool = false },
 	
 	// extra block submissions list
 	{ .var_type = DATUM_CONF_STRING_ARRAY, 	.category = "extra_block_submissions", 	.name = "urls",		.description = "Array of bitcoind RPC URLs to submit our blocks to directly.  Include auth info: http://user:pass@IP",
@@ -124,20 +135,26 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	
 	// logger
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "logger", 		.name = "log_to_console",			.description = "Enable logging of messages to the console",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.clog_to_console, 	.default_bool = true },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "logger", 		.name = "log_to_stderr",			.description = "Log console messages to stderr *instead* of stdout",
 		.required = false, .ptr = &datum_config.clog_to_stderr, 	.default_bool = false },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "logger", 		.name = "log_to_file",				.description = "Enable logging of messages to a file",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.clog_to_file, 		.default_bool = false },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "logger", 		.name = "log_file",					.description = "Path to file to write log messages, when enabled",
+		.example = "\"/var/log/datum.log\"",
 		.required = false, .ptr = datum_config.clog_file,			.default_string[0] = "", .max_string_len = sizeof(datum_config.clog_file) },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "logger", 		.name = "log_rotate_daily",			.description = "Rotate the message log file at midnight",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.clog_rotate_daily, 		.default_bool = true },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "logger", 		.name = "log_calling_function",		.description = "Log the name of the calling function when logging",
 		.required = false, .ptr = &datum_config.clog_calling_function, 		.default_bool = true },
 	{ .var_type = DATUM_CONF_INT, 		.category = "logger",	.name = "log_level_console",			.description = "Minimum log level for console messages (0=All, 1=Debug, 2=Info, 3=Warn, 4=Error, 5=Fatal)",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.clog_level_console, .default_int = 2 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "logger",	.name = "log_level_file",				.description = "Minimum log level for log file messages (0=All, 1=Debug, 2=Info, 3=Warn, 4=Error, 5=Fatal)",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.clog_level_file, .default_int = 1 },
 	
 	// datum options
@@ -148,12 +165,15 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	{ .var_type = DATUM_CONF_STRING, 	.category = "datum", 		.name = "pool_pubkey",					.description = "Public key of the DATUM server for initiating encrypted connection. Get from secure location, or set to empty to auto-fetch.",
 		.required = false, .ptr = datum_config.datum_pool_pubkey,		.default_string[0] = "f21f2f0ef0aa1970468f22bad9bb7f4535146f8e4a8f646bebc93da3d89b1406f40d032f09a417d94dc068055df654937922d2c89522e3e8f6f0e649de473003", .max_string_len = sizeof(datum_config.datum_pool_pubkey) },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pool_pass_workers",			.description = "Pass stratum miner usernames as sub-worker names to the pool (pool_username.miner's username)",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pool_pass_workers, 		.default_bool = true },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pool_pass_full_users",			.description = "Pass stratum miner usernames as raw usernames to the pool (use if putting multiple payout addresses on miners behind this gateway)",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pool_pass_full_users, 	.default_bool = true },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "always_pay_self",				.description = "Always include my datum.pool_username payout in my blocks if possible",
 		.required = false, .ptr = &datum_config.datum_always_pay_self, 	.default_bool = true },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pooled_mining_only",			.description = "If the DATUM pool server becomes unavailable, terminate miner connections (otherwise, 100% of any blocks you find pay mining.pool_address)",
+		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pooled_mining_only, 	.default_bool = true },
 	{ .var_type = DATUM_CONF_INT, 		.category = "datum", 		.name = "protocol_global_timeout",		.description = "If no valid messages are received from the DATUM server in this many seconds, give up and try to reconnect",
 		.required = false, .ptr = &datum_config.datum_protocol_global_timeout, 	.default_int = 60 },
@@ -212,8 +232,6 @@ void datum_config_set_default(const T_DATUM_CONFIG_ITEM *c) {
 			((char *)c->ptr)[0] = 0;
 			break;
 		}
-		
-		default: break;
 	}
 }
 
@@ -273,8 +291,6 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 			((char (*)[1024])c->ptr)[i][0] = 0;
 			return 1;
 		}
-		
-		default: break;
 	}
 	
 	return -1;
@@ -320,7 +336,7 @@ int datum_read_config(const char *conffile) {
 		// item might be valid
 		j = datum_config_parse_value(&datum_config_options[i], item);
 		if (j == -1) {
-			DLOG_ERROR("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, (datum_config_options[i].var_type<DATUM_CONF_TYPES)?datum_conf_var_type_text[datum_config_options[i].var_type]:"UNKNOWN");
+			DLOG_ERROR("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, datum_conf_var_type_text[datum_config_options[i].var_type]);
 			return -1;
 		} else if (j == -2) {
 			DLOG_ERROR("Configuration option %s.%s exceeds maximum length of %d", datum_config_options[i].category, datum_config_options[i].name, datum_config_options[i].max_string_len);
@@ -465,58 +481,106 @@ int datum_read_config(const char *conffile) {
 	return 1;
 }
 
-void datum_gateway_help(void) {
-	unsigned int i;
+void datum_gateway_help(const char * const argv0) {
 	int p;
-	char lastcat[512] = { 0 };
-	char paddots[64];
+	const char *lastcat = "";
 	
-	strcpy(paddots, "...............................................................");
+	static const char * const paddots = "..............................................................";
 	
-	printf("usage: datum_gateway [OPTION...]\n\n");
-	printf("Command line options:\n\n");
-	printf("    -c, --config=FILE ..................... Path to configuration JSON file (default: ./datum_gateway_config.json)\n");
-	printf("    -?, --help ............................ Print this help\n");
-	printf("    --version ............................. Print this software's name and version\n");
+	printf("Usage: %s [OPTION]...\n\n", argv0);
+	puts("Command line options:\n");
+	puts("    -c, --config=FILE ..................... Path to configuration JSON file (default: ./datum_gateway_config.json)");
+	puts("    -?, --help ............................ Print this help");
+	puts("    --example-conf ........................ Print an example configuration JSON file");
+	puts("    --version ............................. Print this software's name and version");
 	puts("");
-	printf("Configuration file options:\n\n{\n");
-	for (i=0;i<NUM_CONFIG_ITEMS;i++) {
-		if (strcmp(datum_config_options[i].category, lastcat)) {
-			if (i) { printf("    },\n"); }
-			printf("    \"%s\": {\n", datum_config_options[i].category);
-			strcpy(lastcat, datum_config_options[i].category);
+	puts("Configuration file options:\n\n{");
+	for (unsigned int i = 0; i < NUM_CONFIG_ITEMS; ++i) {
+		const T_DATUM_CONFIG_ITEM * const opt = &datum_config_options[i];
+		if (strcmp(opt->category, lastcat)) {
+			if (i) { puts("    },"); }
+			printf("    \"%s\": {\n", opt->category);
+			lastcat = opt->category;
 		}
-		p = 30 - strlen(datum_config_options[i].name);
+		p = 30 - strlen(opt->name);
 		if (p < 0) p = 0;
-		if (p > 62) p = 62;
-		paddots[p] = 0;
-		printf("        \"%s\": %s %s (%s", datum_config_options[i].name, paddots, datum_config_options[i].description, (datum_config_options[i].var_type<DATUM_CONF_TYPES)?datum_conf_var_type_text[datum_config_options[i].var_type]:"UNKNOWN");
-		paddots[p] = '.';
-		if (datum_config_options[i].required) {
-			printf(", REQUIRED)\n");
+		printf("        \"%s\": %.*s %s (%s", opt->name, p, paddots, opt->description, datum_conf_var_type_text[opt->var_type]);
+		if (opt->required) {
+			puts(", REQUIRED)");
 		} else {
-			switch(datum_config_options[i].var_type) {
+			switch (opt->var_type) {
 				case DATUM_CONF_INT: {
-					printf(", default: %d)\n",datum_config_options[i].default_int);
+					printf(", default: %d)\n", opt->default_int);
 					break;
 				}
 				
 				case DATUM_CONF_BOOL: {
-					printf(", default: %s)\n",datum_config_options[i].default_bool?"true":"false");
+					printf(", default: %s)\n", opt->default_bool ? "true" : "false");
 					break;
 				}
 				
 				case DATUM_CONF_STRING: {
-					printf(", default: \"%s\")\n",datum_config_options[i].default_string[0]);
+					printf(", default: \"%s\")\n", opt->default_string[0]);
 					break;
 				}
 				
 				default: {
-					printf(")\n");
+					puts(")");
 					break;
 				}
 			}
 		}
 	}
-	printf("    }\n}\n\n");
+	puts("    }\n}\n");
+}
+
+void datum_gateway_example_conf(void) {
+	const char *lastcat = "";
+	bool first = true;
+	
+	puts("{");
+	for (unsigned int i = 0; i < NUM_CONFIG_ITEMS; ++i) {
+		const T_DATUM_CONFIG_ITEM * const opt = &datum_config_options[i];
+		if (!(opt->example || opt->example_default)) {
+			continue;
+		}
+		if (strcmp(opt->category, lastcat)) {
+			if (*lastcat) { puts("\n\t},"); }
+			printf("\t\"%s\": {\n", opt->category);
+			lastcat = opt->category;
+			first = true;
+		}
+		if (first) {
+			first = false;
+		} else {
+			puts(",");
+		}
+		printf("\t\t\"%s\": ", opt->name);
+		if (opt->example) {
+			printf("%s", opt->example);
+		} else if (opt->example_default) {
+			switch (opt->var_type) {
+				case DATUM_CONF_INT: {
+					printf("%d", opt->default_int);
+					break;
+				}
+				
+				case DATUM_CONF_BOOL: {
+					printf("%s", opt->default_bool ? "true" : "false");
+					break;
+				}
+				
+				case DATUM_CONF_STRING: {
+					printf("\"%s\"", opt->default_string[0]);
+					break;
+				}
+				
+				case DATUM_CONF_STRING_ARRAY: {
+					puts("[]");
+					break;
+				}
+			}
+		}
+	}
+	puts("\n\t}\n}");
 }

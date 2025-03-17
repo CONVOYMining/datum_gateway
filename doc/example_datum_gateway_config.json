@@ -1,0 +1,34 @@
+{
+	"bitcoind": {
+		"rpcuser": "datum",
+		"rpcpassword": "something only you know",
+		"rpcurl": "http://localhost:8332",
+		"notify_fallback": true
+	},
+	"stratum": {
+		"listen_port": 23334
+	},
+	"mining": {
+		"pool_address": "put your own Bitcoin invoice address here",
+		"coinbase_tag_primary": "DATUM Gateway",
+		"coinbase_tag_secondary": "DATUM User"
+	},
+	"api": {
+		"admin_password": "",
+		"listen_port": 7152,
+		"modify_conf": false
+	},
+	"logger": {
+		"log_to_console": true,
+		"log_to_file": false,
+		"log_file": "/var/log/datum.log",
+		"log_rotate_daily": true,
+		"log_level_console": 2,
+		"log_level_file": 1
+	},
+	"datum": {
+		"pool_pass_workers": true,
+		"pool_pass_full_users": true,
+		"pooled_mining_only": true
+	}
+}
