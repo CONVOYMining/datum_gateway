@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(DATUM VERSION 0.2 LANGUAGES C)
+project(DATUM VERSION 0.2.3 LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
 add_executable(datum_gateway
 	src/datum_api.c
