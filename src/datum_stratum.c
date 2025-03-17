@@ -1098,22 +1098,12 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// need to get the extranonce together
 	pk_u32le(extranonce_bin, 0, m->sid_inv);
 	extranonce2 = json_array_get(params_obj, 2);
-	if (!extranonce2) {
+	if (json_string_length(extranonce2) != 16) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
 	extranonce2_s = json_string_value(extranonce2);
-	if (!extranonce2_s) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
-	}
-	if (strlen(extranonce2_s) != 16) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
-	}
 	for(i=0;i<8;i++) {
 		extranonce_bin[i+4] = hex2bin_uchar(&extranonce2_s[i<<1]);
 	}
@@ -1151,23 +1141,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	
 	// time offset
 	ntime = json_array_get(params_obj, 3);
-	if (!ntime) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
-	}
-	ntime_s = json_string_value(ntime);
-	if (!ntime_s) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
-	}
-	ntime_len = strlen(ntime_s);
+	ntime_len = json_string_length(ntime);
 	if (ntime_len != 8 && ntime_len != 16) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
+	ntime_s = json_string_value(ntime);
 	if (ntime_len == 8) {
 		ntime_val = (uint32_t)strtoul(ntime_s, NULL, 16);
 		pk_u32le(ntime8, 0, ntime_val);
@@ -1179,23 +1159,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	
 	// nonce
 	nonce = json_array_get(params_obj, 4);
-	if (!nonce) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
-	}
-	nonce_s = json_string_value(nonce);
-	if (!nonce_s) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
-	}
-	nonce_len = strlen(nonce_s);
+	nonce_len = json_string_length(nonce);
 	if (nonce_len != 8 && nonce_len != 16) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
+	nonce_s = json_string_value(nonce);
 	if (nonce_len == 8) {
 		nonce_val = (uint32_t)strtoul(nonce_s, NULL, 16);
 		pk_u32le(nonce8, 0, nonce_val);
