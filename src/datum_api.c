@@ -429,9 +429,12 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 		ret = MHD_NO;
 	}
 	if (ret != MHD_YES) {
-		DLOG_DEBUG("Wrong password in HTTP authentication");
+		const bool nonce_is_stale = (ret == MHD_INVALID_NONCE);
+		if (username && !nonce_is_stale) {
+			DLOG_DEBUG("Wrong password in HTTP authentication");
+		}
 		struct MHD_Response * const response = auth_failure_response_creator();
-		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, (ret == MHD_INVALID_NONCE) ? MHD_YES : MHD_NO, MHD_DIGEST_ALG_SHA256);
+		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, nonce_is_stale ? MHD_YES : MHD_NO, MHD_DIGEST_ALG_SHA256);
 		MHD_destroy_response(response);
 		return false;
 	}
