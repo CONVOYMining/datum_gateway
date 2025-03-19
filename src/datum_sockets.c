@@ -683,6 +683,7 @@ void *datum_gateway_listener_thread(void *arg) {
 	if (!datum_sockets_setup_listening_sockets("stratum", datum_config.stratum_v1_listen_addr, app->listen_port, listen_socks, &listen_socks_len)) {
 		return NULL;
 	}
+	if (listen_socks_len < 2) listen_socks[1] = -1;
 	
 	epollfd = epoll_create1(0);
 	if (epollfd < 0) {
