@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.21)
 
 project(DATUM VERSION 0.2.3 LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
+
+include(GNUInstallDirs)
+
 add_executable(datum_gateway
 	src/datum_api.c
 	src/datum_blocktemplates.c
@@ -97,3 +100,6 @@ target_compile_options(datum_gateway
 	${JANSSON_CFLAGS} ${JANSSON_CFLAGS_OTHER}
 	${SODIUM_CFLAGS} ${SODIUM_CFLAGS_OTHER}
 )
+
+install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(FILES doc/DATUM_recommended_setup-network_diagram.svg DESTINATION ${CMAKE_INSTALL_DOCDIR}/doc)
