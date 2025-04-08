@@ -42,6 +42,14 @@
 #include "datum_logger.h"
 
 void datum_utils_init(void);
+
+extern unsigned int datum_test_failed;
+bool datum_test_fail_(const char *expr, const char *file, unsigned int line, const char *func);
+#define datum_test_(expr, fake_expr, line, fake_func) \
+	((expr) ? true : datum_test_fail_(fake_expr, __FILE__, line, fake_func))
+#define datum_test(expr) \
+	datum_test_(expr, #expr, __LINE__, __func__)
+
 uint64_t current_time_millis(void);
 uint64_t current_time_micros(void);
 unsigned char hex2bin_uchar(const char *in);

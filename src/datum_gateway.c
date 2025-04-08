@@ -68,6 +68,7 @@ static char doc[] = "Decentralized Alternative Templates for Universal Mining - 
 static char args_doc[] = "";
 static struct argp_option options[] = {
 	{"help", '?', 0, 0, "Show custom help", 0},
+	{"test", 0x101, NULL, 0, "Run tests only", 0},
 	{"usage", '?', 0, 0, "Show custom help", 0},
 	{"config", 'c', "FILE", 0, "Configuration JSON file"},
 	{0}
@@ -76,6 +77,8 @@ static struct argp_option options[] = {
 struct arguments {
 	char *config_file;
 };
+
+void datum_utils_tests(void);
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 	struct arguments *arguments = state->input;
@@ -89,6 +92,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 			arguments->config_file = arg;
 			break;
 		}
+		case 0x101:  // test
+			datum_utils_tests();
+			exit(datum_test_failed);
 		default:
 			return ARGP_ERR_UNKNOWN;
 	}

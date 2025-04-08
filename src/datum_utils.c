@@ -54,7 +54,15 @@
 #include "thirdparty_segwit_addr.h"
 #include "datum_logger.h"
 
+unsigned int datum_test_failed = 0;
 volatile int panic_mode = 0;
+
+bool datum_test_fail_(const char *expr, const char *file, unsigned int line, const char *func) {
+	fprintf(stderr, "ERROR: TEST FAILED at %s:%u (%s): %s\n", file, line, func, expr);
+	fflush(stderr);
+	++datum_test_failed;
+	return false;
+}
 
 void get_target_from_diff(unsigned char *result, uint64_t diff) {
 	uint64_t dividend_parts[4] = {0, 0, 0, 0x00000000FFFF0000};
