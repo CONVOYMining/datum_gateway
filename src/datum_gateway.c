@@ -71,6 +71,7 @@ static char args_doc[] = "";
 static struct argp_option options[] = {
 	{"help", '?', 0, 0, "Show custom help", 0},
 	{"example-conf", 0x100, NULL, 0, "Print an example configuration JSON file", 0},
+	{"test", 0x101, NULL, 0, "Run tests only", 0},
 	{"usage", '?', 0, 0, "Show custom help", 0},
 	{"config", 'c', "FILE", 0, "Configuration JSON file"},
 	{0}
@@ -79,6 +80,9 @@ static struct argp_option options[] = {
 struct arguments {
 	char *config_file;
 };
+
+void datum_stratum_tests(void);
+void datum_conf_tests(void);
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 	struct arguments *arguments = state->input;
@@ -97,6 +101,10 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 			datum_gateway_example_conf();
 			exit(0);
 			break;
+		case 0x101:  // test
+			datum_conf_tests();
+			datum_stratum_tests();
+			exit(datum_test_failed);
 		default:
 			return ARGP_ERR_UNKNOWN;
 	}
