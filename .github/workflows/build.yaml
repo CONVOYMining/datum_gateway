@@ -16,8 +16,10 @@ jobs:
           - debian:latest
           - debian:stable
         config:
-          - cmake_args: "-DENABLE_API=ON"
-            extra_deps: "libmicrohttpd-dev"
+          - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
+            extra_deps: "gcc libmicrohttpd-dev"
+          - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
+            extra_deps: "clang libmicrohttpd-dev"
           - cmake_args: "-DENABLE_API=OFF"
 
     runs-on: ubuntu-latest
@@ -30,11 +32,11 @@ jobs:
         run: |
           CMD="set -ex
             apt update
-            apt install -y build-essential cmake libcurl4-openssl-dev libjansson-dev libsodium-dev pkgconf ${{ matrix.config.extra_deps }}
+            apt install -y libc6-dev cmake libcurl4-openssl-dev libjansson-dev libsodium-dev pkgconf ${{ matrix.config.extra_deps }}
             git config --global --add safe.directory /workspace
             mkdir -p build
             cd build
-            cmake /workspace ${{ matrix.config.cmake_args }}
+            cmake /workspace -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
             make -j\$(nproc)
           "
           docker run \
