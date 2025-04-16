@@ -13,6 +13,11 @@ jobs:
         os:
           - ubuntu-latest
           - ubuntu-22.04
+        config:
+          - cmake_args: "-DENABLE_API=ON"
+            extra_deps: "libmicrohttpd-dev"
+          - cmake_args: "-DENABLE_API=OFF"
+
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -23,10 +28,10 @@ jobs:
         run: mkdir -p build
         
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libjansson-dev libmicrohttpd-dev libsodium-dev
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libjansson-dev libsodium-dev ${{ matrix.config.extra_deps }}
       
       - name: Build DATUM Gateway
         run: |
           cd build
-          cmake ..
+          cmake .. ${{ matrix.config.cmake_args }}
           make -j$(nproc)
