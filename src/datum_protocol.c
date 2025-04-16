@@ -1676,12 +1676,12 @@ void *datum_protocol_client(void *args) {
 		
 		nfds = epoll_wait(epollfd, events, MAX_DATUM_CLIENT_EVENTS, 5);  // Wait for 5ms
 		
-		if (nfds == -1) {
+		if (nfds == -1 && errno != EINTR) {
 			DLOG_FATAL("epoll_wait(...) error: %s",strerror(errno));
 			break;
 		}
 		
-		if (nfds == 0) {
+		if (nfds <= 0) {
 			continue;  // Timeout, nothing happened
 		}
 		
