@@ -15,8 +15,11 @@ jobs:
           - ubuntu:22.04
           - debian:latest
           - debian:stable
+          - almalinux:latest
           - amazonlinux:latest
           - fedora:latest
+          - oraclelinux:9
+          - archlinux:latest
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
             extra_deps: "gcc"
@@ -38,11 +41,19 @@ jobs:
               PACKAGES="git libc6-dev cmake libcurl4-openssl-dev libjansson-dev libsodium-dev pkgconf"
               PACKAGES_API="libmicrohttpd-dev"
               ;;
-            amazonlinux:*|fedora:*)
+            almalinux:*|amazonlinux:*|fedora:*|oraclelinux:*)
               INSTALL_CMD="dnf install -y"
+              [[ "${{ matrix.os }}" =~ ^almalinux: ]] && INSTALL_CMD="dnf install -y dnf-plugins-core && dnf config-manager --set-enabled crb && $INSTALL_CMD"
+              [[ "${{ matrix.os }}" =~ ^oraclelinux: ]] && INSTALL_CMD="dnf install -y dnf-plugins-core && dnf config-manager --set-enabled ol9_codeready_builder && $INSTALL_CMD"
+              [[ "${{ matrix.os }}" =~ ^(alma|oracle)linux: ]] && INSTALL_CMD="dnf install -y epel-release && $INSTALL_CMD"
               PACKAGES="git cmake libcurl-devel jansson-devel libsodium-devel pkgconf"
               PACKAGES_API="libmicrohttpd-devel"
               [[ "${{ matrix.config.cmake_args }}" =~ clang|gcc ]] || PACKAGES="$PACKAGES gcc"
+              ;;
+            archlinux:*)
+              INSTALL_CMD="pacman -Syu --noconfirm"
+              PACKAGES="git base-devel cmake curl jansson libsodium"
+              PACKAGES_API="libmicrohttpd"
               ;;
           esac
           PACKAGES="$PACKAGES ${{ matrix.config.extra_deps }}"
