@@ -11,27 +11,31 @@ jobs:
     strategy:
       matrix:
         os:
-          - ubuntu-latest
-          - ubuntu-22.04
+          - ubuntu:latest
+          - ubuntu:22.04
         config:
           - cmake_args: "-DENABLE_API=ON"
             extra_deps: "libmicrohttpd-dev"
           - cmake_args: "-DENABLE_API=OFF"
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Create build directory
-        run: mkdir -p build
-        
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libjansson-dev libsodium-dev ${{ matrix.config.extra_deps }}
-      
-      - name: Build DATUM Gateway
+      - name: Build inside Docker
         run: |
-          cd build
-          cmake .. ${{ matrix.config.cmake_args }}
-          make -j$(nproc)
+          CMD="set -ex
+            apt update
+            apt install -y build-essential cmake libcurl4-openssl-dev libjansson-dev libsodium-dev pkgconf ${{ matrix.config.extra_deps }}
+            git config --global --add safe.directory /workspace
+            mkdir -p build
+            cd build
+            cmake /workspace ${{ matrix.config.cmake_args }}
+            make -j\$(nproc)
+          "
+          docker run \
+            -v "${{ github.workspace }}:/workspace":ro \
+            "${{ matrix.os }}" \
+            /bin/sh -c "${CMD}"
