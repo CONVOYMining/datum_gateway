@@ -40,12 +40,18 @@ pkg_check_modules(MICROHTTPD REQUIRED libmicrohttpd)
 pkg_check_modules(SODIUM REQUIRED libsodium)
 find_package(Threads REQUIRED)
 
-set(POW_LIBS "")
 include(CheckLibraryExists)
+include(CMakePushCheckState)
+cmake_push_check_state(RESET)
+string(APPEND CMAKE_REQUIRED_FLAGS -Wno-error)
+
+set(POW_LIBS "")
 check_library_exists(m pow "" LIBM)
 if(LIBM)
 	list(APPEND POW_LIBS "m")
 endif()
+
+cmake_pop_check_state()
 
 add_custom_target(generate_git_version
 	BYPRODUCTS ${PROJECT_BINARY_DIR}/git_version.h
