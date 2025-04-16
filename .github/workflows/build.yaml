@@ -13,6 +13,8 @@ jobs:
         os:
           - ubuntu:latest
           - ubuntu:22.04
+          - debian:latest
+          - debian:stable
         config:
           - cmake_args: "-DENABLE_API=ON"
             extra_deps: "libmicrohttpd-dev"
