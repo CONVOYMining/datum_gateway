@@ -15,11 +15,13 @@ jobs:
           - ubuntu:22.04
           - debian:latest
           - debian:stable
+          - amazonlinux:latest
+          - fedora:latest
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
-            extra_deps: "gcc libmicrohttpd-dev"
+            extra_deps: "gcc"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
-            extra_deps: "clang libmicrohttpd-dev"
+            extra_deps: "clang"
           - cmake_args: "-DENABLE_API=OFF"
 
     runs-on: ubuntu-latest
@@ -30,9 +32,25 @@ jobs:
 
       - name: Build inside Docker
         run: |
+          case "${{ matrix.os }}" in
+            debian:*|ubuntu:*)
+              INSTALL_CMD="apt update && apt install -y"
+              PACKAGES="git libc6-dev cmake libcurl4-openssl-dev libjansson-dev libsodium-dev pkgconf"
+              PACKAGES_API="libmicrohttpd-dev"
+              ;;
+            amazonlinux:*|fedora:*)
+              INSTALL_CMD="dnf install -y"
+              PACKAGES="git cmake libcurl-devel jansson-devel libsodium-devel pkgconf"
+              PACKAGES_API="libmicrohttpd-devel"
+              [[ "${{ matrix.config.cmake_args }}" =~ clang|gcc ]] || PACKAGES="$PACKAGES gcc"
+              ;;
+          esac
+          PACKAGES="$PACKAGES ${{ matrix.config.extra_deps }}"
+          if [[ "${{ matrix.config.cmake_args }}" =~ ENABLE_API=ON ]]; then
+              PACKAGES="$PACKAGES $PACKAGES_API"
+          fi
           CMD="set -ex
-            apt update
-            apt install -y libc6-dev cmake libcurl4-openssl-dev libjansson-dev libsodium-dev pkgconf ${{ matrix.config.extra_deps }}
+            ${INSTALL_CMD} ${PACKAGES}
             git config --global --add safe.directory /workspace
             mkdir -p build
             cd build
