@@ -23,6 +23,7 @@ jobs:
           - alpine:latest
           - archlinux:latest
           - clearlinux:latest
+          - gentoo/stage3:musl-hardened
           - gentoo/stage3:hardened
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
@@ -107,6 +108,7 @@ jobs:
               '
               INSTALL_CMD="emerge -1 sec-keys/openpgp-keys-gentoo-release && getuto && cat /etc/portage/make.conf && USE='-perl -extra -static-analyzer -compiler-rt -openmp -sanitize -adns -alt-svc -ftp -hsts -http2 -http3 -imap -pop3 -progress-meter -psl -quic -curl_quic_openssl -smtp -tftp -websockets -nls' emerge -vuDtkg1 --noreplace --jobs=\$(nproc) --buildpkg"
               PACKAGES="dev-vcs/git dev-build/cmake net-misc/curl dev-libs/jansson dev-libs/libsodium virtual/pkgconfig app-portage/gentoolkit"
+              [[ "${{ matrix.os }}" =~ musl ]] && PACKAGES="$PACKAGES sys-libs/argp-standalone"
               PACKAGES_API="net-libs/libmicrohttpd"
               PACKAGES_CLANG="llvm-core/clang"
               POSTINSTALL_CMD='
