@@ -20,11 +20,10 @@ jobs:
           - fedora:latest
           - oraclelinux:9
           - archlinux:latest
+          - clearlinux:latest
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
-            extra_deps: "gcc"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
-            extra_deps: "clang"
           - cmake_args: "-DENABLE_API=OFF"
 
     runs-on: ubuntu-latest
@@ -35,6 +34,8 @@ jobs:
 
       - name: Build inside Docker
         run: |
+          PACKAGES_CLANG='clang'
+          PACKAGES_GCC='gcc'
           case "${{ matrix.os }}" in
             debian:*|ubuntu:*)
               INSTALL_CMD="apt update && apt install -y"
@@ -55,10 +56,22 @@ jobs:
               PACKAGES="git base-devel cmake curl jansson libsodium"
               PACKAGES_API="libmicrohttpd"
               ;;
+            clearlinux:*)
+              INSTALL_CMD="swupd bundle-add"
+              PACKAGES="git c-basic devpkg-curl devpkg-jansson devpkg-libsodium"
+              PACKAGES_API="devpkg-libmicrohttpd"
+              PACKAGES_CLANG="llvm"
+              PACKAGES_GCC=''  # included in c-basic
+              ;;
           esac
           PACKAGES="$PACKAGES ${{ matrix.config.extra_deps }}"
           if [[ "${{ matrix.config.cmake_args }}" =~ ENABLE_API=ON ]]; then
               PACKAGES="$PACKAGES $PACKAGES_API"
+          fi
+          if [[ "${{ matrix.config.cmake_args }}" =~ CMAKE_C_COMPILER=gcc ]]; then
+              PACKAGES="$PACKAGES $PACKAGES_GCC"
+          elif [[ "${{ matrix.config.cmake_args }}" =~ CMAKE_C_COMPILER=clang ]]; then
+              PACKAGES="$PACKAGES $PACKAGES_CLANG"
           fi
           CMD="set -ex
             ${INSTALL_CMD} ${PACKAGES}
