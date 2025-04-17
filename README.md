@@ -104,6 +104,10 @@ For Oracle Linux:
     sudo dnf config-manager --set-enabled ol9_codeready_builder
     sudo dnf install cmake pkgconf libcurl-devel jansson-devel libsodium-devel libmicrohttpd-devel psmisc
 
+For Alpine (also needs a standalone argp library):
+
+    sudo apk add build-base cmake pkgconf argp-standalone curl-dev jansson-dev libsodium-dev libmicrohttpd-dev psmisc
+
 For Arch:
 
     sudo pacman -Syu base-devel cmake pkgconf curl jansson libsodium libmicrohttpd psmisc
