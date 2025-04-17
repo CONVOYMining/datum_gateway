@@ -313,6 +313,11 @@ int datum_read_config(const char *conffile) {
 		datum_config.bitcoind_work_update_seconds = 120;
 	}
 	
+#ifndef ENABLE_API
+	if (datum_config.api_listen_port) {
+		DLOG_WARN("API is enabled in configuration, but this build was compiled without API support");
+	}
+#else
 	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
 	if (datum_config.api_admin_password_len) {
 		static const char hash_tag[] = "DATUM Anti-CSRF Token";
@@ -326,6 +331,7 @@ int datum_read_config(const char *conffile) {
 		my_sha256(hash, data, data_sz);
 		hash2hex(hash, datum_config.api_csrf_token);
 	}
+#endif
 	
 	if (datum_config.stratum_v1_max_threads > MAX_THREADS) {
 		DLOG_FATAL("Maximum threads must be less than %d.", MAX_THREADS);

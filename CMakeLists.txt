@@ -3,10 +3,11 @@ cmake_minimum_required(VERSION 3.21)
 project(DATUM VERSION 0.2.3 LANGUAGES C)
 set(CMAKE_C_STANDARD 23)
 
+option(ENABLE_API "Build API support." ON)
+
 include(GNUInstallDirs)
 
 add_executable(datum_gateway
-	src/datum_api.c
 	src/datum_blocktemplates.c
 	src/datum_coinbaser.c
 	src/datum_conf.c
@@ -42,16 +43,24 @@ set(WEB_RESOURCES
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(JANSSON REQUIRED jansson)
+if(ENABLE_API)
 pkg_check_modules(MICROHTTPD REQUIRED libmicrohttpd)
+endif()
 pkg_check_modules(SODIUM REQUIRED libsodium)
 find_package(Threads REQUIRED)
 
-set(POW_LIBS "")
 include(CheckLibraryExists)
+include(CMakePushCheckState)
+cmake_push_check_state(RESET)
+string(APPEND CMAKE_REQUIRED_FLAGS -Wno-error)
+
+set(POW_LIBS "")
 check_library_exists(m pow "" LIBM)
 if(LIBM)
 	list(APPEND POW_LIBS "m")
 endif()
+
+cmake_pop_check_state()
 
 add_custom_target(generate_git_version
 	BYPRODUCTS ${PROJECT_BINARY_DIR}/git_version.h
@@ -73,14 +82,12 @@ target_include_directories(datum_gateway
 	PRIVATE
 	$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
 	${CURL_INCLUDE_DIRS}
-	${MICROHTTPD_INCLUDE_DIRS}
 	${JANSSON_INCLUDE_DIRS}
 	${SODIUM_INCLUDE_DIRS}
 )
 target_link_directories(datum_gateway
 	PUBLIC
 	${CURL_LIBRARY_DIRS}
-	${MICROHTTPD_LIBRARY_DIRS}
 	${JANSSON_LIBRARY_DIRS}
 	${SODIUM_LIBRARY_DIRS}
 )
@@ -89,17 +96,26 @@ target_link_libraries(datum_gateway
 	${POW_LIBS}
 	Threads::Threads
 	${CURL_LIBRARIES} ${CURL_LDFLAGS} ${CURL_LDFLAGS_OTHER}
-	${MICROHTTPD_LIBRARIES} ${MICROHTTPD_LDFLAGS} ${MICROHTTPD_LDFLAGS_OTHER}
 	${JANSSON_LIBRARIES} ${JANSSON_LDFLAGS} ${JANSSON_LDFLAGS_OTHER}
 	${SODIUM_LIBRARIES} ${SODIUM_LDFLAGS} ${SODIUM_LDFLAGS_OTHER}
 )
 target_compile_options(datum_gateway
 	PUBLIC
 	${CURL_CFLAGS} ${CURL_CFLAGS_OTHER}
-	${MICROHTTPD_CFLAGS} ${MICROHTTPD_CFLAGS_OTHER}
 	${JANSSON_CFLAGS} ${JANSSON_CFLAGS_OTHER}
 	${SODIUM_CFLAGS} ${SODIUM_CFLAGS_OTHER}
 )
+
+if(ENABLE_API)
+	target_sources(datum_gateway PRIVATE src/datum_api.c)
+	target_include_directories(datum_gateway PRIVATE ${MICROHTTPD_INCLUDE_DIRS})
+	target_link_directories(datum_gateway PUBLIC ${MICROHTTPD_LIBRARY_DIRS})
+	target_link_libraries(datum_gateway PUBLIC ${MICROHTTPD_LIBRARIES} ${MICROHTTPD_LDFLAGS} ${MICROHTTPD_LDFLAGS_OTHER})
+	target_compile_options(datum_gateway PUBLIC
+		-DENABLE_API
+		${MICROHTTPD_CFLAGS} ${MICROHTTPD_CFLAGS_OTHER}
+	)
+endif()
 
 install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(FILES doc/DATUM_recommended_setup-network_diagram.svg DESTINATION ${CMAKE_INSTALL_DOCDIR}/doc)
