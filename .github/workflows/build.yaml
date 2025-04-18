@@ -80,6 +80,7 @@ jobs:
             cd build
             cmake /workspace -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
             make -j\$(nproc)
+            ./datum_gateway --help
           "
           docker run \
             -v "${{ github.workspace }}:/workspace":ro \
