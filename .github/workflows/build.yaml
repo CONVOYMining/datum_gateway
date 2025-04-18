@@ -39,8 +39,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Restore package cache
+        if: startsWith(matrix.os, 'gentoo/')
+        uses: actions/cache/restore@v4
+        with:
+          path: pkg-cache
+          key: never-exists
+          restore-keys: |
+            ${{ matrix.os }}-pkg-cache-
+
       - name: Build inside Docker
+        id: docker-build
         run: |
+          PKG_CACHE_DIR=/pkg-cache
           PACKAGES_CLANG='clang'
           PACKAGES_GCC='gcc'
           case "${{ matrix.os }}" in
@@ -71,17 +82,41 @@ jobs:
               PACKAGES_GCC=''  # included in c-basic
               ;;
             gentoo/*)
+              PKG_CACHE_DIR='/var/cache/binpkgs'
               INIT_CMD='
-                emerge --sync --quiet
+                if [ -e /var/cache/binpkgs/gentoo-repo.txz ]; then
+                  rm -rf /var/db/repos/gentoo
+                  tar -C /var/db/repos -xpf /var/cache/binpkgs/gentoo-repo.txz
+                  rm /var/cache/binpkgs/gentoo-repo.txz
+
+                  cache_cksum() {
+                    find /var/db/repos/gentoo /var/cache/binpkgs -type f -print0 | sort -z | xargs -0 sha256sum
+                  }
+                  cache_cksum > /tmp/initial-pkg-cache.cksum
+
+                  emerge --sync --quiet || true  # can fail if cache is recent enough
+                else
+                  emerge --sync --quiet
+                fi
               '
               INSTALL_CMD="emerge -1 sec-keys/openpgp-keys-gentoo-release && getuto && cat /etc/portage/make.conf && USE='-perl -extra -static-analyzer -compiler-rt -openmp -sanitize -adns -alt-svc -ftp -hsts -http2 -http3 -imap -pop3 -progress-meter -psl -quic -curl_quic_openssl -smtp -tftp -websockets -nls' emerge -vuDtkg1 --noreplace --jobs=\$(nproc) --buildpkg"
-              PACKAGES="dev-vcs/git dev-build/cmake net-misc/curl dev-libs/jansson dev-libs/libsodium virtual/pkgconfig"
+              PACKAGES="dev-vcs/git dev-build/cmake net-misc/curl dev-libs/jansson dev-libs/libsodium virtual/pkgconfig app-portage/gentoolkit"
               PACKAGES_API="net-libs/libmicrohttpd"
               PACKAGES_CLANG="llvm-core/clang"
               POSTINSTALL_CMD='
                 set +ex
                 source /etc/profile
                 set -ex
+              '
+              CLEANUP_CMD='
+                if ls -d /var/db/pkg/llvm-core/clang-*; then
+                  [ -e /tmp/initial-pkg-cache.cksum ] && cache_cksum >/tmp/final-pkg-cache.cksum
+                  if ! diff -u /tmp/{initial,final}-pkg-cache.cksum; then
+                    ( cd /var/db/repos && tar --sort=name -cpJf /var/cache/binpkgs/gentoo-repo.txz gentoo )
+                    touch /output/SAVE_CACHE
+                    eclean -t 2w packages --changed-deps
+                  fi
+                fi
               '
               ;;
           esac
@@ -104,8 +139,24 @@ jobs:
             cmake /workspace -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
             make -j\$(nproc)
             ./datum_gateway --help
+            ${CLEANUP_CMD}
           "
           docker run \
+            -v ./pkg-cache:"${PKG_CACHE_DIR}" \
+            -v ./output:"/output" \
             -v "${{ github.workspace }}:/workspace":ro \
             "${{ matrix.os }}" \
             /bin/sh -c "${CMD}"
+
+          if [ -e output/SAVE_CACHE ]; then
+            echo 'save_cache=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'save_cache=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save package cache
+        if: steps.docker-build.outputs.save_cache == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: pkg-cache
+          key: ${{ matrix.os }}-pkg-cache-${{ github.sha }}
