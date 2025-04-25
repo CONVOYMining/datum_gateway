@@ -108,6 +108,7 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.stratum_v1_idle_timeout_no_share, 	.default_int = 7200 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "idle_timeout_max_last_work",	.description = "Seconds we allow a subscribed connection to be idle since its last accepted share? (0 disables)",
 		.required = false, .ptr = &datum_config.stratum_v1_idle_timeout_max_last_work, 	.default_int = 0 },
+	{ .var_type = DATUM_CONF_USERNAME_MODS, .category = "stratum", .name = "username_modifiers", .description = "Modifiers to redirect some portion of shares to alternate usernames", .required = false, .ptr = &datum_config.stratum_username_mod, },
 	
 	// mining settings
 	{ .var_type = DATUM_CONF_STRING, 	.category = "mining", 		.name = "pool_address",				.description = "Bitcoin address used for mining rewards.",

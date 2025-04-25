@@ -882,6 +882,39 @@ void stratum_update_miner_stats_accepted(T_DATUM_CLIENT_DATA *c, uint64_t diff_a
 	}
 }
 
+// CAUTION: modname MUST be part of username_s following a tilde
+const char *datum_stratum_mod_username(const char *username_s, char * const username_buf, const size_t username_buf_sz, const uint16_t share_rnd, const char * const modname, const size_t modname_len) {
+	struct datum_username_mod * const umod = datum_username_mods_find(datum_config.stratum_username_mod, modname, modname_len);
+	if (!umod) return username_s;
+	
+	struct datum_addr_range *range;
+	for (range = umod->ranges; ; ++range) {
+		if (!range->addr) return datum_config.mining_pool_address;
+		if (share_rnd <= range->max) break;
+	}
+	
+	const char * const tilde = &modname[-1];
+	if (range->addr_len == 0) {
+		size_t len = tilde - username_s;
+		if (len >= username_buf_sz) len = username_buf_sz - 1;
+		memcpy(username_buf, username_s, len);
+		username_buf[len] = '\0';
+		return username_buf;
+	}
+	
+	const char * const period = strchr(username_s, '.');
+	if (range->addr_len >= username_buf_sz || !period) {
+		return range->addr;
+	}
+	
+	memcpy(username_buf, range->addr, range->addr_len);
+	size_t len = tilde - period;
+	if (len >= username_buf_sz) len = username_buf_sz - 1;
+	memcpy(&username_buf[range->addr_len], period, len);
+	username_buf[range->addr_len + len] = '\0';
+	return username_buf;
+}
+
 int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
 	// {"params": ["username", "job", "extranonce2", "time", "nonce", "version"], "id": 1, "method": "mining.submit"}
 	// 0 = username
@@ -903,6 +936,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	const char *job_id_s;
 	const char *vroll_s;
 	const char *username_s;
+	char username_buf[0x100];
 	const char *extranonce2_s;
 	const char *ntime_s;
 	const char *nonce_s;
@@ -1184,6 +1218,16 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		username_s = json_string_value(username);
 		if (!username_s) {
 			username_s = (const char *)"NULL";
+		}
+	}
+	
+	if (datum_config.stratum_username_mod) {
+		const char * const tilde = strchr(username_s, '~');
+		if (tilde) {
+			const char * const modname = &tilde[1];
+			const size_t modname_len = json_string_length(username) - (modname - username_s);
+			const uint16_t share_rnd = upk_u16le(share_hash, 0);
+			username_s = datum_stratum_mod_username(username_s, username_buf, sizeof(username_buf), share_rnd, modname, modname_len);
 		}
 	}
 	

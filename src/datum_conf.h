@@ -121,6 +121,8 @@ typedef struct {
 	int stratum_v1_idle_timeout_no_share;
 	int stratum_v1_idle_timeout_max_last_work;
 	
+	void *stratum_username_mod;
+	
 	char mining_pool_address[256];
 	char mining_coinbase_tag_primary[64];
 	char mining_coinbase_tag_secondary[64];
