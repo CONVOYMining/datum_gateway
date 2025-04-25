@@ -64,7 +64,13 @@ At this time, you must also reserve some block space for the pool's generation t
 
 Note: This reservation requirement will be removed for Bitcoin Knots users in a future version of the DATUM Gateway thanks to support for on-the-fly specification of these metrics by the client in Knots (as of version 27.1).
 
-You must also configure a "*blocknotify*" setting to alert the Gateway of new blocks.  See Installation section.
+To avoid mining stale work, you will need to ensure the DATUM Gateway receives new block notifications from your node. It is suggested you run the DATUM Gateway as the same user as your full node and utilize the following configuration line in your bitcoin.conf:
+
+    blocknotify=killall -USR1 datum_gateway
+
+Ensure you have "killall" installed on your system (*psmisc* package on many OSs).
+
+If the node and Gateway are on different systems, you may need to utilize the "NOTIFY" endpoint on the Gateway's dashboard/API instead.
 
 Finally, the Gateway must have RPC access to your node, and you must add an RPC user to your configuration to facilitate this, as well as ensuring the service running the Gateway is whitelisted for RPC access (if not on the same machine).
 
@@ -86,15 +92,15 @@ Compile DATUM by running:
 
     cmake . && make
 
+## Usage
+
 Run the datum_gateway executable with the -? flag for detailed configuration information, descriptions, and required options.  Then construct a configuration file (defaults to "datum_gateway_config.json" in the current working directory). Be sure to also set your coinbase tags.  The primary tag setting is unused in pooled mining, however the secondary tag is intended to show on things like block explorers when you mine a block.
 
-To avoid mining stale work, you will need to ensure the DATUM Gateway receives new block notifications from your node. It is suggested you run the DATUM Gateway as the same user as your full node and utilize the following configuration line in your bitcoin.conf:
+There is an [example configuration file included in the doc/ directory](doc/example_datum_gateway_config.json) you may wish to use as a template.
+Note that the API/web admin password is also used for preventing CSRF attacks, so it is crucial you set it to something reasonably secure (or disable the API/web interface entirely).
 
-    blocknotify=killall -USR1 datum_gateway
-
-Ensure you have "killall" installed on your system (*psmisc* package on Debian-like OSs).
-
-If the node and Gateway are on different systems, you may need to utilize the "NOTIFY" endpoint on the Gateway's dashboard/API instead.
+You should review the [documentation on usernames](doc/usernames.md) next.
+Once you have everything running, you can point miners at the Gateway.
 
 ## Template/Share Requirements for Pooled Mining
 
