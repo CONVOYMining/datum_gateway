@@ -251,7 +251,7 @@ void datum_config_set_default(const T_DATUM_CONFIG_ITEM *c) {
 	}
 }
 
-int datum_config_parse_username_mods(struct datum_username_mod ** const umods_p, json_t * const item) {
+int datum_config_parse_username_mods(struct datum_username_mod ** const umods_p, json_t * const item, const bool log_errors) {
 	if (!json_object_size(item)) {
 		if (json_is_null(item) || json_is_object(item)) {
 			free(*umods_p);
@@ -315,6 +315,11 @@ int datum_config_parse_username_mods(struct datum_username_mod ** const umods_p,
 			p = &p[addr_range->addr_len + 1];
 			++addr_range;
 			if (nonce_max == 0xffff) break;
+		}
+		if (log_errors && (addr_range == umod->ranges || addr_range[-1].max != 0xffff)) {
+			double missing_percent = 100 * (1 - sum);
+			const unsigned int missing_percent_precision = datum_double_precision(&missing_percent);
+			DLOG_ERROR("Username modifier '%s' is configured to not distribute %.*f%% of shares!", modname, missing_percent_precision, missing_percent);
 		}
 		addr_range[0].addr = NULL;
 		assert((uint8_t*)addr_range <= &((uint8_t*)umod)[umod->sz]);  // otherwise we overwrote strings!
@@ -398,7 +403,7 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 		}
 		
 		case DATUM_CONF_USERNAME_MODS: {
-			return datum_config_parse_username_mods(c->ptr, item);
+			return datum_config_parse_username_mods(c->ptr, item, true);
 		}
 	}
 	

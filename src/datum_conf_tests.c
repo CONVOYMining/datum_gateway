@@ -52,7 +52,7 @@ struct datum_test_username_mods {
 
 void datum_conf_test_parse_username_mods__(const unsigned int code_line, json_t * const j_input, const char * const input, const int expected_ret, const struct datum_test_username_mods *expected_umods) {
 	struct datum_username_mod *umods = NULL;
-	int ret = datum_config_parse_username_mods(&umods, j_input);
+	int ret = datum_config_parse_username_mods(&umods, j_input, false);
 	json_decref(j_input);
 	datum_test_(ret == expected_ret, input, code_line, "return value");
 	if (ret != 1) {

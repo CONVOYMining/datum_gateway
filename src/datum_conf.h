@@ -91,7 +91,7 @@ struct datum_username_mod {
 	struct datum_addr_range ranges[];
 };
 
-int datum_config_parse_username_mods(struct datum_username_mod **umods_p, json_t *item);
+int datum_config_parse_username_mods(struct datum_username_mod **umods_p, json_t *item, bool log_errors);
 struct datum_username_mod *datum_username_mods_next(struct datum_username_mod *prev_umod);
 struct datum_username_mod *datum_username_mods_find(struct datum_username_mod *umod, const char *modname, size_t modname_len);
 
