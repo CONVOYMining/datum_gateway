@@ -733,6 +733,22 @@ uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char ke
 	return (v0 ^ v1) ^ (v2 ^ v3);
 }
 
+unsigned int datum_double_precision(double *inout_dbl) {
+	if (*inout_dbl >= 0.9) {
+		*inout_dbl = ceil(*inout_dbl);
+		return 0;
+	} else if (*inout_dbl >= 0.09) {
+		*inout_dbl = ceil(*inout_dbl * 10) / 10;
+		return 1;
+	} else if (*inout_dbl >= 0.009) {
+		*inout_dbl = ceil(*inout_dbl * 100) / 100;
+		return 2;
+	} else {
+		*inout_dbl = ceil(*inout_dbl * 1000) / 1000;
+		return 3;
+	}
+}
+
 // Uses a fixed-size buffer; positive only; digits only
 // Returns UINT64_MAX on failure
 uint64_t datum_atoi_strict_u64(const char * const s, const size_t size) {
