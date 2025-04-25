@@ -1029,6 +1029,10 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 					DLOG_ERROR("%s: %s not implemented", __func__, "DATUM_CONF_STRING_ARRAY");
 					break;
 				}
+				case DATUM_CONF_USERNAME_MODS: {
+					DLOG_ERROR("%s: %s not implemented", __func__, "DATUM_CONF_USERNAME_MODS");
+					break;
+				}
 			}
 		} else {
 			DLOG_ERROR("%s: '%.*s' not implemented", __func__, (int)(var_end - var_start_2), var_start_2);

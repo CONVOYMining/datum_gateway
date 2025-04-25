@@ -46,10 +46,12 @@
 #include <jansson.h>
 
 enum datum_conf_vartype {
+	// NOTE: Keep in sync with datum_conf_var_type_text
 	DATUM_CONF_BOOL,
 	DATUM_CONF_INT,
 	DATUM_CONF_STRING,
 	DATUM_CONF_STRING_ARRAY,
+	DATUM_CONF_USERNAME_MODS,
 };
 
 typedef struct {
@@ -75,6 +77,23 @@ typedef struct {
 
 const T_DATUM_CONFIG_ITEM *datum_config_get_option_info(const char *category, size_t category_len, const char *name, size_t name_len);
 const T_DATUM_CONFIG_ITEM *datum_config_get_option_info2(const char *category, const char *name);
+
+struct datum_addr_range {
+	char *addr;
+	size_t addr_len;
+	uint16_t max;
+};
+
+struct datum_username_mod {
+	size_t sz;
+	char *modname;
+	size_t modname_len;
+	struct datum_addr_range ranges[];
+};
+
+int datum_config_parse_username_mods(struct datum_username_mod **umods_p, json_t *item);
+struct datum_username_mod *datum_username_mods_next(struct datum_username_mod *prev_umod);
+struct datum_username_mod *datum_username_mods_find(struct datum_username_mod *umod, const char *modname, size_t modname_len);
 
 // Globally accessable config options
 typedef struct {
