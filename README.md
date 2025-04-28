@@ -106,6 +106,41 @@ Ensure you have "killall" installed on your system (*psmisc* package on Debian-l
 
 If the node and Gateway are on different systems, you may need to utilize the "NOTIFY" endpoint on the Gateway's dashboard/API instead.
 
+## Docker
+
+The DATUM Gateway is also available as a Docker image.
+
+
+### Building the Docker Image
+
+To build the DATUM Gateway Docker image:
+
+```bash
+# From the root of the repository
+docker build -t datum_gateway .
+```
+
+### Running the Container
+
+To run the DATUM Gateway container:
+
+```bash
+# Run with default configuration
+docker run -p 23334:23334 -p 7152:7152 --name datum-gateway datum_gateway
+```
+
+The container expects a configuration file at `/app/config/config.json`. Mount a volume to this path to use your own configuration:
+
+```bash
+docker run -v /path/to/your/config/directory:/app/config datum_gateway
+```
+
+You will need to disable the notify fallback in your configuration file if you are using Docker. And in bitcoin.conf, you will need to set the following:
+
+```bash
+blocknotify=wget -q -O /dev/null http://datum-gateway:7152/NOTIFY
+```
+
 ## Template/Share Requirements for Pooled Mining
 
  - Must be a valid block and conform to current Bitcoin consensus rules
