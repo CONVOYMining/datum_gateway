@@ -1,7 +1,17 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.13)
 
 project(DATUM VERSION 0.3.1 LANGUAGES C)
-set(CMAKE_C_STANDARD 23)
+
+# Enable C23 if supported, else fall back to C11 for compatibility
+if(CMAKE_VERSION VERSION_LESS "3.21")
+    # Older CMake: C23 not recognized; use C11
+    set(CMAKE_C_STANDARD 11)
+    set(CMAKE_C_STANDARD_REQUIRED ON)
+else()
+    # CMake 3.21+: C23 is available
+    set(CMAKE_C_STANDARD 23)
+    set(CMAKE_C_STANDARD_REQUIRED OFF)
+endif()
 
 option(ENABLE_API "Build API support." ON)
 
@@ -52,6 +62,7 @@ endif()
 pkg_check_modules(SODIUM REQUIRED libsodium)
 find_package(Threads REQUIRED)
 
+include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakePushCheckState)
 cmake_push_check_state(RESET)
@@ -61,6 +72,15 @@ set(POW_LIBS "")
 check_library_exists(m pow "" LIBM)
 if(LIBM)
 	list(APPEND POW_LIBS "m")
+endif()
+
+set(ARGP_LIBS "")
+check_function_exists(argp_parse HAVE_ARGP_PARSE)
+if(NOT HAVE_ARGP_PARSE)
+	check_library_exists(argp argp_parse "" ARGP)
+	if(ARGP)
+		list(APPEND ARGP_LIBS "argp")
+	endif()
 endif()
 
 cmake_pop_check_state()
@@ -98,6 +118,7 @@ target_link_libraries(datum_gateway
 	PUBLIC
 	${POW_LIBS}
 	Threads::Threads
+	${ARGP_LIBS}
 	${CURL_LIBRARIES} ${CURL_LDFLAGS} ${CURL_LDFLAGS_OTHER}
 	${JANSSON_LIBRARIES} ${JANSSON_LDFLAGS} ${JANSSON_LDFLAGS_OTHER}
 	${SODIUM_LIBRARIES} ${SODIUM_LDFLAGS} ${SODIUM_LDFLAGS_OTHER}
