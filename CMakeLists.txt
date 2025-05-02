@@ -1,7 +1,17 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.13)
 
 project(DATUM VERSION 0.2.3 LANGUAGES C)
-set(CMAKE_C_STANDARD 23)
+
+# Enable C23 if supported, else fall back to C11 for compatibility
+if(CMAKE_VERSION VERSION_LESS "3.21")
+    # Older CMake: C23 not recognized; use C11
+    set(CMAKE_C_STANDARD 11)
+    set(CMAKE_C_STANDARD_REQUIRED ON)
+else()
+    # CMake 3.21+: C23 is available
+    set(CMAKE_C_STANDARD 23)
+    set(CMAKE_C_STANDARD_REQUIRED OFF)
+endif()
 
 option(ENABLE_API "Build API support." ON)
 
