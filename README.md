@@ -88,15 +88,39 @@ Install and fully sync your Bitcoin full node. Instructions for this are beyond 
 
 Configure your node to create block templates as you desire. Be sure to reserve some space for the generation transaction, otherwise your work will not be able to fit a reward split.  See node configuration recommendations above.
 
-Install the required libraries and development packages for dependencies: cmake, pkg-config, jansson, libmicrohttpd, libsodium, and libcurl.
+Install the required libraries and development packages for dependencies: cmake, pkgconf, libcurl, jansson, libsodium, and libmicrohttpd. You may also need psmisc for your node to send blocknotify signals to the DATUM Gateway.
 
-For Debian/Ubuntu it would be:
+For Debian/Ubuntu:
 
-    sudo apt install cmake pkgconf libcurl4-openssl-dev libjansson-dev libmicrohttpd-dev libsodium-dev psmisc
+    sudo apt install cmake pkgconf libcurl4-openssl-dev libjansson-dev libsodium-dev libmicrohttpd-dev psmisc
 
-For RedHat/Fedora it would be:
+For Fedora/Amazon Linux:
 
-    sudo dnf install cmake pkgconf libcurl-devel jansson-devel libmicrohttpd-devel libsodium-devel psmisc
+    sudo dnf install cmake pkgconf libcurl-devel jansson-devel libsodium-devel libmicrohttpd-devel psmisc
+
+For Alma Linux:
+
+    sudo dnf install epel-release dnf-plugins-core
+    sudo dnf config-manager --set-enabled crb
+    sudo dnf install cmake pkgconf libcurl-devel jansson-devel libsodium-devel libmicrohttpd-devel psmisc
+
+For Oracle Linux:
+
+    sudo dnf install epel-release dnf-plugins-core
+    sudo dnf config-manager --set-enabled ol9_codeready_builder
+    sudo dnf install cmake pkgconf libcurl-devel jansson-devel libsodium-devel libmicrohttpd-devel psmisc
+
+For Alpine (also needs a standalone argp library):
+
+    sudo apk add build-base cmake pkgconf argp-standalone curl-dev jansson-dev libsodium-dev libmicrohttpd-dev psmisc
+
+For Arch:
+
+    sudo pacman -Syu base-devel cmake pkgconf curl jansson libsodium libmicrohttpd psmisc
+
+For Clear Linux:
+
+    sudo swupd bundle-add c-basic cmake pkgconf devpkg-curl devpkg-jansson devpkg-libsodium devpkg-libmicrohttpd psmisc
 
 Compile DATUM by running:
 
