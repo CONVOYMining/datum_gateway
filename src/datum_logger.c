@@ -451,7 +451,7 @@ void * datum_logger_thread(void *ptr) {
 	return NULL;
 }
 
-void datum_logger_hup_signal(int) {
+void datum_logger_hup_signal(int signum) {
 	log_reopen_signal = true;
 }
 
