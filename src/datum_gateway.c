@@ -179,11 +179,13 @@ int main(const int argc, const char * const * const argv) {
 	}
 	last_datum_protocol_connect_tsms = current_time_millis();
 	
+#ifdef ENABLE_API
 	if (datum_api_init()) {
 		DLOG_FATAL("Error initializing API interface");
 		usleep(100000);
 		exit(1);
 	}
+#endif
 	
 	if (datum_coinbaser_init()) {
 		DLOG_FATAL("Error initializing coinbaser thread");
