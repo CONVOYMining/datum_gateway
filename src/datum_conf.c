@@ -344,9 +344,12 @@ int datum_read_config(const char *conffile) {
 		}
 	}
 	
+#ifdef ENABLE_API
 	if (datum_config.api_modify_conf) {
 		datum_config.config_json = config;
-	} else {
+	} else
+#endif
+	{
 		json_decref(config);
 	}
 	
