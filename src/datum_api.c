@@ -1574,6 +1574,31 @@ int datum_api_OK(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
+#ifdef DATUM_API_FOR_UMBREL
+int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
+	char json_response[512];
+	T_DATUM_API_DASH_VARS umbreldata;
+	int json_response_len;
+	
+	datum_api_dash_stats(&umbreldata);
+	
+	json_response_len = snprintf(json_response, sizeof(json_response), "{"
+		"\"type\": \"three-stats\","
+		"\"refresh\": \"30s\","
+		"\"link\": \"\","
+		"\"items\": ["
+			"{\"title\": \"Connections\", \"text\": \"%d\", \"subtext\": \"Worker\"},"
+			"{\"title\": \"Hashrate\", \"text\": \"%.2f\", \"subtext\": \"TH/s\"}"
+		"]"
+	"}", umbreldata.STRATUM_TOTAL_CONNECTIONS, umbreldata.STRATUM_HASHRATE_ESTIMATE);
+	
+	if (json_response_len >= sizeof(json_response)) json_response_len = sizeof(json_response) - 1;
+	struct MHD_Response *response = MHD_create_response_from_buffer(json_response_len, (void *)json_response, MHD_RESPMEM_MUST_COPY);
+	MHD_add_response_header(response, "Content-Type", "application/json");
+	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
+}
+#endif
+
 int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
 	const char *time_str;
 	
@@ -1765,6 +1790,15 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 			}
 			break;
 		}
+		
+#ifdef DATUM_API_FOR_UMBREL
+		case 'u': {
+			if (!strcmp(url, "/umbrel-api")) {
+				return datum_api_umbrel_widget(connection);
+			}
+			break;
+		}
+#endif
 		
 		default: break;
 	}
