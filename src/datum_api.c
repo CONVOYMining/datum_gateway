@@ -1498,22 +1498,17 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 	return ret;
 }
 
-int datum_api_homepage(struct MHD_Connection *connection) {
-	struct MHD_Response *response;
-	char output[DATUM_API_HOMEPAGE_MAX_SIZE];
+void datum_api_dash_stats(T_DATUM_API_DASH_VARS *dashdata) {
 	int j, k = 0, kk = 0, ii;
 	T_DATUM_MINER_DATA *m;
-	T_DATUM_API_DASH_VARS vardata;
 	unsigned char astat;
 	double thr = 0.0;
 	double hr;
 	uint64_t tsms;
-	
-	memset(&vardata, 0, sizeof(T_DATUM_API_DASH_VARS));
 
 	pthread_rwlock_rdlock(&stratum_global_job_ptr_lock);
 	j = global_latest_stratum_job_index;
-	vardata.sjob = (j >= 0 && j < MAX_STRATUM_JOBS) ? global_cur_stratum_jobs[j] : NULL;
+	dashdata->sjob = (j >= 0 && j < MAX_STRATUM_JOBS) ? global_cur_stratum_jobs[j] : NULL;
 	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
 
 	tsms = current_time_millis();
@@ -1540,16 +1535,27 @@ int datum_api_homepage(struct MHD_Connection *connection) {
 				}
 			}
 		}
-		vardata.STRATUM_ACTIVE_THREADS = global_stratum_app->datum_active_threads;
-		vardata.STRATUM_TOTAL_CONNECTIONS = k;
-		vardata.STRATUM_TOTAL_SUBSCRIPTIONS = kk;
-		vardata.STRATUM_HASHRATE_ESTIMATE = thr;
+		dashdata->STRATUM_ACTIVE_THREADS = global_stratum_app->datum_active_threads;
+		dashdata->STRATUM_TOTAL_CONNECTIONS = k;
+		dashdata->STRATUM_TOTAL_SUBSCRIPTIONS = kk;
+		dashdata->STRATUM_HASHRATE_ESTIMATE = thr;
 	} else {
-		vardata.STRATUM_ACTIVE_THREADS = 0;
-		vardata.STRATUM_TOTAL_CONNECTIONS = 0;
-		vardata.STRATUM_TOTAL_SUBSCRIPTIONS = 0;
-		vardata.STRATUM_HASHRATE_ESTIMATE = 0.0;
+		dashdata->STRATUM_ACTIVE_THREADS = 0;
+		dashdata->STRATUM_TOTAL_CONNECTIONS = 0;
+		dashdata->STRATUM_TOTAL_SUBSCRIPTIONS = 0;
+		dashdata->STRATUM_HASHRATE_ESTIMATE = 0.0;
 	}
+
+}
+
+int datum_api_homepage(struct MHD_Connection *connection) {
+	struct MHD_Response *response;
+	char output[DATUM_API_HOMEPAGE_MAX_SIZE];
+	T_DATUM_API_DASH_VARS vardata;
+	
+	memset(&vardata, 0, sizeof(T_DATUM_API_DASH_VARS));
+	
+	datum_api_dash_stats(&vardata);
 	
 	output[0] = 0;
 	datum_api_fill_vars(www_home_html, output, DATUM_API_HOMEPAGE_MAX_SIZE, datum_api_fill_var, &vardata);
