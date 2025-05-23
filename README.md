@@ -141,6 +141,89 @@ You will need to disable the notify fallback in your configuration file if you a
 blocknotify=wget -q -O /dev/null http://datum-gateway:7152/NOTIFY
 ```
 
+### Connecting to a Bitcoin Node
+
+When running the DATUM Gateway in Docker, you need to configure it to connect to your Bitcoin node. The connection method depends on where your Bitcoin node is running:
+
+#### 1. Bitcoin Node Running in Docker (Same Network)
+
+If your Bitcoin node is also running in a Docker container on the same network, use the container name as the hostname:
+
+```json
+{
+  "rpc_host": "bitcoin-node",
+  "rpc_port": 8332,
+  "rpc_user": "your_rpc_user",
+  "rpc_pass": "your_rpc_password"
+}
+```
+
+In your `bitcoin.conf`, set the blocknotify to use the DATUM Gateway container name:
+
+```
+blocknotify=wget -q -O /dev/null http://datum-gateway:7152/NOTIFY
+```
+
+#### 2. Bitcoin Node Running on Host System
+
+If your Bitcoin node is running directly on the host system or in a container that binds to host ports, you have two options:
+
+**Option A: Using host.docker.internal (recommended)**
+```json
+{
+  "rpc_host": "host.docker.internal",
+  "rpc_port": 8332,
+  "rpc_user": "your_rpc_user",
+  "rpc_pass": "your_rpc_password"
+}
+```
+
+**Option B: Using host networking mode**
+Run the DATUM Gateway container with `--network host`:
+
+```bash
+docker run --network host -v /path/to/config:/app/config datum_gateway
+```
+
+Then configure using localhost:
+```json
+{
+  "rpc_host": "localhost",
+  "rpc_port": 8332,
+  "rpc_user": "your_rpc_user",
+  "rpc_pass": "your_rpc_password"
+}
+```
+
+For blocknotify in `bitcoin.conf` when using host networking:
+```
+blocknotify=wget -q -O /dev/null http://localhost:7152/NOTIFY
+```
+
+#### 3. Bitcoin Node on Remote System
+
+If your Bitcoin node is running on a different machine, use the hostname or IP address:
+
+```json
+{
+  "rpc_host": "192.168.1.100",
+  "rpc_port": 8332,
+  "rpc_user": "your_rpc_user",
+  "rpc_pass": "your_rpc_password"
+}
+```
+
+In your remote Bitcoin node's `bitcoin.conf`:
+```
+blocknotify=wget -q -O /dev/null http://datum-gateway-host-ip:7152/NOTIFY
+```
+
+**Important Notes:**
+- Ensure your Bitcoin node's RPC is configured to accept connections from the DATUM Gateway
+- For remote connections, you may need to configure `rpcbind` and `rpcallowip` in your `bitcoin.conf`
+- Always use strong RPC credentials and consider network security when exposing RPC endpoints
+- Remember to disable the notify fallback in your DATUM Gateway configuration when using Docker
+
 ## Template/Share Requirements for Pooled Mining
 
  - Must be a valid block and conform to current Bitcoin consensus rules
