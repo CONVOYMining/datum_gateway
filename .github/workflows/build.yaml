@@ -48,7 +48,8 @@ jobs:
           path: pkg-cache
           key: never-exists
           restore-keys: |
-            ${{ matrix.os }}-pkg-cache-
+            ${{ matrix.os }}/pkg-cache/${{ matrix.config.cmake_args }}/
+            ${{ matrix.os }}/pkg-cache/
 
       - name: Build inside Docker
         id: docker-build
@@ -117,13 +118,11 @@ jobs:
                 set -ex
               '
               CLEANUP_CMD='
-                if ls -d /var/db/pkg/llvm-core/clang-*; then
-                  [ -e /tmp/initial-pkg-cache.cksum ] && cache_cksum >/tmp/final-pkg-cache.cksum
-                  if ! diff -u /tmp/{initial,final}-pkg-cache.cksum; then
-                    ( cd /var/db/repos && tar --sort=name -cpJf /var/cache/binpkgs/gentoo-repo.txz gentoo )
-                    touch /output/SAVE_CACHE
-                    eclean -t 2w packages --changed-deps
-                  fi
+                [ -e /tmp/initial-pkg-cache.cksum ] && cache_cksum >/tmp/final-pkg-cache.cksum
+                if ! diff -u /tmp/{initial,final}-pkg-cache.cksum; then
+                  ( cd /var/db/repos && tar --sort=name -cpJf /var/cache/binpkgs/gentoo-repo.txz gentoo )
+                  touch /output/SAVE_CACHE
+                  eclean -t 2w packages --changed-deps
                 fi
               '
               ;;
@@ -167,4 +166,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: pkg-cache
-          key: ${{ matrix.os }}-pkg-cache-${{ github.sha }}
+          key: ${{ matrix.os }}/pkg-cache/${{ matrix.config.cmake_args }}/${{ github.sha }}
