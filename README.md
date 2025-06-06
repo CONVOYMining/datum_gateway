@@ -132,7 +132,7 @@ docker run -p 23334:23334 -p 7152:7152 --name datum-gateway datum_gateway
 The container expects a configuration file at `/app/config/config.json`. Mount a volume to this path to use your own configuration:
 
 ```bash
-docker run -v /path/to/your/config/directory:/app/config datum_gateway
+docker run -v /path/to/your/config/directory:/app/config -p 23334:23334 -p 7152:7152 datum_gateway
 ```
 
 You will need to disable the notify fallback in your configuration file if you are using Docker. And in bitcoin.conf, you will need to set the following:
