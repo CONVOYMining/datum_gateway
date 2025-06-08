@@ -33,7 +33,25 @@
  *
  */
 
+#include <stddef.h>
+#include <string.h>
+
 #include "datum_utils.h"
 
 void datum_utils_tests(void) {
+	const char * const secret = "abc";
+	const size_t secret_len = strlen(secret);
+	
+	/* equal strings */
+	datum_test(datum_secure_strequals(secret, secret_len, "abc"));
+	
+	/* guess longer than secret */
+	datum_test(!datum_secure_strequals(secret, secret_len, "abcd"));
+	
+	/* guess repeats secret but is longer */
+	datum_test(!datum_secure_strequals(secret, secret_len, "abcabc"));
+	
+	/* zero-length secret matches only on empty guess */
+	datum_test(!datum_secure_strequals("", 0, "anything"));
+	datum_test(datum_secure_strequals("", 0, ""));
 }
