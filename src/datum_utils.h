@@ -36,6 +36,7 @@
 #ifndef _DATUM_UTILS_H_
 #define _DATUM_UTILS_H_
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "datum_logger.h"
