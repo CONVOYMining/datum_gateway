@@ -48,10 +48,13 @@ void datum_utils_tests(void) {
 	/* guess longer than secret */
 	datum_test(!datum_secure_strequals(secret, secret_len, "abcd"));
 	
+	/* guess shorter than secret */
+	datum_test(!datum_secure_strequals(secret, secret_len, "ab"));
+	
 	/* guess repeats secret but is longer */
 	datum_test(!datum_secure_strequals(secret, secret_len, "abcabc"));
 	
-	/* zero-length secret matches only on empty guess */
-	datum_test(!datum_secure_strequals("", 0, "anything"));
-	datum_test(datum_secure_strequals("", 0, ""));
+	/* zero-length secret matches only on empty guess, and doesn't dereference NULL */
+	datum_test(!datum_secure_strequals(NULL, 0, "anything"));
+	datum_test(datum_secure_strequals(NULL, 0, ""));
 }
