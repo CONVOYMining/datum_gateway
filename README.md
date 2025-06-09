@@ -122,6 +122,10 @@ For Clear Linux:
 
     sudo swupd bundle-add c-basic cmake pkgconf devpkg-curl devpkg-jansson devpkg-libsodium devpkg-libmicrohttpd psmisc
 
+For FreeBSD:
+
+    sudo pkg install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim
+
 Compile DATUM by running:
 
     cmake . && make
