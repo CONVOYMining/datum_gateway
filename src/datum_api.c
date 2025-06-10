@@ -1578,9 +1578,22 @@ int datum_api_OK(struct MHD_Connection *connection) {
 int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
 	char json_response[512];
 	T_DATUM_API_DASH_VARS umbreldata;
+	char hash_unit[5];
 	int json_response_len;
 	
 	datum_api_dash_stats(&umbreldata);
+	
+	if (umbreldata.STRATUM_HASHRATE_ESTIMATE >= 1000000.0) {
+		// Convert to EH/s
+		umbreldata.STRATUM_HASHRATE_ESTIMATE /= 1000000.0;
+		strcpy(hash_unit, "EH/s");
+	} else if (umbreldata.STRATUM_HASHRATE_ESTIMATE >= 1000.0) {
+		// Convert to PH/s
+		umbreldata.STRATUM_HASHRATE_ESTIMATE /= 1000.0;
+		strcpy(hash_unit, "PH/s");
+	} else {
+		strcpy(hash_unit, "TH/s");
+	}
 	
 	json_response_len = snprintf(json_response, sizeof(json_response), "{"
 		"\"type\": \"three-stats\","
@@ -1588,9 +1601,9 @@ int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
 		"\"link\": \"\","
 		"\"items\": ["
 			"{\"title\": \"Connections\", \"text\": \"%d\", \"subtext\": \"Worker\"},"
-			"{\"title\": \"Hashrate\", \"text\": \"%.2f\", \"subtext\": \"TH/s\"}"
+			"{\"title\": \"Hashrate\", \"text\": \"%.2f\", \"subtext\": \"%s\"}"
 		"]"
-	"}", umbreldata.STRATUM_TOTAL_CONNECTIONS, umbreldata.STRATUM_HASHRATE_ESTIMATE);
+	"}", umbreldata.STRATUM_TOTAL_CONNECTIONS, umbreldata.STRATUM_HASHRATE_ESTIMATE, hash_unit);
 	
 	if (json_response_len >= sizeof(json_response)) json_response_len = sizeof(json_response) - 1;
 	struct MHD_Response *response = MHD_create_response_from_buffer(json_response_len, (void *)json_response, MHD_RESPMEM_MUST_COPY);
