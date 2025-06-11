@@ -1583,17 +1583,7 @@ int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
 	
 	datum_api_dash_stats(&umbreldata);
 	
-	if (umbreldata.STRATUM_HASHRATE_ESTIMATE >= 1000000.0) {
-		// Convert to EH/s
-		umbreldata.STRATUM_HASHRATE_ESTIMATE /= 1000000.0;
-		strcpy(hash_unit, "EH/s");
-	} else if (umbreldata.STRATUM_HASHRATE_ESTIMATE >= 1000.0) {
-		// Convert to PH/s
-		umbreldata.STRATUM_HASHRATE_ESTIMATE /= 1000.0;
-		strcpy(hash_unit, "PH/s");
-	} else {
-		strcpy(hash_unit, "TH/s");
-	}
+	dynamic_hash_unit(&umbreldata, hash_unit);
 	
 	json_response_len = snprintf(json_response, sizeof(json_response), "{"
 		"\"type\": \"three-stats\","
