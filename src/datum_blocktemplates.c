@@ -55,17 +55,25 @@
 #include "datum_stratum.h"
 
 volatile sig_atomic_t new_notify = 0;
+atomic_int new_notify_threadsafe = 0;
+static pthread_mutex_t new_notify_lock = PTHREAD_MUTEX_INITIALIZER;
 volatile char new_notify_blockhash[256] = { 0 };
 volatile int new_notify_height = 0;
 
-void datum_blocktemplates_notifynew(const char *prevhash, int height) {
+void datum_blocktemplates_notifynew_sighandler() {
 	new_notify = 1;
+}
+
+void datum_blocktemplates_notifynew(const char * const prevhash, const int height) {
+	if (prevhash && *prevhash) pthread_mutex_lock(&new_notify_lock);
+	new_notify_threadsafe = 1;
 	if (prevhash) {
 		if (prevhash[0] > 0) {
 			strncpy((char *)new_notify_blockhash, prevhash, 66);
 			if (height > new_notify_height) {
 				new_notify_height = height;
 			}
+			pthread_mutex_unlock(&new_notify_lock);
 		}
 	}
 }
@@ -470,6 +478,7 @@ void *datum_gateway_template_thread(void *args) {
 							// we got a notification of a new block, but there doesn't seem to actually be a new block.
 							// we should quickly check again instead of actually updating the stratum job
 							
+							pthread_mutex_lock(&new_notify_lock);
 							if ((new_notify_blockhash[0] > 0) && (!strcmp(t->previousblockhash,(char *)new_notify_blockhash))) {
 								// we got notified for work we already knew about
 								if (new_notify_height <= 0) {
@@ -523,6 +532,7 @@ void *datum_gateway_template_thread(void *args) {
 									was_notified = false;
 								}
 							}
+							pthread_mutex_unlock(&new_notify_lock);
 						} else {
 							i = datum_stratum_v1_global_subscriber_count();
 							DLOG_INFO("Updating standard stratum job for block %lu: %.8f BTC, %lu txns, %lu bytes (Sent to %llu stratum client%s)", (unsigned long)t->height, (double)t->coinbasevalue / (double)100000000.0, (unsigned long)t->txn_count, (unsigned long)t->txn_total_size, (unsigned long long)i, (i!=1)?"s":"");
@@ -535,11 +545,12 @@ void *datum_gateway_template_thread(void *args) {
 		}
 		gbt = NULL;
 		
-		if ((!was_notified) || (new_notify)) {
+		if ((!was_notified) || (new_notify || new_notify_threadsafe)) {
 			for(i=0;i<(((uint64_t)datum_config.bitcoind_work_update_seconds*(uint64_t)1000000)/(uint64_t)2500);i++) {
 				usleep(2500);
-				if (new_notify) {
+				if (new_notify || new_notify_threadsafe) {
 					new_notify = 0;
+					new_notify_threadsafe = 0;
 					was_notified = 1;
 					wnc = 0;
 					DLOG_INFO("NEW NETWORK BLOCK NOTIFICATION RECEIVED");

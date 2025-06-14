@@ -189,6 +189,7 @@ typedef struct {
 int datum_template_init(void);
 T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt);
 void *datum_gateway_template_thread(void *args);
+void datum_blocktemplates_notifynew_sighandler();
 void datum_blocktemplates_notifynew(const char *prevhash, int height);
 
 #endif
