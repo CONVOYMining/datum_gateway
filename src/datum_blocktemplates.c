@@ -56,6 +56,7 @@
 
 volatile sig_atomic_t new_notify = 0;
 atomic_int new_notify_threadsafe = 0;
+atomic_int notify_othercause = 0;
 static pthread_mutex_t new_notify_lock = PTHREAD_MUTEX_INITIALIZER;
 volatile char new_notify_blockhash[256] = { 0 };
 volatile int new_notify_height = 0;
@@ -76,6 +77,10 @@ void datum_blocktemplates_notifynew(const char * const prevhash, const int heigh
 			pthread_mutex_unlock(&new_notify_lock);
 		}
 	}
+}
+
+void datum_blocktemplates_notify_othercause() {
+	notify_othercause = 1;
 }
 
 T_DATUM_TEMPLATE_DATA *template_data = NULL;
@@ -448,13 +453,19 @@ void *datum_gateway_template_thread(void *args) {
 					DLOG_DEBUG("--- prevhash: %s", t->previousblockhash);
 					DLOG_DEBUG("--- txn_count: %u / sigops: %u / weight: %u / size: %u", t->txn_count, t->txn_total_sigops, t->txn_total_weight, t->txn_total_size);
 					
-					// If the previous block hash changed, we should push clean work
-					if (strcmp(t->previousblockhash, p1)) {
-						last_block_change = current_time_millis();
+					// If the previous block hash changed, or work is no longer valid, we should push clean work
+					const bool new_block = strcmp(t->previousblockhash, p1);
+					if (new_block || notify_othercause) {
+						notify_othercause = 0;
 						update_stratum_job(t,true,JOB_STATE_EMPTY_PLUS);
-						strcpy(p1, t->previousblockhash);
-						was_notified = false;
-						DLOG_INFO("NEW NETWORK BLOCK: %s (%lu)", t->previousblockhash, (unsigned long)t->height);
+						if (new_block) {
+							last_block_change = current_time_millis();
+							strcpy(p1, t->previousblockhash);
+							was_notified = false;
+							DLOG_INFO("NEW NETWORK BLOCK: %s (%lu)", t->previousblockhash, (unsigned long)t->height);
+						} else {
+							DLOG_DEBUG("Urgent work update triggered");
+						}
 						
 						// sleep for a milisecond
 						// this will let other threads churn for a moment.  we wont get all the empty jobs blasted out in a milisecond anyway

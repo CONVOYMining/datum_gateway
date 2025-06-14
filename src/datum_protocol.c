@@ -1845,6 +1845,15 @@ void *datum_protocol_client(void *args) {
 	close(epollfd);
 	datum_protocol_client_active = 0;
 	datum_queue_free(&pow_queue);
+	
+	// Wait up to 5 seconds for another thread to reconnect
+	for (i = 2000; i; --i) {
+		if (datum_protocol_client_active >= 3) break;
+		usleep(2500);
+	}
+	// ...then force a new job
+	datum_blocktemplates_notify_othercause();
+	
 	return 0;
 }
 
