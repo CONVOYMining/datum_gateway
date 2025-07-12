@@ -1630,7 +1630,7 @@ void *datum_protocol_client(void *args) {
 					server_out_buf = 0;
 				}
 			} else {
-				if (!(errno == EAGAIN || errno == EWOULDBLOCK)) {
+				if (!(errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOTCONN)) {
 					pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 					break;
 				}
