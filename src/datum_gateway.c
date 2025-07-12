@@ -105,7 +105,7 @@ static struct argp argp = {options, parse_opt, args_doc, doc};
 // END ARGP Stuff
 
 void handle_sigusr1(int sig) {
-	datum_blocktemplates_notifynew(NULL, 0);
+	datum_blocktemplates_notifynew_sighandler();
 }
 
 int main(int argc, char **argv) {
