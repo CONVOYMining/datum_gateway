@@ -25,6 +25,7 @@ jobs:
           - clearlinux:latest
           - gentoo/stage3:musl-hardened
           - gentoo/stage3:hardened
+          - freebsd
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
@@ -52,6 +53,7 @@ jobs:
             ${{ matrix.os }}/pkg-cache/
 
       - name: Build inside Docker
+        if: "!startsWith(matrix.os, 'freebsd')"
         id: docker-build
         run: |
           PKG_CACHE_DIR=/pkg-cache
@@ -167,3 +169,22 @@ jobs:
         with:
           path: pkg-cache
           key: ${{ matrix.os }}/pkg-cache/${{ matrix.config.cmake_args }}/${{ github.sha }}
+
+      - name: Build inside FreeBSD VM
+        if: startsWith(matrix.os, 'freebsd')
+        uses: vmactions/freebsd-vm@v1
+        with:
+          prepare: |
+            PACKAGES="git cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim" 
+            if echo "${{ matrix.config.cmake_args }}" | grep -q "CMAKE_C_COMPILER=gcc"; then
+              PACKAGES="$PACKAGES gcc"
+            fi
+            pkg install -y $PACKAGES
+
+          run: |
+            git config --global --add safe.directory ${{ github.workspace }}
+            mkdir -p build
+            cd build
+            cmake ${{ github.workspace }} -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
+            make
+            ./datum_gateway --help

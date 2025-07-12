@@ -76,9 +76,22 @@ set(ARGP_LIBS "")
 check_function_exists(argp_parse HAVE_ARGP_PARSE)
 if(NOT HAVE_ARGP_PARSE)
 	check_library_exists(argp argp_parse "" ARGP)
+	if(NOT ARGP AND CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+		# Workaround bug where CMake doesn't check the standard install location on FreeBSD
+		unset(ARGP CACHE)
+		check_library_exists(argp argp_parse "/usr/local/lib" ARGP)
+	endif()
 	if(ARGP)
 		list(APPEND ARGP_LIBS "argp")
 	endif()
+endif()
+
+check_function_exists(epoll_wait HAVE_EPOLL_WAIT)
+if(HAVE_EPOLL_WAIT)
+	set(EPOLL_SHIM_INCLUDE_DIRS "")
+	set(EPOLL_SHIM_LIBRARIES "")
+else()
+	pkg_check_modules(EPOLL_SHIM REQUIRED epoll-shim)
 endif()
 
 cmake_pop_check_state()
@@ -102,6 +115,7 @@ add_custom_command(
 target_include_directories(datum_gateway
 	PRIVATE
 	$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
+	${EPOLL_SHIM_INCLUDE_DIRS}
 	${CURL_INCLUDE_DIRS}
 	${JANSSON_INCLUDE_DIRS}
 	${SODIUM_INCLUDE_DIRS}
@@ -117,6 +131,7 @@ target_link_libraries(datum_gateway
 	${POW_LIBS}
 	Threads::Threads
 	${ARGP_LIBS}
+	${EPOLL_SHIM_LIBRARIES}
 	${CURL_LIBRARIES} ${CURL_LDFLAGS} ${CURL_LDFLAGS_OTHER}
 	${JANSSON_LIBRARIES} ${JANSSON_LDFLAGS} ${JANSSON_LDFLAGS_OTHER}
 	${SODIUM_LIBRARIES} ${SODIUM_LDFLAGS} ${SODIUM_LDFLAGS_OTHER}
