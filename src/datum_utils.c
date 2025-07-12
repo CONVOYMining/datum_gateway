@@ -810,16 +810,14 @@ bool datum_secure_strequals(const char *secret, const size_t secret_len, const c
 	return !acc;
 }
 
-void dynamic_hash_unit(T_DATUM_API_DASH_VARS *hash_rate, char *unit){
-	if (hash_rate->STRATUM_HASHRATE_ESTIMATE >= 1000000.0) {
-		// Convert to EH/s
-		hash_rate->STRATUM_HASHRATE_ESTIMATE /= 1000000.0;
-		strcpy(unit, "Eh/s");
-	} else if (hash_rate->STRATUM_HASHRATE_ESTIMATE >= 1000.0) {
-		// Convert to PH/s
-		hash_rate->STRATUM_HASHRATE_ESTIMATE /= 1000.0;
-		strcpy(unit, "Ph/s");
+const char *dynamic_hash_unit(double * const inout_hashrate){
+	if (*inout_hashrate >= 1000000.0) {
+		*inout_hashrate /= 1000000.0;
+		return "Eh/s";
+	} else if (*inout_hashrate >= 1000.0) {
+		*inout_hashrate /= 1000.0;
+		return "Ph/s";
 	} else {
-		strcpy(unit, "Th/s");
+		return "Th/s";
 	}
 }

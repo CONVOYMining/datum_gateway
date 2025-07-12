@@ -1578,12 +1578,12 @@ int datum_api_OK(struct MHD_Connection *connection) {
 int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
 	char json_response[512];
 	T_DATUM_API_DASH_VARS umbreldata;
-	char hash_unit[5];
+	const char *hash_unit;
 	int json_response_len;
 	
 	datum_api_dash_stats(&umbreldata);
 	
-	dynamic_hash_unit(&umbreldata, hash_unit);
+	hash_unit = dynamic_hash_unit(&umbreldata.STRATUM_HASHRATE_ESTIMATE);
 	
 	json_response_len = snprintf(json_response, sizeof(json_response), "{"
 		"\"type\": \"three-stats\","
