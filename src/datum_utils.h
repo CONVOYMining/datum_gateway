@@ -88,6 +88,11 @@ void datum_reexec();
 bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess);
 
 
+static inline size_t datum_align_sz(const size_t min_sz, const size_t alignment) {
+	return (min_sz + alignment - 1) / alignment * alignment;
+}
+
+
 static inline
 uint8_t upk_u8(const void * const bufp, const int offset)
 {

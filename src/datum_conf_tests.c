@@ -90,7 +90,7 @@ void datum_conf_test_parse_username_mods__(const unsigned int code_line, json_t 
 			++range;
 		}
 		datum_test_(!range->addr, input, code_line, "extra range");
-		datum_test_(umod->sz == ((uint8_t*)last_p - (uint8_t*)umod), input, code_line, "umod sz mismatch");
+		datum_test_(umod->sz == datum_align_sz((uint8_t*)last_p - (uint8_t*)umod, _Alignof(struct datum_username_mod)), input, code_line, "umod sz mismatch");
 		
 		umod = datum_username_mods_next(umod);
 		++expected_umods;

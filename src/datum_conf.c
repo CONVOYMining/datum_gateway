@@ -261,7 +261,7 @@ int datum_config_parse_username_mods(struct datum_username_mod ** const umods_p,
 		return -1;
 	}
 	
-	size_t sz = sizeof(**umods_p) * json_object_size(item) + sizeof(size_t);
+	size_t sz = (sizeof(**umods_p) + _Alignof(struct datum_username_mod) - 1) * (json_object_size(item) + 1);
 	const char *modname, *addr;
 	json_t *moddefn, *proportion_j;
 	bool at_least_one_mod = false;
@@ -324,9 +324,10 @@ int datum_config_parse_username_mods(struct datum_username_mod ** const umods_p,
 		addr_range[0].addr = NULL;
 		assert((uint8_t*)addr_range <= &((uint8_t*)umod)[umod->sz]);  // otherwise we overwrote strings!
 		assert(p <= &((uint8_t*)*umods_p)[sz]);  // otherwise we overran the buffer!
-		umod->sz = p - (uint8_t*)umod;
+		umod->sz = datum_align_sz(p - (uint8_t*)umod, _Alignof(struct datum_username_mod));
+		p = &((uint8_t*)umod)[umod->sz];
 	}
-	*((size_t*)p) = 0;
+	((struct datum_username_mod*)p)->sz = 0;
 	
 	return 1;
 }
