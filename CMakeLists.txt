@@ -159,6 +159,7 @@ endif()
 
 install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(FILES doc/DATUM_recommended_setup-network_diagram.svg DESTINATION ${CMAKE_INSTALL_DOCDIR}/doc)
+install(FILES doc/usernames.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 set(PREGEN_DOC ${CMAKE_SOURCE_DIR}/doc/example_datum_gateway_config.json)
 install(FILES ${PREGEN_DOC} DESTINATION ${CMAKE_INSTALL_DOCDIR})
