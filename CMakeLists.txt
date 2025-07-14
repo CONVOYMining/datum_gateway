@@ -156,3 +156,4 @@ endif()
 
 install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(FILES doc/DATUM_recommended_setup-network_diagram.svg DESTINATION ${CMAKE_INSTALL_DOCDIR}/doc)
+install(FILES doc/usernames.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
