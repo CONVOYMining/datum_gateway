@@ -80,6 +80,7 @@ long double calc_network_difficulty(const char *bits_hex);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
+unsigned int datum_double_precision(double *inout_dbl);
 uint64_t datum_atoi_strict_u64(const char *s, size_t size);
 int datum_atoi_strict(const char *s, size_t size);
 bool datum_str_to_bool_strict(const char *s, bool *out);
@@ -87,6 +88,11 @@ char **datum_deepcopy_charpp(const char * const *p);
 void datum_reexec();
 bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess);
 const char *dynamic_hash_unit(double *inout_hashrate);
+
+
+static inline size_t datum_align_sz(const size_t min_sz, const size_t alignment) {
+	return (min_sz + alignment - 1) / alignment * alignment;
+}
 
 
 static inline
