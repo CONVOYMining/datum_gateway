@@ -91,6 +91,7 @@ typedef struct {
 	int stratum_v1_max_clients;
 	int stratum_v1_max_threads;
 	int stratum_v1_max_clients_per_thread;
+	int stratum_v1_trust_proxy;
 	
 	int stratum_v1_vardiff_min;
 	int stratum_v1_vardiff_target_shares_min;
