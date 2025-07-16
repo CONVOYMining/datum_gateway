@@ -113,10 +113,13 @@ static struct argp argp = {options, parse_opt, args_doc, doc};
 // END ARGP Stuff
 
 void datum_print_banner(void) {
-	printf("\n **************************************************************************\n");
-	printf(" * DATUM Gateway --- Copyright (c) 2024 Bitcoin Ocean, LLC & Jason Hughes *\n");
-	printf(" * git commit: %-58s *\n", GIT_COMMIT_HASH);
-	printf(" **************************************************************************\n\n");
+	puts("");
+	puts(" *****************************************************************");
+	puts(" * DATUM Gateway --- Copyright (c) 2024-2025 Bitcoin Ocean, LLC, *");
+	puts(" *                     Jason Hughes, and individual contributors *");
+	printf(" * git commit: %-49s *\n", GIT_COMMIT_HASH);
+	puts(" *****************************************************************");
+	puts("");
 	fflush(stdout);
 }
 
