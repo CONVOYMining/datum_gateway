@@ -821,3 +821,15 @@ bool datum_secure_strequals(const char *secret, size_t secret_len, const char *g
 	}
 	return !acc;
 }
+
+const char *dynamic_hash_unit(double * const inout_hashrate){
+	if (*inout_hashrate >= 1000000.0) {
+		*inout_hashrate /= 1000000.0;
+		return "Eh/s";
+	} else if (*inout_hashrate >= 1000.0) {
+		*inout_hashrate /= 1000.0;
+		return "Ph/s";
+	} else {
+		return "Th/s";
+	}
+}

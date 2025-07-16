@@ -86,6 +86,7 @@ bool datum_str_to_bool_strict(const char *s, bool *out);
 char **datum_deepcopy_charpp(const char * const *p);
 void datum_reexec();
 bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess);
+const char *dynamic_hash_unit(double *inout_hashrate);
 
 
 static inline
