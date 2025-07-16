@@ -119,10 +119,13 @@ int main(int argc, char **argv) {
 	bool rejecting_stratum = false;
 	uint32_t next_reconnect_attempt_ms = 5000;
 	
-	printf("\n **************************************************************************\n");
-	printf(" * DATUM Gateway --- Copyright (c) 2024 Bitcoin Ocean, LLC & Jason Hughes *\n");
-	printf(" * git commit: %-58s *\n", GIT_COMMIT_HASH);
-	printf(" **************************************************************************\n\n");
+	puts("");
+	puts(" *****************************************************************");
+	puts(" * DATUM Gateway --- Copyright (c) 2024-2025 Bitcoin Ocean, LLC, *");
+	puts(" *                     Jason Hughes, and individual contributors *");
+	printf(" * git commit: %-49s *\n", GIT_COMMIT_HASH);
+	puts(" *****************************************************************");
+	puts("");
 	fflush(stdout);
 	
 	// listen for block notifications
