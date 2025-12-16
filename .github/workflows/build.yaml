@@ -22,7 +22,6 @@ jobs:
           - oraclelinux:9
           - alpine:latest
           - archlinux:latest
-          - clearlinux:latest
           - gentoo/stage3:musl-hardened
           - gentoo/stage3:hardened
         config:
@@ -80,13 +79,6 @@ jobs:
               INSTALL_CMD="pacman -Syu --noconfirm"
               PACKAGES="git base-devel cmake curl jansson libsodium"
               PACKAGES_API="libmicrohttpd"
-              ;;
-            clearlinux:*)
-              INSTALL_CMD="swupd bundle-add"
-              PACKAGES="git c-basic devpkg-curl devpkg-jansson devpkg-libsodium"
-              PACKAGES_API="devpkg-libmicrohttpd"
-              PACKAGES_CLANG="llvm"
-              PACKAGES_GCC=''  # included in c-basic
               ;;
             gentoo/*)
               PKG_CACHE_DIR='/var/cache/binpkgs'
