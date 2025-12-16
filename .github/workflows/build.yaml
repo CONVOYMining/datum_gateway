@@ -140,6 +140,7 @@ jobs:
             cmake /workspace -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
             make -j\$(nproc)
             ./datum_gateway --help
+            ./datum_gateway --test
             ${CLEANUP_CMD}
           "
           docker run \
@@ -180,3 +181,4 @@ jobs:
             cmake ${{ github.workspace }} -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
             make
             ./datum_gateway --help
+            ./datum_gateway --test
