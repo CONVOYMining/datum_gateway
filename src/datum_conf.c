@@ -108,6 +108,8 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = datum_config.api_admin_password,						.default_string[0] = "", .max_string_len = sizeof(datum_config.api_admin_password) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "api",	 		.name = "listen_port",				.description = "Port to listen for API/dashboard requests (0=disabled)",
 		.required = false, .ptr = &datum_config.api_listen_port, 						.default_int = 0 },
+	{ .var_type = DATUM_CONF_BOOL, 		.category = "api", 			.name = "allow_insecure_auth",		.description = "Allow insecure authentication (required for Safari)",
+		.required = false, .ptr = &datum_config.api_allow_insecure_auth,				.default_bool = false },
 	
 	// extra block submissions list
 	{ .var_type = DATUM_CONF_STRING_ARRAY, 	.category = "extra_block_submissions", 	.name = "urls",		.description = "Array of bitcoind RPC URLs to submit our blocks to directly.  Include auth info: http://user:pass@IP",

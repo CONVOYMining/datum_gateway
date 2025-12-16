@@ -98,6 +98,7 @@ typedef struct {
 	size_t api_admin_password_len;
 	char api_csrf_token[65];
 	int api_listen_port;
+	bool api_allow_insecure_auth;
 	
 	int extra_block_submissions_count;
 	char extra_block_submissions_urls[DATUM_MAX_BLOCK_SUBMITS][DATUM_CONFIG_MAX_STRING_ARRAY_LEN];
