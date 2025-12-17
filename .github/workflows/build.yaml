@@ -6,6 +6,9 @@ on:
     push:
     pull_request:
 
+env:
+  GLOBAL_CFLAGS: "-Wall -Werror"
+
 jobs:
   build:
     strategy:
@@ -137,7 +140,9 @@ jobs:
             git config --global --add safe.directory /workspace
             mkdir -p build
             cd build
-            cmake /workspace -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
+            CFLAGS='${{ env.GLOBAL_CFLAGS }}'
+            CFLAGS=\"\$CFLAGS\"' ${{ matrix.config.extra_cflags }}'
+            cmake /workspace ${{ matrix.config.cmake_args }} -DCMAKE_C_FLAGS=\"\$CFLAGS\"
             make -j\$(nproc)
             ./datum_gateway --help
             ./datum_gateway --test
@@ -178,7 +183,10 @@ jobs:
             git config --global --add safe.directory ${{ github.workspace }}
             mkdir -p build
             cd build
-            cmake ${{ github.workspace }} -DCMAKE_C_FLAGS='-Wall -Werror' ${{ matrix.config.cmake_args }}
+            CFLAGS='${{ env.GLOBAL_CFLAGS }}'
+            CFLAGS="$CFLAGS"' ${{ matrix.config.extra_cflags }}'
+            echo "Using CFLAGS: $CFLAGS"
+            cmake ${{ github.workspace }} ${{ matrix.config.cmake_args }} -DCMAKE_C_FLAGS="${CFLAGS}"
             make
             ./datum_gateway --help
             ./datum_gateway --test
