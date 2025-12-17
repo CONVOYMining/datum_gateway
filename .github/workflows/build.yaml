@@ -36,6 +36,7 @@ jobs:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_C_FLAGS=-DDATUM_API_FOR_UMBREL=ON"
+            extra_cflags: "-DDATUM_API_FOR_UMBREL"
           - cmake_args: "-DENABLE_API=OFF"
         exclude:
           # Clang configured for C11 rejects our C23 usage
