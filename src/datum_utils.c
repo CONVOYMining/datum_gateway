@@ -736,6 +736,7 @@ int datum_atoi_strict(const char * const s, const size_t size) {
 }
 
 bool datum_secure_strequals(const char *secret, size_t secret_len, const char *guess) {
+	if (!guess) return false;
 	const size_t guess_len = strlen(guess);
 	size_t acc = secret_len ^ guess_len;
 	if (!secret_len) {
