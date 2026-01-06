@@ -118,7 +118,7 @@ jobs:
                   emerge --sync --quiet
                 fi
               '
-              INSTALL_CMD="emerge -1 sec-keys/openpgp-keys-gentoo-release && getuto && cat /etc/portage/make.conf && USE='-httpsrr -perl -extra -static-analyzer compiler-rt -openmp sanitize -adns -alt-svc -ftp -hsts -http2 -http3 -imap -pop3 -progress-meter -psl -quic -curl_quic_openssl -smtp -tftp -websockets -nls' emerge -vuDtkg1 --noreplace --jobs=\$(nproc) --buildpkg"
+              INSTALL_CMD="emerge -1 sec-keys/openpgp-keys-gentoo-release && getuto && cat /etc/portage/make.conf && USE='-httpsrr -perl -extra -static-analyzer compiler-rt -openmp sanitize -adns -alt-svc -ftp -hsts -http2 -http3 -imap -pop3 -progress-meter -psl -quic -curl_quic_openssl -smtp -tftp -websockets' emerge -vuDtkg1 --noreplace --jobs=\$(nproc) --buildpkg"
               PACKAGES="dev-vcs/git dev-build/cmake net-misc/curl dev-libs/jansson dev-libs/libsodium virtual/pkgconfig app-portage/gentoolkit"
               [[ "${{ matrix.os }}" =~ musl ]] && PACKAGES="$PACKAGES sys-libs/argp-standalone"
               PACKAGES_API="net-libs/libmicrohttpd"
