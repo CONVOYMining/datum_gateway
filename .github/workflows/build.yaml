@@ -32,6 +32,8 @@ jobs:
           - gentoo/stage3:musl-hardened
           - gentoo/stage3:hardened
           - freebsd
+          - freebsd:14.4
+          - freebsd:14.4:aarch64
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
@@ -41,16 +43,20 @@ jobs:
           - os: debian:oldstable
             config:
               cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
+          # CMake can't find Threads support using GCC
+          - os: freebsd:14.4:aarch64
+            config:
+              cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
 
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Restore package cache
         if: startsWith(matrix.os, 'gentoo/')
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: pkg-cache
           key: never-exists
@@ -111,12 +117,17 @@ jobs:
                   }
                   cache_cksum > /tmp/initial-pkg-cache.cksum
 
+                  cat <<\EOF >>/etc/portage/make.conf
+          EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --quiet-build y --tree"
+          FETCHCOMMAND="$FETCHCOMMAND --progress=dot:giga"  # assumes wget default
+          EOF
+
                   emerge --sync --quiet || true  # can fail if cache is recent enough
                 else
                   emerge --sync --quiet
                 fi
               '
-              INSTALL_CMD="emerge -1 sec-keys/openpgp-keys-gentoo-release && getuto && cat /etc/portage/make.conf && emerge -vuDtkg1 @world && USE='-httpsrr -perl -extra -static-analyzer compiler-rt -openmp sanitize -adns -alt-svc -ftp -hsts -http2 -http3 -imap -pop3 -progress-meter -psl -quic -curl_quic_openssl -smtp -tftp -websockets' emerge -vuDtkg1 --noreplace --jobs=\$(nproc) --buildpkg"
+              INSTALL_CMD="emerge -1 sec-keys/openpgp-keys-gentoo-release && getuto && cat /etc/portage/make.conf && emerge -vuDkg1 @world && USE='-httpsrr -perl -extra -static-analyzer compiler-rt -openmp sanitize -adns -alt-svc -ftp -hsts -http2 -http3 -imap -pop3 -progress-meter -psl -quic -curl_quic_openssl -smtp -tftp -websockets' emerge -vuDkg1 --noreplace --jobs=\$(nproc) --buildpkg"
               PACKAGES="dev-vcs/git dev-build/cmake net-misc/curl dev-libs/jansson dev-libs/libsodium virtual/pkgconfig app-portage/gentoolkit"
               [[ "${{ matrix.os }}" =~ musl ]] && PACKAGES="$PACKAGES sys-libs/argp-standalone"
               PACKAGES_API="net-libs/libmicrohttpd"
@@ -181,7 +192,7 @@ jobs:
 
       - name: Save package cache
         if: steps.docker-build.outputs.save_cache == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: pkg-cache
           key: ${{ matrix.os }}/pkg-cache/${{ matrix.config.cmake_args }}/${{ github.sha }}
@@ -190,6 +201,8 @@ jobs:
         if: startsWith(matrix.os, 'freebsd')
         uses: vmactions/freebsd-vm@v1
         with:
+          release: ${{ contains(matrix.os, ':14.4') && '14.4' || '' }}
+          arch: ${{ endsWith(matrix.os, ':aarch64') && 'aarch64' || '' }}
           prepare: |
             PACKAGES="git cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim" 
             if echo "${{ matrix.config.cmake_args }}" | grep -q "CMAKE_C_COMPILER=gcc"; then
