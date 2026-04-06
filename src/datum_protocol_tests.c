@@ -247,11 +247,9 @@ static int datum_protocol_test_decrypt_frame(const unsigned char *wire,
 	unsigned char nonce[crypto_box_NONCEBYTES],
 	T_DATUM_PROTOCOL_HEADER *header, unsigned char *clear,
 	size_t clear_size) {
-	if (*offset + sizeof(*header) > wire_size) return -1;
-	memcpy(header, wire + *offset, sizeof(*header));
-	*((uint32_t *)header) ^= *header_key;
-	*header_key = datum_header_xor_feedback(*header_key);
-	*offset += sizeof(*header);
+	if (*offset + T_DATUM_PROTOCOL_HEADER_WIRE_BYTES > wire_size) return -1;
+	datum_header_upk(header, wire, *offset, header_key);
+	*offset += T_DATUM_PROTOCOL_HEADER_WIRE_BYTES;
 	if (!header->is_encrypted_channel || header->cmd_len < crypto_box_MACBYTES ||
 	    *offset + header->cmd_len > wire_size ||
 	    header->cmd_len - crypto_box_MACBYTES > clear_size) return -1;
@@ -298,7 +296,7 @@ static void datum_protocol_bulk_tests(void) {
 	uint32_t receiver_header_key = sending_header_key;
 	unsigned char receiver_nonce[crypto_box_NONCEBYTES];
 	memcpy(receiver_nonce, session_nonce_sender, sizeof(receiver_nonce));
-	unsigned char wire[2 * (sizeof(T_DATUM_PROTOCOL_HEADER) +
+	unsigned char wire[2 * (T_DATUM_PROTOCOL_HEADER_WIRE_BYTES +
 		DATUM_BULK_FRAGMENT_HEADER_SIZE + DATUM_BULK_FRAGMENT_DATA_SIZE +
 		crypto_box_MACBYTES)];
 	unsigned char clear[DATUM_BULK_FRAGMENT_HEADER_SIZE +

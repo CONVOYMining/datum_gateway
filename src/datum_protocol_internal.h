@@ -56,6 +56,7 @@ extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
 
 uint32_t datum_header_xor_feedback(uint32_t i);
+void datum_header_upk(T_DATUM_PROTOCOL_HEADER *h, const uint8_t *src, size_t offset, uint32_t *xor_key);
 int datum_protocol_flush_socket(int sockfd);
 void datum_protocol_bulk_reset(void);
 int datum_protocol_bulk_cmd_for_session(
