@@ -46,11 +46,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Restore package cache
         if: startsWith(matrix.os, 'gentoo/')
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: pkg-cache
           key: never-exists
@@ -181,7 +181,7 @@ jobs:
 
       - name: Save package cache
         if: steps.docker-build.outputs.save_cache == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: pkg-cache
           key: ${{ matrix.os }}/pkg-cache/${{ matrix.config.cmake_args }}/${{ github.sha }}
