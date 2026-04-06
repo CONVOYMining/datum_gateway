@@ -32,6 +32,8 @@ jobs:
           - gentoo/stage3:musl-hardened
           - gentoo/stage3:hardened
           - freebsd
+          - freebsd:14.4
+          - freebsd:14.4:aarch64
         config:
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
           - cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
@@ -41,6 +43,10 @@ jobs:
           - os: debian:oldstable
             config:
               cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=clang"
+          # CMake can't find Threads support using GCC
+          - os: freebsd:14.4:aarch64
+            config:
+              cmake_args: "-DENABLE_API=ON -DCMAKE_C_COMPILER=gcc"
 
     runs-on: ubuntu-latest
 
@@ -190,6 +196,8 @@ jobs:
         if: startsWith(matrix.os, 'freebsd')
         uses: vmactions/freebsd-vm@v1
         with:
+          release: ${{ contains(matrix.os, ':14.4') && '14.4' || '' }}
+          arch: ${{ endsWith(matrix.os, ':aarch64') && 'aarch64' || '' }}
           prepare: |
             PACKAGES="git cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim" 
             if echo "${{ matrix.config.cmake_args }}" | grep -q "CMAKE_C_COMPILER=gcc"; then
