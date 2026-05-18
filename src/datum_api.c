@@ -448,7 +448,7 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 		}
 		const enum MHD_DigestAuthAlgorithm algo = datum_api_pick_digest_algo(connection, nonce_is_stale);
 		struct MHD_Response * const response = auth_failure_response_creator();
-		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
+		ret = MHD_queue_auth_fail_response2(connection, realm, "x", response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
 		MHD_destroy_response(response);
 		return false;
 	}
