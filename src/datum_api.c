@@ -473,7 +473,7 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 			DLOG_DEBUG("Wrong password in HTTP authentication");
 		}
 		struct MHD_Response * const response = auth_failure_response_creator();
-		ret = MHD_queue_auth_fail_response2(connection, realm, datum_config.api_csrf_token, response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
+		ret = MHD_queue_auth_fail_response2(connection, realm, "x", response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
 		MHD_destroy_response(response);
 		return false;
 	}
@@ -768,7 +768,8 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_thread_dashboard(struct MHD_Connection *connection) {
+static
+struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	struct MHD_Response *response;
 	int sz=0, max_sz = 0, j, ii;
 	char *output = NULL;
@@ -784,15 +785,16 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	max_sz = www_threads_top_html_sz + www_foot_html_sz + (max_threads * 512) + 2048; // approximate max size of each row
 	output = calloc(max_sz+16,1);
 	if (!output) {
-		return MHD_NO;
+		return datum_api_create_empty_mhd_response();
 	}
-	
-	const bool have_admin = datum_config.api_admin_password_len;
 	
 	tsms = current_time_millis();
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_threads_top_html);
-	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
+	if (have_admin) {
+		sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' />", datum_config.api_csrf_token);
+	}
+	sz += snprintf(&output[sz], max_sz-1-sz, "<TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>");
 	for (j = 0; j < max_threads; ++j) {
 		thr = 0.0;
 		subs = 0;
@@ -825,9 +827,9 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 			sz += snprintf(&output[sz], max_sz-1-sz, ">Disconnect All</button></TD></TR>");
 		}
 	}
-	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE></form>");
+	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE>");
 	if (have_admin) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "<script>");
+		sz += snprintf(&output[sz], max_sz-1-sz, "</form><script>");
 		sz += snprintf(&output[sz], max_sz-1-sz, www_assets_post_js, datum_config.api_csrf_token);
 		sz += snprintf(&output[sz], max_sz-1-sz, "</script>");
 	}
@@ -835,6 +837,20 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	
 	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
+	return response;
+}
+
+static
+struct MHD_Response *datum_api_thread_dashboard_inner_noadmin() {
+	return datum_api_thread_dashboard_inner(/*have_admin*/ false);
+}
+
+static
+int datum_api_thread_dashboard(struct MHD_Connection *connection) {
+	if (!datum_api_check_admin_password_httponly(connection, datum_api_thread_dashboard_inner_noadmin)) {
+		return MHD_YES;
+	}
+	struct MHD_Response * const response = datum_api_thread_dashboard_inner(/*have_admin*/ true);
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
@@ -865,14 +881,6 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_clients_top_html);
 	
-	if (!datum_config.api_admin_password_len) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "This page requires admin access (add \"admin_password\" to \"api\" section of config file)");
-		sz += snprintf(&output[sz], max_sz-1-sz, "%s", www_foot_html);
-		
-		response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
-		MHD_add_response_header(response, "Content-Type", "text/html");
-		return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
-	}
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
 		return MHD_YES;
 	}
