@@ -785,6 +785,11 @@ int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, i
 	datum_id = coinbaser[cidx]; cidx++;
 	
 	while (cidx < cblen) {
+		if (cidx + 8 + 1 > cblen) {
+			DLOG_ERROR("Coinbaser length is invalid (mid-parsing). Using default/empty");
+			s->available_coinbase_outputs_count = 0;
+			return 0;
+		}
 		outval = upk_u64le(coinbaser, cidx); cidx+=8;
 		if ((outval + tally) > s->coinbase_value) {
 			// we can't include this value, since it would put us over our total available!
@@ -792,9 +797,10 @@ int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, i
 			break;
 		}
 		slen = coinbaser[cidx]; cidx++;
-		if ((slen < 2) || (slen > 64)) {
-			// invalid script len?!?
-			break;
+		if (slen < 2 || slen > 64 || cidx + slen > cblen) {
+			DLOG_ERROR("Script length (%d) is invalid. Using default/empty", slen);
+			s->available_coinbase_outputs_count = 0;
+			return 0;
 		}
 		
 		tally += outval;
