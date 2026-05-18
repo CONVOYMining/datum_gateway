@@ -734,7 +734,10 @@ struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	tsms = current_time_millis();
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_threads_top_html);
-	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
+	if (have_admin) {
+		sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' />", datum_config.api_csrf_token);
+	}
+	sz += snprintf(&output[sz], max_sz-1-sz, "<TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>");
 	for(j=0;j<global_stratum_app->max_threads;j++) {
 		thr = 0.0;
 		subs = 0;
@@ -767,9 +770,9 @@ struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 			sz += snprintf(&output[sz], max_sz-1-sz, ">Disconnect All</button></TD></TR>");
 		}
 	}
-	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE></form>");
+	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE>");
 	if (have_admin) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "<script>");
+		sz += snprintf(&output[sz], max_sz-1-sz, "</form><script>");
 		sz += snprintf(&output[sz], max_sz-1-sz, www_assets_post_js, datum_config.api_csrf_token);
 		sz += snprintf(&output[sz], max_sz-1-sz, "</script>");
 	}
