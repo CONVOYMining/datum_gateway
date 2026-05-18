@@ -775,7 +775,7 @@ int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, i
 	
 	if (cblen < 9) {
 		// 0 outputs possible
-		DLOG_WARN("Coinbaser lentgh is invalid (too short). Using default/empty");
+		DLOG_WARN("Coinbaser length is invalid (too short). Using default/empty");
 		s->available_coinbase_outputs_count = 0;
 		return 0;
 	}
