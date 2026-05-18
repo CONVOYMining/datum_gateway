@@ -533,6 +533,10 @@ size_t datum_api_fill_authfail_error(const char * const var_start, const size_t 
 	return www_auth_failed_html_sz;
 }
 
+static struct MHD_Response *datum_api_create_response_authfail_config_view() {
+	return datum_api_create_response_authfail(www_config_noauth_top_html, www_config_noauth_top_html_sz);
+}
+
 static struct MHD_Response *datum_api_create_response_authfail_config() {
 	const size_t max_sz = www_config_errors_html_sz + www_auth_failed_html_sz;
 	
@@ -1087,6 +1091,10 @@ int datum_api_config_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	size_t sz = 0, max_sz = 0;
 	char *output = NULL;
+	
+	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_config_view)) {
+		return MHD_YES;
+	}
 	
 	max_sz = www_config_html_sz * 2;
 	output = malloc(max_sz);
