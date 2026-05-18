@@ -822,14 +822,6 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_clients_top_html);
 	
-	if (!datum_config.api_admin_password_len) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "This page requires admin access (add \"admin_password\" to \"api\" section of config file)");
-		sz += snprintf(&output[sz], max_sz-1-sz, "%s", www_foot_html);
-		
-		response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
-		MHD_add_response_header(response, "Content-Type", "text/html");
-		return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
-	}
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
 		return MHD_YES;
 	}
