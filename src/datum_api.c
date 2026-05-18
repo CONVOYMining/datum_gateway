@@ -713,7 +713,8 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_thread_dashboard(struct MHD_Connection *connection) {
+static
+struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	struct MHD_Response *response;
 	int sz=0, max_sz = 0, j, ii;
 	char *output = NULL;
@@ -727,10 +728,8 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	max_sz = www_threads_top_html_sz + www_foot_html_sz + (global_stratum_app->max_threads * 512) + 2048; // approximate max size of each row
 	output = calloc(max_sz+16,1);
 	if (!output) {
-		return MHD_NO;
+		return datum_api_create_empty_mhd_response();
 	}
-	
-	const bool have_admin = datum_config.api_admin_password_len;
 	
 	tsms = current_time_millis();
 	
@@ -778,6 +777,20 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	
 	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
+	return response;
+}
+
+static
+struct MHD_Response *datum_api_thread_dashboard_inner_noadmin() {
+	return datum_api_thread_dashboard_inner(/*have_admin*/ false);
+}
+
+static
+int datum_api_thread_dashboard(struct MHD_Connection *connection) {
+	if (!datum_api_check_admin_password_httponly(connection, datum_api_thread_dashboard_inner_noadmin)) {
+		return MHD_YES;
+	}
+	struct MHD_Response * const response = datum_api_thread_dashboard_inner(/*have_admin*/ true);
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
