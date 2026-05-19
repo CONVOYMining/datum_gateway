@@ -596,7 +596,7 @@ void datum_gateway_example_conf(void) {
 				}
 				
 				case DATUM_CONF_STRING_ARRAY: {
-					puts("[]");
+					printf("[]");
 					break;
 				}
 			}
