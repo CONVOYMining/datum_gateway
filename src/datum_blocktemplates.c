@@ -61,7 +61,7 @@ volatile int new_notify_height = 0;
 void datum_blocktemplates_notifynew(const char *prevhash, int height) {
 	new_notify = 1;
 	if (prevhash) {
-		if (prevhash[0] > 0) {
+		if (prevhash[0]) {
 			strncpy((char *)new_notify_blockhash, prevhash, 66);
 			if (height > new_notify_height) {
 				new_notify_height = height;
