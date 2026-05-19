@@ -242,6 +242,7 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 				if (!json_is_string(value)) return -1;
 				if (i >= DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1) return -3;
 				const size_t value_len = json_string_length(value);
+				if (value_len == 0) return -4;
 				if (value_len > c->max_string_len - 1) return -2;
 				memcpy(arr[i], json_string_value(value), value_len);
 				arr[i][value_len] = '\0';
@@ -295,6 +296,9 @@ int datum_read_config(const char *conffile) {
 		if (j != 1) {
 			if (j == -3) {
 				DLOG_ERROR("Configuration option %s.%s exceeds maximum list size of %u", datum_config_options[i].category, datum_config_options[i].name, (unsigned int)(DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1));
+				return -1;
+			} else if (j == -4) {
+				DLOG_ERROR("Configuration option %s.%s cannot include empty strings", datum_config_options[i].category, datum_config_options[i].name);
 				return -1;
 			}
 			DLOG_ERROR("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, (datum_config_options[i].var_type<DATUM_CONF_TYPES)?datum_conf_var_type_text[datum_config_options[i].var_type]:"UNKNOWN");
