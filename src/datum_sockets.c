@@ -693,8 +693,7 @@ void datum_socket_setoptions(int sock) {
 	
 	// Set the TCP_NODELAY option
 	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(int)) < 0) {
-		DLOG_FATAL("setsockopt(TCP_NODELAY) failed: %s", strerror(errno));
-		panic_from_thread(__LINE__);
+		DLOG_WARN("setsockopt(TCP_NODELAY) failed: %s", strerror(errno));
 	}
 }
 
