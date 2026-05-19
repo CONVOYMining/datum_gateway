@@ -58,7 +58,7 @@ typedef struct {
 	int max_string_len;
 	int default_int;
 	bool default_bool;
-	const char *default_string[DATUM_CONFIG_MAX_ARRAY_ENTRIES];
+	const char *default_string[1];
 	
 	void *ptr;
 	
