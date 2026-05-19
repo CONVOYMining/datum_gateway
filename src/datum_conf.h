@@ -44,6 +44,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "datum_utils.h"
+
 #define DATUM_CONF_BOOL 1
 #define DATUM_CONF_INT 2
 #define DATUM_CONF_STRING 3
@@ -137,11 +139,17 @@ void datum_gateway_help(void);
 
 static inline
 size_t datum_expected_n_global_nonstale_shares(const global_config_t * const cfg) {
-	return ((
-		(uint64_t)cfg->stratum_v1_max_clients_per_thread *
-		(uint64_t)cfg->stratum_v1_vardiff_target_shares_min *
-		(uint64_t)cfg->stratum_v1_share_stale_seconds *
-		16) + 59) / 60;
+	// NOTE: If we use size_t too early, 32-bit gets capped at a mere 71 MB
+	uint64_t c;
+	bool overflow =
+		ckd_mul(&c, cfg->stratum_v1_max_clients_per_thread,
+		               cfg->stratum_v1_vardiff_target_shares_min) ||
+		ckd_mul(&c, c, cfg->stratum_v1_share_stale_seconds) ||
+		ckd_mul(&c, c, 16) ||
+		ckd_add(&c, c, 59);
+	c /= 60;  // seconds per minute
+	overflow |= (c > SIZE_MAX);  // check *after* division
+	return overflow ? 0 : (size_t)c;
 }
 
 #endif

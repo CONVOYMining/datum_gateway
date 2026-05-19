@@ -60,6 +60,11 @@ void datum_stratum_dupes_init(void *sdata_v) {
 	dupes = sdata->dupes;
 	
 	dupes->max_items = datum_expected_n_global_nonstale_shares(&datum_config);
+	if (!dupes->max_items) {
+		DLOG_FATAL("Dupe struct requires more RAM than we have virtual memory space!");
+		panic_from_thread(__LINE__);
+		return;
+	}
 	
 	dupes->ptr = calloc(dupes->max_items, sizeof(T_DATUM_STRATUM_DUPE_ITEM));
 	if (!dupes->ptr) {
