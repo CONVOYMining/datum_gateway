@@ -236,15 +236,16 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 			size_t index;
 			json_t *value;
 			int i = 0;
+			char (* const arr)[DATUM_CONFIG_MAX_STRING_ARRAY_LEN] = c->ptr;
 			
 			json_array_foreach(item, index, value) {
 				if (!json_is_string(value)) return -1;
 				if (i >= DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1) return -3;
-				strncpy(((char (*)[1024])c->ptr)[i], json_string_value(value), c->max_string_len-1);
-				((char (*)[1024])c->ptr)[i][c->max_string_len-1] = 0;
+				strncpy(arr[i], json_string_value(value), c->max_string_len-1);
+				arr[i][c->max_string_len-1] = '\0';
 				i++;
 			}
-			((char (*)[1024])c->ptr)[i][0] = 0;
+			arr[i][0] = '\0';
 			return 1;
 		}
 		
