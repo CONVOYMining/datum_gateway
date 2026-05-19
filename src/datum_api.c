@@ -1235,7 +1235,7 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		status->need_restart = true;
 	} else if (0 == strcmp(key, "bitcoind_rpcurl")) {
 		if (0 == strcmp(val, datum_config.bitcoind_rpcurl)) return true;
-		if (strlen(val) > 128) {
+		if (strlen(val) >= sizeof(datum_config.bitcoind_rpcurl)) {
 			json_array_append_new(errors, json_string_nocheck("bitcoind RPC URL is too long"));
 			return false;
 		}
@@ -1243,7 +1243,7 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		datum_api_json_modify_new("bitcoind", "rpcurl", json_string(val));
 	} else if (0 == strcmp(key, "bitcoind_rpcuser")) {
 		if (0 == strcmp(val, datum_config.bitcoind_rpcuser)) return true;
-		if (strlen(val) > 128) {
+		if (strlen(val) >= sizeof(datum_config.bitcoind_rpcuser)) {
 			json_array_append_new(errors, json_string_nocheck("bitcoind RPC user is too long"));
 			return false;
 		}
@@ -1253,7 +1253,7 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 	} else if (0 == strcmp(key, "bitcoind_rpcpassword")) {
 		if (0 == strcmp(val, datum_config.bitcoind_rpcpassword)) return true;
 		if (!val[0]) return true;  // no password change
-		if (strlen(val) > 128) {
+		if (strlen(val) >= sizeof(datum_config.bitcoind_rpcpassword)) {
 			json_array_append_new(errors, json_string_nocheck("bitcoind RPC password is too long"));
 			return false;
 		}
