@@ -1017,10 +1017,7 @@ int datum_protocol_send_hello(int sockfd) {
 	hello_msg[i] = 0xFE; i++;
 	
 	// pick our initial sending_header_key
-	hello_msg[i] = rand(); i++;
-	hello_msg[i] = rand(); i++;
-	hello_msg[i] = rand(); i++;
-	hello_msg[i] = rand(); i++;
+	randombytes_buf(&hello_msg[i], 4); i += 4;
 	
 	nk = upk_u32le(hello_msg, i - 4);
 	
