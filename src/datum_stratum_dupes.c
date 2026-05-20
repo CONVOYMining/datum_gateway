@@ -38,6 +38,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <inttypes.h>
+#include <stdint.h>
 
 #include "datum_stratum_dupes.h"
 #include "datum_stratum.h"

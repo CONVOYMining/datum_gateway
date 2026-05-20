@@ -35,6 +35,7 @@
 
 // This is quick and dirty for now.  Will be improved over time.
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <microhttpd.h>
