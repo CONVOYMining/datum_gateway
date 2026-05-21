@@ -59,14 +59,15 @@ void datum_stratum_dupes_init(void *sdata_v) {
 	
 	dupes = sdata->dupes;
 	
-	dupes->ptr = calloc(datum_expected_n_global_nonstale_shares(&datum_config), sizeof(T_DATUM_STRATUM_DUPE_ITEM) );
+	dupes->max_items = datum_expected_n_global_nonstale_shares(&datum_config);
+	
+	dupes->ptr = calloc(dupes->max_items, sizeof(T_DATUM_STRATUM_DUPE_ITEM));
 	if (!dupes->ptr) {
-		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %lu bytes)",(unsigned long)datum_expected_n_global_nonstale_shares(&datum_config) * sizeof(T_DATUM_STRATUM_DUPE_ITEM));
+		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %llu bytes)", (unsigned long long)(dupes->max_items * sizeof(T_DATUM_STRATUM_DUPE_ITEM)));
 		panic_from_thread(__LINE__);
 		return;
 	}
 	
-	dupes->max_items = datum_expected_n_global_nonstale_shares(&datum_config);
 	dupes->current_items = 0;
 	
 	DLOG_DEBUG("Initialized dupe check thread data. %"PRIu64" bytes of RAM used for %d max entries @ %p for %p", (uint64_t)dupes->max_items * (uint64_t)sizeof(T_DATUM_STRATUM_DUPE_ITEM), dupes->max_items, dupes, sdata);
