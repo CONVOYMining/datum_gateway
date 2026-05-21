@@ -138,9 +138,9 @@ void datum_gateway_help(void);
 static inline
 size_t datum_expected_n_global_nonstale_shares(const global_config_t * const cfg) {
 	return
-		cfg->stratum_v1_max_clients_per_thread *
-		cfg->stratum_v1_vardiff_target_shares_min *
-		(cfg->stratum_v1_share_stale_seconds / 60) *
+		(uint64_t)cfg->stratum_v1_max_clients_per_thread *
+		(uint64_t)cfg->stratum_v1_vardiff_target_shares_min *
+		(uint64_t)(cfg->stratum_v1_share_stale_seconds / 60) *
 		16;
 }
 
