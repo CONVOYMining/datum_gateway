@@ -53,7 +53,7 @@ void datum_conf_test_expected_n_global_nonstale_shares(void) {
 	cfg.stratum_v1_max_clients_per_thread = 4096;
 	cfg.stratum_v1_vardiff_target_shares_min = 8096;
 	cfg.stratum_v1_share_stale_seconds = 150;
-	datum_test(datum_expected_n_global_nonstale_shares(&cfg) == 1061158912UL);
+	datum_test(datum_expected_n_global_nonstale_shares(&cfg) == 1326448640UL);
 }
 
 void datum_conf_tests(void) {
