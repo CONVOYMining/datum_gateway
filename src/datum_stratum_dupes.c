@@ -59,14 +59,14 @@ void datum_stratum_dupes_init(void *sdata_v) {
 	
 	dupes = sdata->dupes;
 	
-	dupes->ptr = calloc((datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16), sizeof(T_DATUM_STRATUM_DUPE_ITEM) );
+	dupes->ptr = calloc(datum_expected_n_global_nonstale_shares(&datum_config), sizeof(T_DATUM_STRATUM_DUPE_ITEM) );
 	if (!dupes->ptr) {
-		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %lu bytes)",(unsigned long)(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16) * sizeof(T_DATUM_STRATUM_DUPE_ITEM));
+		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %lu bytes)",(unsigned long)datum_expected_n_global_nonstale_shares(&datum_config) * sizeof(T_DATUM_STRATUM_DUPE_ITEM));
 		panic_from_thread(__LINE__);
 		return;
 	}
 	
-	dupes->max_items = (datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16);
+	dupes->max_items = datum_expected_n_global_nonstale_shares(&datum_config);
 	dupes->current_items = 0;
 	
 	DLOG_DEBUG("Initialized dupe check thread data. %"PRIu64" bytes of RAM used for %d max entries @ %p for %p", (uint64_t)dupes->max_items * (uint64_t)sizeof(T_DATUM_STRATUM_DUPE_ITEM), dupes->max_items, dupes, sdata);
@@ -388,7 +388,7 @@ void datum_stratum_dupes_codetest(void) {
 		t+=1000000000;
 	}
 	
-	for(i=0;i<(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16)*80;i++) {
+	for(i=0;i<datum_expected_n_global_nonstale_shares(&datum_config)*80;i++) {
 		en[0]=i%256;
 		en[7]=en[0]^0xAA;
 		nonce = ((i&0xFFFF)<<16)|(((i>>2)&0xFFFF)^0xFFFF);
@@ -408,7 +408,7 @@ void datum_stratum_dupes_codetest(void) {
 	
 	uint64_t starttsms, endtsms;
 	starttsms = current_time_millis();
-	for(i=0;i<(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16)*8;i++) {
+	for(i=0;i<datum_expected_n_global_nonstale_shares(&datum_config)*8;i++) {
 		en[0]=i%256;
 		en[7]=en[0]^0xAA;
 		nonce = ((i&0xFFFF)<<16)|(((i>>2)&0xFFFF)^0xFFFF);
@@ -418,7 +418,7 @@ void datum_stratum_dupes_codetest(void) {
 		}
 	}
 	endtsms = current_time_millis();
-	DLOG_DEBUG("%d dupe checks took %"PRIu64" miliseconds", (datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16)*80, endtsms-starttsms);
+	DLOG_DEBUG("%zu dupe checks took %"PRIu64" miliseconds", datum_expected_n_global_nonstale_shares(&datum_config)*80, endtsms-starttsms);
 	
 	free(stratum_job_list);
 }
