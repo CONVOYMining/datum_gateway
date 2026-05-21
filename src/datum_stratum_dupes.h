@@ -36,13 +36,9 @@
 #ifndef _DATUM_STRATUM_DUPES_H_
 #define _DATUM_STRATUM_DUPES_H_
 
-#ifndef uint64_t
-	#include <stdint.h>
-#endif
-
-#ifndef bool
-	#include <stdbool.h>
-#endif
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 typedef struct T_DATUM_STRATUM_DUPE_ITEM {
 	// things to compare against, in order, to check our list
@@ -65,8 +61,8 @@ typedef struct T_DATUM_STRATUM_DUPES {
 	// memory - we target 8 shares per minute per connection.
 	// suggested items: datum_expected_n_global_nonstale_shares(&datum_config)
 	T_DATUM_STRATUM_DUPE_ITEM *ptr;
-	int max_items;
-	int current_items;
+	size_t max_items;
+	size_t current_items;
 } T_DATUM_STRATUM_DUPES;
 
 void datum_stratum_dupes_init(void *vsdata);
