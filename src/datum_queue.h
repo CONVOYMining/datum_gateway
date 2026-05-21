@@ -36,27 +36,27 @@
 #ifndef _DATUM_QUEUE_H_
 #define _DATUM_QUEUE_H_
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
 typedef struct {
 	volatile bool initialized;
-	int max_entries;
+	size_t max_entries;
 	pthread_rwlock_t active_buffer_rwlock;
 	int active_buffer;
 	uint64_t active_buffer_version;
 	pthread_rwlock_t buffer_rwlock[2];
-	int queue_next[2];
+	size_t queue_next[2];
 	uint64_t queue_version[2];
 	size_t item_size;
-	int buf_idx[2];
 	void *buffer[2];
 	// pointer to processor function
 	int (*item_handler)(void *);
 } DATUM_QUEUE;
 
-int datum_queue_prep(DATUM_QUEUE *q, const int max_items, const int item_size, int (*item_handler)(void *));
-int datum_queue_process(DATUM_QUEUE *q);
+int datum_queue_prep(DATUM_QUEUE *q, const size_t max_items, const size_t item_size, int (*item_handler)(void *));
+size_t datum_queue_process(DATUM_QUEUE *q);
 int datum_queue_add_item(DATUM_QUEUE *q, void *item);
 int datum_queue_free(DATUM_QUEUE *q);
 
