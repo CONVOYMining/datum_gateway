@@ -144,7 +144,6 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	struct upload_buffer upload_data;
 	json_error_t err = { };
 	struct curl_slist *headers = NULL;
-	char len_hdr[64];
 	char curl_err_str[CURL_ERROR_SIZE];
 	bool check_for_result = true;
 	
@@ -170,10 +169,9 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	
 	upload_data.buf = rpc_req;
 	upload_data.len = strlen(rpc_req);
-	sprintf(len_hdr, "Content-Length: %lu",(unsigned long) upload_data.len);
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_data.len);
 	
 	headers = curl_slist_append(headers, "Content-type: application/json");
-	headers = curl_slist_append(headers, len_hdr);
 	headers = curl_slist_append(headers, "Expect:");
 	
 	if (extra_header) {
