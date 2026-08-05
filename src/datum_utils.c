@@ -824,6 +824,7 @@ void datum_reexec() {
 	// execv shouldn't return!
 	
 	DLOG_FATAL("Failed to restart! We're too deep in to recover!");
+	sleep(1);
 	abort();
 }
 
