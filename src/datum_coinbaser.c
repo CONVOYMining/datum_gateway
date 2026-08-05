@@ -37,6 +37,7 @@
 // It's kind of unlikely that a sane miner would be purposefully providing empty templates, but
 // this is a low priority bug to address nonetheless.
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
