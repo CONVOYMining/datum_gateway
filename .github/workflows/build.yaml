@@ -107,6 +107,11 @@ jobs:
             gentoo/*)
               PKG_CACHE_DIR='/var/cache/binpkgs'
               INIT_CMD='
+                cat <<\EOF >>/etc/portage/make.conf
+          EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --quiet-build y --tree"
+          FETCHCOMMAND="$FETCHCOMMAND --progress=dot:giga"  # assumes wget default
+          EOF
+
                 if [ -e /var/cache/binpkgs/gentoo-repo.txz ]; then
                   rm -rf /var/db/repos/gentoo
                   tar -C /var/db/repos -xpf /var/cache/binpkgs/gentoo-repo.txz
@@ -116,11 +121,6 @@ jobs:
                     find /var/db/repos/gentoo /var/cache/binpkgs -type f -print0 | sort -z | xargs -0 sha256sum
                   }
                   cache_cksum > /tmp/initial-pkg-cache.cksum
-
-                  cat <<\EOF >>/etc/portage/make.conf
-          EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --quiet-build y --tree"
-          FETCHCOMMAND="$FETCHCOMMAND --progress=dot:giga"  # assumes wget default
-          EOF
 
                   emerge --sync --quiet || true  # can fail if cache is recent enough
                 else
