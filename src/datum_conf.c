@@ -293,7 +293,11 @@ int datum_config_parse_username_mods(struct datum_username_mod ** const umods_p,
 	}
 	
 	uint8_t *p = malloc(sz);
-	assert(p);
+	if (!p) {
+		fprintf(stderr, "%s: Couldn't allocate memory (%llu bytes)\n", __func__, (unsigned long long)sz);
+		fflush(stderr);
+		abort();
+	}
 	*umods_p = (struct datum_username_mod*)p;
 	json_object_foreach(item, modname, moddefn) {
 		if (json_is_null(moddefn)) continue;
