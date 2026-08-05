@@ -47,6 +47,7 @@ set(WEB_RESOURCES
 	www/coinbaser_top.html
 	www/config.html
 	www/config_errors.html
+	www/config_noauth_top.html
 	www/config_restart.html
 	www/threads_top.html
 	www/foot.html
