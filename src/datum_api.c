@@ -933,7 +933,7 @@ void *datum_api_thread(void *ptr) {
 	}
 	
 	daemon = MHD_start_daemon(MHD_USE_AUTO | MHD_USE_INTERNAL_POLLING_THREAD, datum_config.api_listen_port, NULL, NULL, &datum_api_answer, NULL,
-	                          MHD_OPTION_CONNECTION_LIMIT, 128,
+	                          MHD_OPTION_CONNECTION_LIMIT, (unsigned int)128,
 	                          MHD_OPTION_NOTIFY_COMPLETED, datum_api_request_completed, NULL,
 	                          MHD_OPTION_END);
 	
