@@ -38,6 +38,7 @@
 
 #include <sodium.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "datum_stratum.h"
 
