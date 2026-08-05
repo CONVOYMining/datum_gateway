@@ -69,7 +69,7 @@ void datum_blocktemplates_notifynew(const char * const prevhash, const int heigh
 	if (prevhash && *prevhash) pthread_mutex_lock(&new_notify_lock);
 	new_notify_threadsafe = 1;
 	if (prevhash) {
-		if (prevhash[0] > 0) {
+		if (prevhash[0]) {
 			strncpy((char *)new_notify_blockhash, prevhash, 66);
 			if (height > new_notify_height) {
 				new_notify_height = height;
