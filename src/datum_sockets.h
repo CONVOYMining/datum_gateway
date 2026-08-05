@@ -40,6 +40,7 @@
 	#include "datum_blocktemplates.h"
 #endif
 
+#include <stdint.h>
 #include <sys/epoll.h>
 #include <pthread.h>
 
