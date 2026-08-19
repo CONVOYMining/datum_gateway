@@ -48,7 +48,7 @@ The protocol is not specific to a pooled reward system, as the Gateway coordinat
 
 This list is not extensive, but the main goal is the have a stable system for your Bitcoin node and the Gateway such that your node is processing new incoming blocks and getting templates to the Gateway as quickly as possible.  While this may all work on relatively low end hardware, your mileage may vary.
 
-No modifications to the Bitcoin node source code is required for the Gateway, as it uses the standard GBT mechanism for template fetch.
+No modifications to the Bitcoin node source code are required for SHA256d mining; the Gateway uses standard GBT. BLAKE2b header-v2 mining (Antminer A3) needs a Knots node built with the POW change, plus `mining.pow_algorithm` set to `blake2b`.
 
 The following external libraries are required:
  - libcurl
@@ -139,6 +139,17 @@ Note that the API/web admin password is also used for preventing CSRF attacks, s
 
 You should review the [documentation on usernames](doc/usernames.md) next.
 Once you have everything running, you can point miners at the Gateway.
+
+### BLAKE2b header v2 (Antminer A3 + Knots POW change)
+
+Current Bitcoin Knots `getblocktemplate` on the blake2b POW branch still looks like BIP22 GBT. It does not send DATUM-specific keys such as `powalgorithm` or `xor_key`. To serve an Antminer A3 (or other Sia-style BLAKE2b hasher) against that node, set:
+
+    "mining": {
+        "pow_algorithm": "blake2b",
+        "allow_hasher_time_rolling": false
+    }
+
+`auto` (the default) stays on SHA256d unless GBT advertises blake2b via `powalgorithm`, `header_version`, `rules`, `coinbaseaux.blake2b_headline`, or version bit `0x80000000`. `allow_hasher_time_rolling` only matters once the node is committing `UseTimeOffset` in header 1.
 
 ## Docker
 
@@ -272,6 +283,7 @@ blocknotify=wget -q -O /dev/null http://datum-gateway-host-ip:7152/NOTIFY
 
 - By default, if the connection with the pool is lost and fails to reconnect, the Gateway will disconnect all stratum clients. This way miners can use their built-in failover and switch to non-DATUM mining, or an alternate/backup Gateway.
 - Accepted/rejected share counts on mining hardware may not perfectly match with the pool. The delta may vary depending on the Gateway's configuration. This is because shares are first accepted or rejected as valid for your local template based on your local node, and then again accepted or rejected based on the pool's requirements, latency to the pool (stale work), latency between your node and the network (stale work), etc.  Stratum v1 has no mechanism to report back to the miner that previously accepted work is now rejected, and it doesn't make sense to wait for the pool before responding, either.
+- **Share statistics**: The status page always shows local shares accepted/rejected by this Gateway. When a pool host is configured, it also shows shares accepted/rejected by the DATUM pool. Those two series are tracked separately and can differ (see above). When no pool host is configured, pool share counts are shown as N/A.
 
 **Most importantly**, please note that this is currently a public **BETA** release. While best efforts have been made to ensure this software is as stable and as useful as possible, you may still encounter issues.
 

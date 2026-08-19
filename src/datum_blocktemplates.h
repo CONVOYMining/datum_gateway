@@ -172,6 +172,14 @@ typedef struct {
 	
 	char		block_target_hex[72]; //
 	uint8_t		block_target[32]; // calculated from bits
+
+	uint32_t	header_version; // 0 = SHA256d / BIP22; 2 = Knots header-v2 / BLAKE2b
+	uint32_t	header_transaction_count; //
+	uint8_t		header_flags; //
+	uint32_t	header_time_offset; //
+	uint8_t		xor_key_mask_clear_bits; //
+	uint8_t		xor_key[16]; //
+	uint8_t		merge_mining_rhs[32]; //
 	
 	uint32_t 	txn_count;
 	uint32_t	txn_total_weight;
@@ -189,6 +197,7 @@ typedef struct {
 extern const char *datum_blocktemplates_error;
 
 int datum_template_init(void);
+bool datum_gbt_parse_header_fields(json_t *gbt, T_DATUM_TEMPLATE_DATA *tdata);
 T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt);
 void *datum_gateway_template_thread(void *args);
 void datum_blocktemplates_notifynew_sighandler();

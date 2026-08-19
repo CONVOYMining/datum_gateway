@@ -318,6 +318,16 @@ int append_bitcoin_varint_hex(uint64_t n, char *s) {
 }
 
 int append_UNum_hex(uint64_t n, char *s) {
+	if (n == 0) {
+		memcpy(s, "00", 3); // OP_0
+		return 2;
+	}
+	if (n <= 16) {
+		uchar_to_hex(s, (uint8_t)(0x50 + n)); // OP_1 through OP_16
+		s[2] = '\0';
+		return 2;
+	}
+	
 	int count = 0;
 	uint64_t temp = n;
 	bool last_msb = false;

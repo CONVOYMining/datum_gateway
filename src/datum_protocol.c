@@ -74,6 +74,7 @@
 #include "datum_blocktemplates.h"
 #include "datum_coinbaser.h"
 #include "datum_queue.h"
+#include "datum_pow.h"
 #include "git_version.h"
 
 atomic_int datum_protocol_client_active = 0;
@@ -141,8 +142,8 @@ unsigned char datum_protocol_setup_new_job_idx(void *sx) {
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
 	
-	memset(&datum_jobs[a], 0, sizeof(T_DATUM_PROTOCOL_JOB));
-	
+	// Keep server_sjob / server_has_* so a recycled slot does not drop the
+	// remote cache until a share for the new job is actually sent.
 	datum_jobs[a].sjob = s;
 	datum_jobs[a].datum_job_id = a;
 	
@@ -886,6 +887,20 @@ int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 	return 1;
 }
 
+static void datum_protocol_add_share_diff(uint64_t *total, unsigned char pot) {
+	uint64_t add;
+	if (pot >= 64) {
+		*total = UINT64_MAX;
+		return;
+	}
+	add = 1ULL << pot;
+	if (*total > UINT64_MAX - add) {
+		*total = UINT64_MAX;
+	} else {
+		*total += add;
+	}
+}
+
 // TODO: Ensure all shares are responded to!  Currently this has no bearing on anything, just logging
 int datum_protocol_share_response(int len, unsigned char *data) {
 	if (len < 9) {
@@ -899,7 +914,7 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 		
 		datum_rejected_share_count++;
 		if (data[7] != 0xFF) {
-			datum_rejected_share_diff += 1<<data[7];
+			datum_protocol_add_share_diff(&datum_rejected_share_diff, data[7]);
 		} else {
 			datum_rejected_share_diff += datum_config.override_vardiff_min;
 		}
@@ -917,7 +932,7 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 	           data[7], (int)data[8]);
 	
 	datum_accepted_share_count++;
-	datum_accepted_share_diff += 1<<data[7];
+	datum_protocol_add_share_diff(&datum_accepted_share_diff, data[7]);
 	datum_last_accepted_share_tsms = datum_protocol_mainloop_tsms;
 	
 	return 1;
@@ -1288,7 +1303,8 @@ int datum_protocol_pow_submit(
 {
 	// called by other threads to submit new POW
 	T_DATUM_PROTOCOL_POW pow;
-	
+
+	memset(&pow, 0, sizeof(pow));
 	pow.datum_job_id = job->datum_job_idx;
 	memcpy(pow.extranonce, extranonce, 12);
 	strncpy(pow.username, username, 383);
@@ -1299,43 +1315,65 @@ int datum_protocol_pow_submit(
 	pow.quickdiff = quickdiff;
 	pow.target_byte_index = job->target_pot_index; // just a sanity check on the server side. server hunts for this in the correct place anyway.
 	pow.target_byte = full_cb_tx[job->target_pot_index];
-	pow.ntime = upk_u32le(block_header, 68);
-	pow.nonce = upk_u32le(block_header, 76);
-	pow.version = upk_u32le(block_header, 0);
+	if (job->block_template && job->block_template->header_version >= 2) {
+		pow.sjob = (T_DATUM_STRATUM_JOB *)job;
+		memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
+		pow.blake2b_use_time_offset = (job->block_template->header_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
+		pow.ntime = upk_u64le(block_header, 40);
+		pow.nonce = upk_u64le(block_header, 32);
+		pow.time_on_wire = job->blake2b_time_on_wire;
+		pow.version = job->version_uint;
+	} else {
+		pow.sjob = NULL;
+		pow.blake2b_use_time_offset = false;
+		pow.ntime = upk_u32le(block_header, 68);
+		pow.nonce = upk_u32le(block_header, 76);
+		pow.time_on_wire = 0;
+		pow.version = upk_u32le(block_header, 0);
+	}
 	
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
 	
 	return datum_queue_add_item(&pow_queue, &pow);
 }
 
-// {"params": ["mzjP9Hn7aqaCLM5pSgMSQzgs3gnxSFv91B", "662599770700", "f40c000000000000", "66259976", "48220d13", "00d30000"], "id": 182, "method": "mining.submit"}
-int datum_protocol_pow(void *arg) {
-	T_DATUM_PROTOCOL_POW *pow = arg;
+int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size) {
 	T_DATUM_STRATUM_JOB *sjob;
-	
-	unsigned char msg[32768 + crypto_box_MACBYTES];
+	T_DATUM_PROTOCOL_JOB *pj;
+	const T_DATUM_STRATUM_COINBASE *cb;
 	int i = 0, j;
-	bool w=false;
-	// this is called when processing queued shares in our thread
-	//DLOG_DEBUG("DATUM POW @ %p: time %d nonce %8.8X", pow, pow->ntime, pow->nonce);
-	
-	if ((pow->coinbase_id > 7) && (!(pow->coinbase_id == 0xff) && pow->subsidy_only)) {
-		DLOG_ERROR("Could not process POW to DATUM server! Bad coinbase ID.");
+	bool w = false;
+	bool blake2b;
+	bool new_to_server;
+	size_t merkle_bytes;
+
+	if (!pow || !msg) return 0;
+	if (msg_size < 64) return 0;
+
+	// blake2b shares attach the stratum job; SHA256d leaves sjob NULL
+	blake2b = (pow->sjob != NULL);
+
+	if (blake2b) {
+		if (pow->subsidy_only) return 0;
+		if (pow->coinbase_id >= MAX_COINBASE_TYPES) return 0;
+	} else if ((pow->coinbase_id > 7) && !((pow->coinbase_id == 0xff) && pow->subsidy_only)) {
 		return 0;
 	}
-	
-	msg[0] = 0x27; i++; // submit POW
-	
-	msg[i]=pow->datum_job_id; i++; // job ID 0
-	msg[i]=pow->coinbase_id; i++; // which coinbase 1
-	msg[i]=((pow->is_block?1:0)|(pow->subsidy_only?2:0)|(pow->quickdiff?4:0)); i++; // other flags that are useful for constructing the block header 2
-	msg[i]=pow->target_byte; i++; // target byte we used for this work (PoT target diff) 3
-	pk_u32le(msg, i, pow->ntime); i += 4;  // ntime 4
-	pk_u32le(msg, i, pow->nonce); i += 4;  // nonce 8
-	pk_u32le(msg, i, pow->version); i += 4;  // version 12
-	msg[i] = 12; i++; // extranonce size... DO NOT CHANGE. Server support for other sizes is not likely any time soon.  But, planning ahead.  This should be plenty for everyone. :) 16
-	memcpy(&msg[i], pow->extranonce, 12); i+=12; // extranonce1+2 17
-	
+
+	msg[i++] = 0x27; // submit POW
+	msg[i++] = pow->datum_job_id; // job ID 0
+	msg[i++] = pow->coinbase_id; // which coinbase 1
+	msg[i] = (unsigned char)((pow->is_block ? 1 : 0) | (pow->subsidy_only ? 2 : 0) | (pow->quickdiff ? 4 : 0)); // flags 2
+	if (blake2b) msg[i] |= DATUM_POW_FLAG_BLAKE2B;
+	i++;
+	msg[i++] = pow->target_byte; // PoT target byte 3
+	pk_u32le(msg, i, (uint32_t)pow->ntime); i += 4; // ntime 4
+	pk_u32le(msg, i, (uint32_t)pow->nonce); i += 4; // nonce 8
+	pk_u32le(msg, i, pow->version); i += 4; // version 12
+	// extranonce size... DO NOT CHANGE. Server support for other sizes is not likely any time soon.
+	msg[i++] = 12; // 16
+	memcpy(&msg[i], pow->extranonce, 12); i += 12; // extranonce1+2 17
+
 	char * const username = (char *)&msg[i];
 	if (((!datum_config.datum_pool_pass_full_users) && (!datum_config.datum_pool_pass_workers)) || pow->username[0] == '\0') {
 		j = snprintf(username, DATUM_PROTOCOL_MAX_USERNAME_LEN + 1, "%s", datum_config.mining_pool_address);
@@ -1353,98 +1391,165 @@ int datum_protocol_pow(void *arg) {
 		j = 0;
 	}
 	if (j > DATUM_PROTOCOL_MAX_USERNAME_LEN) j = DATUM_PROTOCOL_MAX_USERNAME_LEN;
-	i += j + 1;  // including final null byte
-	
+	if ((size_t)i + (size_t)j + 1 + 4 >= msg_size) return 0;
+	i += j + 1; // including final null byte
+
 	// reserve 4 bytes for future use
-	memset(&msg[i], 0, 4); i+=4;
-	
+	memset(&msg[i], 0, 4);
+	if (blake2b && pow->blake2b_use_time_offset) {
+		msg[i] |= DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET;
+	}
+	i += 4;
+
+	if (blake2b) {
+		if ((size_t)i + 23 >= msg_size) return 0;
+		msg[i++] = 0x03;
+		msg[i++] = DATUM_POW_BLAKE2B;
+		pk_u64le(msg, i, pow->ntime); i += 8;
+		pk_u64le(msg, i, pow->nonce); i += 8;
+		msg[i++] = 0x04;
+		pk_u32le(msg, i, pow->time_on_wire); i += 4;
+	}
+
 	pthread_rwlock_rdlock(&datum_jobs_rwlock);
-	
-	sjob = datum_jobs[pow->datum_job_id].sjob;
-	if (!sjob) {
+
+	pj = &datum_jobs[pow->datum_job_id];
+	sjob = pow->sjob ? pow->sjob : pj->sjob;
+	if (!sjob || !sjob->block_template) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		return 0;
 	}
-	
-	if (!datum_jobs[pow->datum_job_id].server_has_merkle_branches) {
+
+	new_to_server = (pj->server_sjob != sjob);
+
+	if (new_to_server || !pj->server_has_merkle_branches) {
 		// we need to send the merkle branches with this job
 		// also send the prevblockhash
-		msg[i] = 0x01; i++;
-		memcpy(&msg[i], sjob->prevhash_bin, 32); i+=32;
-		pk_u16le(msg, i, pow->target_byte_index); i += 2; // target byte location in coinb1
-		memcpy(&msg[i], &sjob->nbits_bin[0], sizeof(sjob->nbits_bin)); i += sizeof(sjob->nbits_bin); // nbits!
-		msg[i] = sjob->datum_coinbaser_id; i++;
+		merkle_bytes = (size_t)sjob->merklebranch_count * 32;
+		if ((size_t)i + 62 + merkle_bytes >= msg_size) {
+			pthread_rwlock_unlock(&datum_jobs_rwlock);
+			return 0;
+		}
+		msg[i++] = 0x01;
+		memcpy(&msg[i], sjob->prevhash_bin, 32); i += 32;
+		pk_u16le(msg, i, pow->target_byte_index); i += 2;
+		memcpy(&msg[i], &sjob->nbits_bin[0], sizeof(sjob->nbits_bin)); i += sizeof(sjob->nbits_bin);
+		msg[i++] = sjob->datum_coinbaser_id;
 		pk_u32le(msg, i, sjob->height); i += 4;
 		pk_u64le(msg, i, sjob->coinbase_value); i += 8;
-		
 		pk_u32le(msg, i, sjob->block_template->txn_count); i += 4;
 		pk_u32le(msg, i, sjob->block_template->txn_total_weight); i += 4;
 		pk_u32le(msg, i, sjob->block_template->txn_total_size); i += 4;
 		pk_u32le(msg, i, sjob->block_template->txn_total_sigops); i += 4;
-		
-		msg[i] = sjob->merklebranch_count; i++;
-		
-		memcpy(&msg[i], &sjob->merklebranches_bin[0][0], sjob->merklebranch_count * 32);
-		i+=sjob->merklebranch_count * 32;
-		
-		// switch us to a write lock
+		msg[i++] = sjob->merklebranch_count;
+		memcpy(&msg[i], &sjob->merklebranches_bin[0][0], merkle_bytes);
+		i += (int)merkle_bytes;
+
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		pthread_rwlock_wrlock(&datum_jobs_rwlock);
 		w = true;
-		datum_jobs[pow->datum_job_id].server_has_merkle_branches = true;
+		pj = &datum_jobs[pow->datum_job_id];
+		pj->server_has_merkle_branches = true;
 	}
-	
+
 	if (pow->subsidy_only) {
-		if (!datum_jobs[pow->datum_job_id].server_has_coinbase_empty) {
-			msg[i] = 0x02; i++;
-			msg[i] = 0xFF; i++; // subsidy only coinbase! yes, I know we specified above in the flags as well
-			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb1_len); i += 2;  // len1
-			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb2_len); i += 2;  // len2
+		if (new_to_server || !pj->server_has_coinbase_empty) {
+			// subsidy only coinbase! yes, I know we specified above in the flags as well
+			if ((size_t)i + 6 + sjob->subsidy_only_coinbase.coinb1_len + sjob->subsidy_only_coinbase.coinb2_len >= msg_size) {
+				pthread_rwlock_unlock(&datum_jobs_rwlock);
+				return 0;
+			}
+			msg[i++] = 0x02;
+			msg[i++] = 0xFF;
+			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb1_len); i += 2;
+			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb2_len); i += 2;
 			memcpy(&msg[i], sjob->subsidy_only_coinbase.coinb1_bin, sjob->subsidy_only_coinbase.coinb1_len);
-			i+=sjob->subsidy_only_coinbase.coinb1_len;
+			i += sjob->subsidy_only_coinbase.coinb1_len;
 			memcpy(&msg[i], sjob->subsidy_only_coinbase.coinb2_bin, sjob->subsidy_only_coinbase.coinb2_len);
-			i+=sjob->subsidy_only_coinbase.coinb2_len;
-			
+			i += sjob->subsidy_only_coinbase.coinb2_len;
+
 			if (!w) {
 				pthread_rwlock_unlock(&datum_jobs_rwlock);
 				pthread_rwlock_wrlock(&datum_jobs_rwlock);
 				w = true;
+				pj = &datum_jobs[pow->datum_job_id];
 			}
-			
-			datum_jobs[pow->datum_job_id].server_has_coinbase_empty = true;
+			pj->server_has_coinbase_empty = true;
 		}
 	} else {
-		if (!datum_jobs[pow->datum_job_id].server_has_coinbase[pow->coinbase_id]) {
-			msg[i] = 0x02; i++;
-			msg[i] = pow->coinbase_id; i++;
-			pk_u16le(msg, i, sjob->coinbase[pow->coinbase_id].coinb1_len); i += 2;  // len1
-			pk_u16le(msg, i, sjob->coinbase[pow->coinbase_id].coinb2_len); i += 2;  // len2
-			memcpy(&msg[i], sjob->coinbase[pow->coinbase_id].coinb1_bin, sjob->coinbase[pow->coinbase_id].coinb1_len);
-			i+=sjob->coinbase[pow->coinbase_id].coinb1_len;
-			memcpy(&msg[i], sjob->coinbase[pow->coinbase_id].coinb2_bin, sjob->coinbase[pow->coinbase_id].coinb2_len);
-			i+=sjob->coinbase[pow->coinbase_id].coinb2_len;
-			
+		if (new_to_server || !pj->server_has_coinbase[pow->coinbase_id]) {
+			cb = &sjob->coinbase[pow->coinbase_id];
+			if ((size_t)i + 6 + cb->coinb1_len + cb->coinb2_len >= msg_size) {
+				pthread_rwlock_unlock(&datum_jobs_rwlock);
+				return 0;
+			}
+			msg[i++] = 0x02;
+			msg[i++] = pow->coinbase_id;
+			pk_u16le(msg, i, cb->coinb1_len); i += 2;
+			pk_u16le(msg, i, cb->coinb2_len); i += 2;
+			memcpy(&msg[i], cb->coinb1_bin, cb->coinb1_len);
+			i += cb->coinb1_len;
+			memcpy(&msg[i], cb->coinb2_bin, cb->coinb2_len);
+			i += cb->coinb2_len;
+
 			if (!w) {
 				pthread_rwlock_unlock(&datum_jobs_rwlock);
 				pthread_rwlock_wrlock(&datum_jobs_rwlock);
 				w = true;
+				pj = &datum_jobs[pow->datum_job_id];
 			}
-			
-			datum_jobs[pow->datum_job_id].server_has_coinbase[pow->coinbase_id] = true;
+			pj->server_has_coinbase[pow->coinbase_id] = true;
 		}
 	}
-	
+
+	if ((size_t)i + 1 > msg_size) {
+		pthread_rwlock_unlock(&datum_jobs_rwlock);
+		return 0;
+	}
+	msg[i++] = 0xFE; // cap message
+
+	if (w || new_to_server) {
+		if (!w) {
+			pthread_rwlock_unlock(&datum_jobs_rwlock);
+			pthread_rwlock_wrlock(&datum_jobs_rwlock);
+			pj = &datum_jobs[pow->datum_job_id];
+		}
+		if (pj->server_sjob != sjob) {
+			pj->server_has_merkle_branches = true;
+			memset(pj->server_has_coinbase, 0, sizeof(pj->server_has_coinbase));
+			pj->server_has_coinbase_empty = false;
+			if (!pow->subsidy_only && pow->coinbase_id < 8) {
+				pj->server_has_coinbase[pow->coinbase_id] = true;
+			}
+			if (pow->subsidy_only) pj->server_has_coinbase_empty = true;
+		}
+		pj->server_sjob = sjob;
+	}
+
 	pthread_rwlock_unlock(&datum_jobs_rwlock);
-	
-	// cap message
-	msg[i] = 0xFE; i++;
-	
-	// pad with some randomness
+	return i;
+}
+
+// {"params": ["mzjP9Hn7aqaCLM5pSgMSQzgs3gnxSFv91B", "662599770700", "f40c000000000000", "66259976", "48220d13", "00d30000"], "id": 182, "method": "mining.submit"}
+int datum_protocol_pow(void *arg) {
+	T_DATUM_PROTOCOL_POW *pow = arg;
+	unsigned char msg[32768 + crypto_box_MACBYTES];
+	int i, j;
+
+	i = datum_protocol_pow_build_message(pow, msg, sizeof(msg));
+	if (i <= 0) {
+		DLOG_ERROR("Could not process POW to DATUM server! Bad coinbase ID or job.");
+		return 0;
+	}
+
+	// pad with some randomness (builder itself does not pad; tests assert exact lengths)
 	// TODO: Make this dependant on the number of shares we have in our queue to submit, since they can share space in a packet further obfuscating the nature of the data
 	j = 1 + (rand() % 80);
-	memset(&msg[i], rand(), j);
-	i+=j;
-	
+	if ((size_t)i + (size_t)j < sizeof(msg)) {
+		memset(&msg[i], rand(), j);
+		i += j;
+	}
+
 	datum_protocol_mining_cmd(msg, i);
 	if ((datum_protocol_mainloop_tsms - datum_last_accepted_share_local_tsms) > 25000) {
 		// we don't want to trigger a connection timeout just because we are mining very slowly...

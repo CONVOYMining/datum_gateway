@@ -25,6 +25,7 @@ add_executable(datum_gateway
 	src/datum_gateway.c
 	src/datum_jsonrpc.c
 	src/datum_logger.c
+	src/datum_pow.c
 	src/datum_protocol.c
 	src/datum_queue.c
 	src/datum_sockets.c

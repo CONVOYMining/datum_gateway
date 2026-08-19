@@ -46,11 +46,10 @@
 
 typedef struct T_DATUM_STRATUM_DUPE_ITEM {
 	// things to compare against, in order, to check our list
-	// in most cases, we shouldn't get beyond nonce_low, but we need the rest for completeness
-	unsigned short nonce_high;
-	unsigned short nonce_low;
+	// in most cases, we shouldn't get beyond nonce, but we need the rest for completeness
+	uint64_t nonce;
 	unsigned short job_index;
-	unsigned int ntime;
+	uint64_t ntime;
 	unsigned int version_bits;
 	uint64_t extra_nonce_a;  // extranonce1 + first 32 bits of extranonce2
 	uint32_t extra_nonce_b;  // last 32 bits of extranonce2
@@ -59,7 +58,7 @@ typedef struct T_DATUM_STRATUM_DUPE_ITEM {
 } T_DATUM_STRATUM_DUPE_ITEM;
 
 typedef struct T_DATUM_STRATUM_DUPES {
-	// high bits of nonce = index
+	// low 16 bits of nonce = index
 	T_DATUM_STRATUM_DUPE_ITEM *index[65536];
 	
 	// memory - we target 8 shares per minute per connection.
@@ -73,7 +72,7 @@ void datum_stratum_dupes_init(void *vsdata);
 
 #include "datum_stratum.h"
 
-bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, unsigned int nonce, unsigned short job_index, unsigned int ntime_val, unsigned int bver, unsigned char *extranonce_bin);
+bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int bver, unsigned char *extranonce_bin);
 void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe);
 
 #endif

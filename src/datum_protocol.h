@@ -38,6 +38,7 @@
 
 #include <sodium.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "datum_stratum.h"
@@ -90,6 +91,7 @@ typedef struct {
 typedef struct T_DATUM_PROTOCOL_JOB {
 	unsigned char datum_job_id;
 	T_DATUM_STRATUM_JOB *sjob;
+	T_DATUM_STRATUM_JOB *server_sjob;
 	
 	bool server_has_merkle_branches;
 	
@@ -104,14 +106,18 @@ typedef struct {
 	unsigned char datum_job_id;
 	unsigned char extranonce[12];
 	char username[384];
+	char stratum_job_id[24];
+	T_DATUM_STRATUM_JOB *sjob;
 	unsigned char coinbase_id;
 	bool subsidy_only;
 	bool is_block;
 	bool quickdiff;
+	bool blake2b_use_time_offset;
 	unsigned char target_byte;
 	uint16_t target_byte_index;
-	uint32_t ntime;
-	uint32_t nonce;
+	uint64_t ntime;
+	uint64_t nonce;
+	uint32_t time_on_wire;
 	uint32_t version;
 } T_DATUM_PROTOCOL_POW;
 
@@ -139,6 +145,7 @@ int datum_protocol_pow_submit(
 bool datum_protocol_thread_is_active(void);
 void datum_protocol_start_connector(void);
 unsigned char datum_protocol_setup_new_job_idx(void *sx);
+int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size);
 
 extern uint64_t datum_accepted_share_count;
 extern uint64_t datum_accepted_share_diff;
