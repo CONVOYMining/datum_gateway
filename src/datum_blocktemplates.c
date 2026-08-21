@@ -143,6 +143,26 @@ void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
 	datum_template_clear_header_fields(p);
 }
 
+bool datum_gbt_advertise_blake2b(void) {
+	// BIP22: if the node requires !blake2b, GBT fails unless we listed blake2b.
+	return strcmp(datum_config.mining_pow_algorithm, "sha256d") != 0;
+}
+
+bool datum_gbt_rules_want_blake2b(json_t *gbt) {
+	json_t *jval, *rule;
+	const char *s;
+	size_t ri;
+	
+	if (!gbt) return false;
+	jval = json_object_get(gbt, "rules");
+	if (!json_is_array(jval)) return false;
+	json_array_foreach(jval, ri, rule) {
+		s = json_string_value(rule);
+		if (s && (!strcmp(s, "blake2b") || !strcmp(s, "!blake2b"))) return true;
+	}
+	return false;
+}
+
 static bool datum_gbt_try_hex_field(json_t *gbt, const char *key, unsigned char *out, size_t out_len) {
 	json_t *v = json_object_get(gbt, key);
 	if (!json_is_string(v)) return false;
@@ -262,8 +282,7 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 	T_DATUM_TEMPLATE_DATA *tdata;
 	const char *s;
 	int i,j;
-	json_t *tx_array, *jval, *rule;
-	size_t ri;
+	json_t *tx_array, *jval;
 	bool want_blake2b;
 	
 	tdata = get_next_template_ptr();
@@ -326,17 +345,7 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 			return NULL;
 		}
 	} else {
-		want_blake2b = false;
-		jval = json_object_get(gbt, "rules");
-		if (json_is_array(jval)) {
-			json_array_foreach(jval, ri, rule) {
-				s = json_string_value(rule);
-				if (s && (!strcmp(s, "blake2b") || !strcmp(s, "!blake2b"))) {
-					want_blake2b = true;
-					break;
-				}
-			}
-		}
+		want_blake2b = datum_gbt_rules_want_blake2b(gbt);
 		jval = json_object_get(gbt, "coinbaseaux");
 		if (!want_blake2b && json_is_object(jval) && json_object_get(jval, "blake2b_headline")) {
 			want_blake2b = true;
@@ -594,7 +603,7 @@ void *datum_gateway_template_thread(void *args) {
 		i++;
 		
 		// fetch latest template
-		if (!strcmp(datum_config.mining_pow_algorithm, "blake2b")) {
+		if (datum_gbt_advertise_blake2b()) {
 			snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
 		} else {
 			snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));

@@ -197,6 +197,8 @@ typedef struct {
 extern const char *datum_blocktemplates_error;
 
 int datum_template_init(void);
+bool datum_gbt_advertise_blake2b(void);
+bool datum_gbt_rules_want_blake2b(json_t *gbt);
 bool datum_gbt_parse_header_fields(json_t *gbt, T_DATUM_TEMPLATE_DATA *tdata);
 T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt);
 void *datum_gateway_template_thread(void *args);

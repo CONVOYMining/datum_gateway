@@ -1710,7 +1710,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		}
 		cb1[sizeof(j->blake2b_sia_coinb1) << 1] = 0;
 		datum_socket_send_string_to_client(c, cb1);
-		// A3/Sia work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
+		// BLAKE2b-sia work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
 		// Emit a real JSON array [] (not the string "[]") so clients can parse mining.notify.
 		datum_socket_send_string_to_client(c, "\",\"\",[],");
 		snprintf(s, sizeof(s), "\"%s\",\"%s\",\"%s\",", j->version, j->nbits, j->ntime);

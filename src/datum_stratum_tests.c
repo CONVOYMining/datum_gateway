@@ -126,6 +126,44 @@ static void datum_gbt_header_fields_tests(void) {
        datum_config.mining_allow_hasher_time_rolling = saved_allow_time_rolling;
 }
 
+static void datum_gbt_rules_blake2b_tests(void) {
+       json_error_t error;
+       json_t *gbt;
+       char saved_pow[sizeof(datum_config.mining_pow_algorithm)];
+
+       memcpy(saved_pow, datum_config.mining_pow_algorithm, sizeof(saved_pow));
+
+       strcpy(datum_config.mining_pow_algorithm, "auto");
+       datum_test(datum_gbt_advertise_blake2b());
+       strcpy(datum_config.mining_pow_algorithm, "blake2b");
+       datum_test(datum_gbt_advertise_blake2b());
+       strcpy(datum_config.mining_pow_algorithm, "sha256d");
+       datum_test(!datum_gbt_advertise_blake2b());
+
+       gbt = json_loads("{\"rules\":[\"segwit\"]}", 0, &error);
+       datum_test(gbt != NULL);
+       datum_test(!datum_gbt_rules_want_blake2b(gbt));
+       json_decref(gbt);
+
+       gbt = json_loads("{\"rules\":[\"segwit\",\"!blake2b\"]}", 0, &error);
+       datum_test(gbt != NULL);
+       datum_test(datum_gbt_rules_want_blake2b(gbt));
+       json_decref(gbt);
+
+       gbt = json_loads("{\"rules\":[\"blake2b\",\"segwit\"]}", 0, &error);
+       datum_test(gbt != NULL);
+       datum_test(datum_gbt_rules_want_blake2b(gbt));
+       json_decref(gbt);
+
+       datum_test(!datum_gbt_rules_want_blake2b(NULL));
+       gbt = json_object();
+       datum_test(gbt != NULL);
+       datum_test(!datum_gbt_rules_want_blake2b(gbt));
+       json_decref(gbt);
+
+       memcpy(datum_config.mining_pow_algorithm, saved_pow, sizeof(saved_pow));
+}
+
 static void datum_blake2b_coinbase_limit_tests(void) {
        T_DATUM_TEMPLATE_DATA tdata;
        T_DATUM_STRATUM_JOB job;
@@ -691,6 +729,7 @@ void datum_stratum_tests(void) {
 	datum_stratum_mod_username_tests();
 	datum_stratum_string_request_id_tests();
 	datum_gbt_header_fields_tests();
+	datum_gbt_rules_blake2b_tests();
     datum_blake2b_coinbase_limit_tests();
     datum_block_coinbase_witness_tests();
     datum_pow_blake2b_vector_tests();
