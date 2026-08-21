@@ -198,12 +198,13 @@ bool datum_blake2b_header_commitment(
 	unsigned char h2_payload[96];
 	int o = 0;
 
-	// Matches Knots pow_hf_blake2b GetHash H1 (119 bytes) + H2 merge-mining hook.
+	// Matches Knots CBlockHeader::GetHash H1 (119 bytes) + H2 merge-mining hook.
+	// H1 version is the wire version, including header-v2 bit 0x80000000 (RC1+).
 	if (!commitment || !prevhash || !merkle || !xor_key || !rhs) return false;
 
 	datum_blake2b_xor_key_hash(xor_key_hash, xor_key);
 
-	pk_u32le(h1_payload, o, version); o += 4;
+	pk_u32le(h1_payload, o, version | UINT32_C(0x80000000)); o += 4;
 	datum_reverse32(h1_payload + o, prevhash); o += 32;
 	pk_u32le(h1_payload, o, height); o += 4;
 	memcpy(h1_payload + o, merkle, 32); o += 32;

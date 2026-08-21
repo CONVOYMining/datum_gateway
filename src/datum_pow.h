@@ -59,6 +59,7 @@ void datum_blake2b_sia_coinb1(unsigned char *out, const unsigned char *commitmen
 void datum_blake2b_sia_prevhash(unsigned char *out, const unsigned char *prevhash);
 void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root);
 
+/* version may be with or without 0x80000000; H1 always includes the v2 bit. */
 bool datum_blake2b_header_commitment(
 	unsigned char *commitment,
 	uint32_t version,

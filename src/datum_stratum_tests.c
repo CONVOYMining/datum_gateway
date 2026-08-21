@@ -228,17 +228,17 @@ static void datum_block_coinbase_witness_tests(void) {
 }
 
 static void datum_pow_blake2b_vector_tests(void) {
-       /* H1+H2 match Knots pow_hf_blake2b CBlockHeader::GetHash (2026-08-19). */
+       /* H1+H2 match Knots CBlockHeader::GetHash with wire version bit 0x80000000 in H1. */
        static const char expected_commitment_hex[] =
-               "36a078130a879e5791a5578f5ff81308e90dc15007357992ff808563587daa33";
+               "be3009118e9fbe8be787c9fef5ee1a34c95b92efe7c6f1d430c488e094ce94a8";
        static const char expected_root_hex[] =
-               "b3bff0f168cec015830e03f15a21286fa52c3c0fba70f2262d5c78e8bc7887e6";
+               "2ae3e2ac5e7b16faeda5b13386d9b3fb0e5ddfa803deee88eb9a1f6ce65c9110";
        static const char expected_work_hex[] =
                "0000000000008a7f7054908ed879cc78d133dc6604fb0fd017552289799cabd6"
                "01020304050607080403020115161718"
-               "b3bff0f168cec015830e03f15a21286fa52c3c0fba70f2262d5c78e8bc7887e6";
+               "2ae3e2ac5e7b16faeda5b13386d9b3fb0e5ddfa803deee88eb9a1f6ce65c9110";
        static const char expected_hash_le_hex[] =
-               "4d167f1cee6fa2e511da9ed3d7bf77b422bef6def12cabfdefa16bfc1c0b25c1";
+               "15ed05ccf950c40f149ea623b77f7f3f58afb9ab3ab723d5ca5870338c42d935";
        static const char expected_header_hex[] =
                "000000a0c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2f415365ffff7f20"
@@ -318,7 +318,7 @@ static void datum_pow_blake2b_vector_tests(void) {
                static const char knots_rhs_hex[] =
                        "8967452301efcdab8967452301efcdab8967452301efcdab8967452301efcdab";
                static const char knots_commitment_hex[] =
-                       "42108894e3e4d6e3172e379412d4bf4e03c259f46d58fa419e44ec54620f1d54";
+                       "39a5eb49a0907424d78db90ff6701f701d5044486c0434059d4320452ffe4f0b";
                static const char knots_root_hex[] =
                        "8e55344843862b11ce8d74d726940b00b3235d2cf57139fa9c6c20ce0c77e32a";
                static const char knots_work_hex[] =
