@@ -351,7 +351,13 @@ static void datum_pow_blake2b_vector_tests(void) {
        datum_test(!memcmp(header, expected, sizeof(header)));
        datum_test(!datum_pow_decode_hex_exact("xyz", 1, nonce));
 
-       /* Canonical profile-0 vector published with Knots' header-v2 implementation. */
+       /* Canonical profile-0 vector published with Knots' header-v2 implementation:
+        * profile_0_time_offset from src/test/data/block_header_v2.json. Its "h2",
+        * "blake2b_1", "asic_input", and the byte-reverse of its "block_hash".
+        * Taken from the published file rather than recomputed, so the test pins the
+        * gateway to consensus rather than to itself. m_flags is 28 (0x1c) there;
+        * 0x5c would additionally set 0x40, which Knots rejects as bad-flags-highbits
+        * (validation.cpp: `block.m_flags & 0xc0`). */
        {
                static const char knots_prevhash_hex[] =
                        "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
@@ -360,15 +366,15 @@ static void datum_pow_blake2b_vector_tests(void) {
                static const char knots_rhs_hex[] =
                        "8967452301efcdab8967452301efcdab8967452301efcdab8967452301efcdab";
                static const char knots_commitment_hex[] =
-                       "39a5eb49a0907424d78db90ff6701f701d5044486c0434059d4320452ffe4f0b";
+                       "ab5becb2336a3701557b0f6e33de39bd333072b8494c7c60952a8e8a636565e3";
                static const char knots_root_hex[] =
-                       "8e55344843862b11ce8d74d726940b00b3235d2cf57139fa9c6c20ce0c77e32a";
+                       "7e6326906eaa52fe59e03a14f1dfb8dd5d6e78497e56a8a6e4f4fb4d385e43db";
                static const char knots_work_hex[] =
                        "000000000000943aff74219e1f45899abfdf536373c0f2fc92e6fe58335cd0ad"
                        "0df0ad0b4433221158020000efcdab89"
-                       "8e55344843862b11ce8d74d726940b00b3235d2cf57139fa9c6c20ce0c77e32a";
+                       "7e6326906eaa52fe59e03a14f1dfb8dd5d6e78497e56a8a6e4f4fb4d385e43db";
                static const char knots_hash_le_hex[] =
-                       "0c614ddef4b5d55119982e7515d592dc02d61a4ce66d833b02ecaaee643de235";
+                       "04d78755b174467ec8537c230912ddd9bc4f28229b795b78490ad705cf5d494b";
                unsigned char knots_prevhash[32], knots_merkle[32], knots_rhs[32];
                unsigned char knots_nonce[8], knots_ntime[8];
 
@@ -383,7 +389,7 @@ static void datum_pow_blake2b_vector_tests(void) {
 
                datum_test(datum_blake2b_header_commitment(commitment, 0x20000000,
                        knots_prevhash, 840000, knots_merkle, UINT32_C(2000000000) - 600,
-                       0x1d00ffff, 3, 0x5c, 0, xor_key, knots_rhs));
+                       0x1d00ffff, 3, 0x1c, 0, xor_key, knots_rhs));
                datum_test(datum_pow_decode_hex_exact(knots_commitment_hex, 32, expected));
                datum_test(!memcmp(commitment, expected, 32));
 
