@@ -255,8 +255,13 @@ static void datum_pow_blake2b_vector_tests(void) {
        datum_test(datum_blake2b_time_on_wire(&time_on_wire, 2000000000, 600,
                DATUM_BLAKE2B_USE_TIME_OFFSET));
        datum_test(time_on_wire == 1999999400);
-       datum_test(!datum_blake2b_time_on_wire(&time_on_wire, 599, 600,
+       // Consensus wraps rather than rejecting when the offset exceeds nTime.
+       datum_test(datum_blake2b_time_on_wire(&time_on_wire, 599, 600,
                DATUM_BLAKE2B_USE_TIME_OFFSET));
+       datum_test(time_on_wire == 4294967295u);
+       datum_test(datum_blake2b_time_on_wire(&time_on_wire, 100, 1000,
+               DATUM_BLAKE2B_USE_TIME_OFFSET));
+       datum_test(time_on_wire == 4294966396u);
        datum_test(!datum_blake2b_time_on_wire(&time_on_wire,
                UINT64_C(0x100000000), 0, 0));
        datum_test(datum_blake2b_time_on_wire(&time_on_wire, 599, 600, 0));
