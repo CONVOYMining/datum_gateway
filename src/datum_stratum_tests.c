@@ -182,6 +182,43 @@ static void datum_blake2b_coinbase_limit_tests(void) {
        datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 866);
 }
 
+static void datum_blake2b_client_pot_commitment_tests(void) {
+       T_DATUM_TEMPLATE_DATA tdata;
+       T_DATUM_STRATUM_JOB job;
+       unsigned char c_ff[32], c_pot[32], c_from_txn[32];
+       unsigned char sia_ff[39], sia_pot[39];
+       unsigned char cb_txn[64];
+       size_t cb_len;
+
+       memset(&tdata, 0, sizeof(tdata));
+       memset(&job, 0, sizeof(job));
+       tdata.header_version = 2;
+       tdata.version = 0x20000000;
+       tdata.height = 12345;
+       tdata.bits_uint = 0x1d00ffff;
+       job.block_template = &tdata;
+       job.blake2b_time_on_wire = 1000;
+       job.coinbase[0].coinb1_len = 20;
+       job.coinbase[0].coinb2_len = 8;
+       memset(job.coinbase[0].coinb1_bin, 0x11, 20);
+       memset(job.coinbase[0].coinb2_bin, 0x22, 8);
+       job.coinbase[0].coinb1_bin[4] = 0xFF;
+       job.target_pot_index = 4;
+
+       datum_test(datum_stratum_job_blake2b_commitment(&job, 0xFF, c_ff, sia_ff));
+       datum_test(datum_stratum_job_blake2b_commitment(&job, 14, c_pot, sia_pot));
+       datum_test(memcmp(c_ff, c_pot, 32) != 0);
+       datum_test(memcmp(sia_ff, sia_pot, 39) != 0);
+
+       cb_len = (size_t)job.coinbase[0].coinb1_len + 12 + (size_t)job.coinbase[0].coinb2_len;
+       memcpy(cb_txn, job.coinbase[0].coinb1_bin, job.coinbase[0].coinb1_len);
+       memset(cb_txn + job.coinbase[0].coinb1_len, 0, 12);
+       memcpy(cb_txn + job.coinbase[0].coinb1_len + 12, job.coinbase[0].coinb2_bin, job.coinbase[0].coinb2_len);
+       cb_txn[job.target_pot_index] = 14;
+       datum_test(datum_stratum_job_blake2b_commitment_from_txn(&job, cb_txn, cb_len, c_from_txn));
+       datum_test(!memcmp(c_from_txn, c_pot, 32));
+}
+
 static void datum_block_coinbase_witness_tests(void) {
        static const unsigned char stripped[] = {
                0x01, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00,
@@ -731,6 +768,7 @@ void datum_stratum_tests(void) {
 	datum_gbt_header_fields_tests();
 	datum_gbt_rules_blake2b_tests();
     datum_blake2b_coinbase_limit_tests();
+    datum_blake2b_client_pot_commitment_tests();
     datum_block_coinbase_witness_tests();
     datum_pow_blake2b_vector_tests();
     datum_pow_response_large_difficulty_test();
