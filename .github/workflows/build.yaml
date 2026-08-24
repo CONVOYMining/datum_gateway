@@ -14,6 +14,23 @@ env:
   UBSAN_OPTIONS: "print_stacktrace=1"
 
 jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: brew install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone epoll-shim
+
+      - name: Build and test
+        run: |
+          cmake -S . -B build -DCMAKE_C_FLAGS="${GLOBAL_CFLAGS}"
+          cmake --build build --parallel
+          ./build/datum_gateway --help
+          ./build/datum_gateway --test
+
   build:
     strategy:
       matrix:

@@ -480,7 +480,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
        char saved_pool_address[sizeof(datum_config.mining_pool_address)];
 
        if (!jobs || !templates) {
-               datum_test(false);
+               datum_test(jobs && templates);
                free(templates);
                free(jobs);
                return;

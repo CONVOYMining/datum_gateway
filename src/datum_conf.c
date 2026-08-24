@@ -536,9 +536,8 @@ int datum_read_config(const char *conffile) {
 	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
 	if (datum_config.api_admin_password_len) {
 		static const char hash_tag[] = "DATUM Anti-CSRF Token";
-		const size_t data_max_sz = sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + sizeof(datum_config.api_admin_password);
 		const size_t data_sz = sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + datum_config.api_admin_password_len;
-		char data[data_max_sz];
+		char data[sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + sizeof(datum_config.api_admin_password)];
 		strcpy(data, hash_tag);
 		memcpy(&data[sizeof(hash_tag)], &datum_config.api_listen_port, sizeof(datum_config.api_listen_port));
 		strcpy(&data[sizeof(hash_tag)+sizeof(datum_config.api_listen_port)], datum_config.api_admin_password);

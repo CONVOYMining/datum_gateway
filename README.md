@@ -126,6 +126,10 @@ For FreeBSD:
 
     sudo pkg install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim
 
+For macOS with Homebrew:
+
+    brew install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone epoll-shim
+
 Compile DATUM by running:
 
     cmake . && make
