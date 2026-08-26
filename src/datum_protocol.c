@@ -274,6 +274,28 @@ unsigned char datum_coinbaser_v2_response_buf_idx = 0;
 uint64_t datum_coinbaser_v2_response_value[2] = { 0, 0 };
 int datum_coinbaser_v2_response_len[2] = { 0, 0 };
 
+static int datum_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *timeout) {
+#ifndef HAVE_PTHREAD_MUTEX_TIMEDLOCK
+	int rc;
+	struct timespec now;
+	const struct timespec retry_delay = { .tv_sec = 0, .tv_nsec = 1000000 };
+
+	while ((rc = pthread_mutex_trylock(mutex)) == EBUSY) {
+		if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+			return errno;
+		}
+		if (now.tv_sec > timeout->tv_sec ||
+			(now.tv_sec == timeout->tv_sec && now.tv_nsec >= timeout->tv_nsec)) {
+			return ETIMEDOUT;
+		}
+		nanosleep(&retry_delay, NULL);
+	}
+	return rc;
+#else
+	return pthread_mutex_timedlock(mutex, timeout);
+#endif
+}
+
 int datum_protocol_coinbaser_fetch_response(int len, unsigned char *data) {
 	if (len < 12) {
 		DLOG_DEBUG("Invalid coinbaser received!");
@@ -296,7 +318,7 @@ int datum_protocol_coinbaser_fetch_response(int len, unsigned char *data) {
 		return 0;
 	}
 	
-	rc = pthread_mutex_timedlock(&datum_protocol_coinbaser_fetch_mutex, &ts);
+	rc = datum_mutex_timedlock(&datum_protocol_coinbaser_fetch_mutex, &ts);
 	if (rc != 0) {
 		DLOG_DEBUG("Could not get a lock on the coinbaser reception mutex after 5 seconds... bug?");
 		return 0;

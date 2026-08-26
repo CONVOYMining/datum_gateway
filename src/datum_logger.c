@@ -141,9 +141,9 @@ int datum_logger_queue_msg(const char *func, int level, const char *format, ...)
 			strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", &tm_info);
 			
 			if (log_calling_function) {
-				fprintf(log_to_stderr?stderr:stdout, "%s.%03ld [%44s] %s: ", time_buffer, tv.tv_usec / 1000, func, level_text[level]);
+				fprintf(log_to_stderr?stderr:stdout, "%s.%03ld [%44s] %s: ", time_buffer, (long)(tv.tv_usec / 1000), func, level_text[level]);
 			} else {
-				fprintf(log_to_stderr?stderr:stdout, "%s.%03ld %s: ", time_buffer, tv.tv_usec / 1000, level_text[level]);
+				fprintf(log_to_stderr?stderr:stdout, "%s.%03ld %s: ", time_buffer, (long)(tv.tv_usec / 1000), level_text[level]);
 			}
 			
 			vfprintf(log_to_stderr?stderr:stdout, format, args);
@@ -222,9 +222,9 @@ int datum_logger_queue_msg(const char *func, int level, const char *format, ...)
 			localtime_r(&tv.tv_sec, &tm_info);
 			strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", &tm_info);
 			if (log_calling_function) {
-				fprintf(log_to_stderr?stderr:stdout, "LOGGER OVERRUN:%s.%03ld [%44s] %s: %s\n", time_buffer, tv.tv_usec / 1000, func, level_text[level], msg->msg);
+				fprintf(log_to_stderr?stderr:stdout, "LOGGER OVERRUN:%s.%03ld [%44s] %s: %s\n", time_buffer, (long)(tv.tv_usec / 1000), func, level_text[level], msg->msg);
 			} else {
-				fprintf(log_to_stderr?stderr:stdout, "LOGGER OVERRUN:%s.%03ld %s: %s\n", time_buffer, tv.tv_usec / 1000, level_text[level], msg->msg);
+				fprintf(log_to_stderr?stderr:stdout, "LOGGER OVERRUN:%s.%03ld %s: %s\n", time_buffer, (long)(tv.tv_usec / 1000), level_text[level], msg->msg);
 			}
 		}
 		return -1;
