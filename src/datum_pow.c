@@ -73,6 +73,16 @@ bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, 
 	return true;
 }
 
+uint32_t datum_blake2b_share_ntime(uint32_t time_on_wire, const unsigned char *ntime8, uint8_t flags) {
+	uint32_t offset;
+	if (!(flags & DATUM_BLAKE2B_USE_TIME_OFFSET) || !ntime8) return time_on_wire;
+	// Bytes 0-3 of the hasher's time field go into the header as
+	// m_time_offset (see datum_blake2b_serialize_block_header), and the node
+	// adds them back to the wire time on deserialization, modulo 2^32.
+	offset = (uint32_t)ntime8[0] | ((uint32_t)ntime8[1] << 8) | ((uint32_t)ntime8[2] << 16) | ((uint32_t)ntime8[3] << 24);
+	return time_on_wire + offset;
+}
+
 static void datum_u256_shr(unsigned char *n, unsigned int bits) {
 	const unsigned int byte_shift = bits / 8;
 	const unsigned int bit_shift = bits % 8;

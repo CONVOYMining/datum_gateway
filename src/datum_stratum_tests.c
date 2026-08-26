@@ -264,6 +264,46 @@ static void datum_block_coinbase_witness_tests(void) {
                output, sizeof(output), stripped, 7, true));
 }
 
+static void datum_blake2b_share_ntime_tests(void) {
+       /* What the node reads from a header built from a share, per case. The
+        * wire time is what the gateway used to bound, and it is only right
+        * when the offset flag is off. curtime is a real testnet4 block time. */
+       const uint32_t curtime = 1787427585u;
+       unsigned char ntime8[8], header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
+       unsigned char zero32[32] = {0}, nonce8[8] = {0}, en[12] = {0};
+       uint32_t wire;
+
+       /* Hasher time rolling: template offset 0, flag on, hasher rolls +10000. */
+       pk_u32le(ntime8, 0, 10000); pk_u32le(ntime8, 4, curtime);
+       datum_test(datum_blake2b_share_ntime(curtime, ntime8, DATUM_BLAKE2B_USE_TIME_OFFSET) == curtime + 10000);
+       /* Rolling past 2^32 wraps to a time below curtime, as WrappingAdd does. */
+       pk_u32le(ntime8, 0, 0xFFFFF000u);
+       datum_test(datum_blake2b_share_ntime(curtime, ntime8, DATUM_BLAKE2B_USE_TIME_OFFSET) == curtime - 4096);
+       /* Flag off: the offset bytes are not read as time. */
+       pk_u32le(ntime8, 0, 10000);
+       datum_test(datum_blake2b_share_ntime(curtime, ntime8, 0) == curtime);
+       datum_test(datum_blake2b_share_ntime(curtime, NULL, DATUM_BLAKE2B_USE_TIME_OFFSET) == curtime);
+       /* Template offset 600: wire is curtime - 600 and the node reads curtime. */
+       datum_test(datum_blake2b_time_on_wire(&wire, curtime, 600, DATUM_BLAKE2B_USE_TIME_OFFSET));
+       pk_u32le(ntime8, 0, 600);
+       datum_test(wire == curtime - 600);
+       datum_test(datum_blake2b_share_ntime(wire, ntime8, DATUM_BLAKE2B_USE_TIME_OFFSET) == curtime);
+       /* The wrap vector from the time_on_wire tests round-trips to 599. */
+       datum_test(datum_blake2b_time_on_wire(&wire, 599, 600, DATUM_BLAKE2B_USE_TIME_OFFSET));
+       datum_test(wire == 4294967295u);
+       datum_test(datum_blake2b_share_ntime(wire, ntime8, DATUM_BLAKE2B_USE_TIME_OFFSET) == 599);
+
+       /* The helper reads the same bytes the serializer writes: wire time at
+        * 68-71 and the hasher's offset field at 104-107. */
+       pk_u32le(ntime8, 0, 10000); pk_u32le(ntime8, 4, curtime);
+       datum_blake2b_serialize_block_header(header, 0x20000000, zero32, zero32, curtime, 0x1d00ffff,
+               nonce8, ntime8, en, 1, DATUM_BLAKE2B_USE_TIME_OFFSET, 0, zero32, 12345, zero32);
+       datum_test(upk_u32le(header, 68) == curtime);
+       datum_test(upk_u32le(header, 104) == 10000);
+       datum_test(header[110] == DATUM_BLAKE2B_USE_TIME_OFFSET);
+       datum_test(datum_blake2b_share_ntime(upk_u32le(header, 68), header + 104, header[110]) == curtime + 10000);
+}
+
 static void datum_pow_blake2b_vector_tests(void) {
        /* H1+H2 match Knots CBlockHeader::GetHash with wire version bit 0x80000000 in H1. */
        static const char expected_commitment_hex[] =
@@ -781,6 +821,7 @@ void datum_stratum_tests(void) {
     datum_blake2b_coinbase_limit_tests();
     datum_blake2b_client_pot_commitment_tests();
     datum_block_coinbase_witness_tests();
+    datum_blake2b_share_ntime_tests();
     datum_pow_blake2b_vector_tests();
     datum_pow_response_large_difficulty_test();
     datum_pow_sia_dupe_tests();

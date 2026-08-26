@@ -1382,7 +1382,10 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	
 	// check if ntime is within bounds for a valid block
 	// we'll do this after we try and potential blocks found with bad times, just in case
-	check_time = blake2b_job ? job->blake2b_time_on_wire : ntime_val;
+	// For a header-v2 job the node does not read the wire time as nTime: it
+	// adds the hasher's time-offset bytes back when the offset flag is set.
+	// Bound what the node will read, which also bounds hasher time rolling.
+	check_time = blake2b_job ? datum_blake2b_share_ntime(job->blake2b_time_on_wire, ntime8, job->block_template->header_flags) : ntime_val;
 	if (check_time < job->block_template->mintime) {
 		send_rejected_time_too_old(c, id);
 		stratum_note_share(m, false, job_diff);
