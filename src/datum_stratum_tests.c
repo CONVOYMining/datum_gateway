@@ -182,6 +182,50 @@ static void datum_blake2b_coinbase_limit_tests(void) {
        datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 866);
 }
 
+static void datum_blake2b_refresh_time_offset_tests(void) {
+       T_DATUM_TEMPLATE_DATA tdata;
+       T_DATUM_STRATUM_JOB job;
+
+       /* The wire time is curtime less the offset when the flag is set. */
+       memset(&tdata, 0, sizeof(tdata));
+       memset(&job, 0, sizeof(job));
+       job.block_template = &tdata;
+       tdata.header_version = 2;
+       tdata.curtime = 2000000000;
+       tdata.header_flags = DATUM_BLAKE2B_USE_TIME_OFFSET;
+       tdata.header_time_offset = 600;
+       datum_stratum_job_refresh_blake2b(&job);
+       datum_test(job.blake2b_time_on_wire == 1999999400u);
+       datum_test(tdata.header_flags == DATUM_BLAKE2B_USE_TIME_OFFSET);
+       datum_test(tdata.header_time_offset == 600);
+
+       /* An offset larger than curtime wraps, as consensus does; nothing is cleared. */
+       tdata.curtime = 599;
+       datum_stratum_job_refresh_blake2b(&job);
+       datum_test(job.blake2b_time_on_wire == 4294967295u);
+       datum_test(tdata.header_flags == DATUM_BLAKE2B_USE_TIME_OFFSET);
+       datum_test(tdata.header_time_offset == 600);
+
+       /* Without the flag the offset is ignored and curtime goes on the wire as is. */
+       tdata.curtime = 2000000000;
+       tdata.header_flags = 0;
+       datum_stratum_job_refresh_blake2b(&job);
+       datum_test(job.blake2b_time_on_wire == 2000000000u);
+       datum_test(tdata.header_time_offset == 600);
+
+       /* A curtime that does not fit the wire field is the one way the helper
+        * can fail. The header must then not claim an offset it did not apply:
+        * the flag and the offset are cleared on the template so the
+        * commitment, the notify and the DATUM submission agree. */
+       tdata.curtime = (uint64_t)UINT32_MAX + 1;
+       tdata.header_flags = DATUM_BLAKE2B_USE_TIME_OFFSET;
+       tdata.header_time_offset = 600;
+       datum_stratum_job_refresh_blake2b(&job);
+       datum_test(job.blake2b_time_on_wire == (uint32_t)tdata.curtime);
+       datum_test(tdata.header_flags == 0);
+       datum_test(tdata.header_time_offset == 0);
+}
+
 static void datum_blake2b_client_pot_commitment_tests(void) {
        T_DATUM_TEMPLATE_DATA tdata;
        T_DATUM_STRATUM_JOB job;
@@ -820,6 +864,7 @@ void datum_stratum_tests(void) {
 	datum_gbt_rules_blake2b_tests();
     datum_blake2b_coinbase_limit_tests();
     datum_blake2b_client_pot_commitment_tests();
+    datum_blake2b_refresh_time_offset_tests();
     datum_block_coinbase_witness_tests();
     datum_blake2b_share_ntime_tests();
     datum_pow_blake2b_vector_tests();

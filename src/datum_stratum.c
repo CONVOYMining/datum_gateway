@@ -2232,7 +2232,18 @@ void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	if (block_template->header_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) {
 		if (!datum_blake2b_time_on_wire(&time_on_wire, block_template->curtime,
 				block_template->header_time_offset, block_template->header_flags)) {
-			time_on_wire = (uint32_t)block_template->curtime;
+			// The offset cannot be applied, so the header must not claim it was.
+			// A node adds the offset back to the wire time on deserialization,
+			// and a commitment that keeps the flag over an unadjusted time
+			// would have the block's nTime land off by the offset with
+			// nothing here noticing. Clear the flag and the offset on the
+			// template, since the commitment, the notify and the DATUM
+			// submission all read them from there, and say so. time_on_wire
+			// already holds curtime: the helper only writes on success.
+			DLOG_ERROR("Could not derive the BLAKE2b wire time from curtime %llu and time offset %u; mining this template without the time offset",
+				(unsigned long long)block_template->curtime, (unsigned int)block_template->header_time_offset);
+			block_template->header_flags &= ~DATUM_BLAKE2B_USE_TIME_OFFSET;
+			block_template->header_time_offset = 0;
 		}
 	}
 	s->blake2b_time_on_wire = time_on_wire;
