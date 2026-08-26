@@ -37,8 +37,8 @@ The protocol is not specific to a pooled reward system, as the Gateway coordinat
 
 ## Requirements
 
- - 64-bit AMD or Intel system. Other systems may work, but at this time it is at your own risk.
- - Linux-based operating system. Other OSs will be supported in the future.
+ - 64-bit AMD, Intel, or Apple silicon system. Other systems may work, but at this time it is at your own risk.
+ - Linux, macOS, or FreeBSD operating system.
  - Bitcoin full node ([Bitcoin Knots](https://bitcoinknots.org/) recommended) fully synced with the Bitcoin network.
  - Fast storage recommended for the Bitcoin node.
  - Stable internet connection for both the Bitcoin node and Gateway's communication with the pool.
