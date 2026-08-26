@@ -58,17 +58,18 @@ bool datum_pow_decode_hex_exact(const char *hex, size_t out_len, unsigned char *
 }
 
 bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, uint8_t flags) {
-	uint64_t t;
 	if (!out) return false;
-	if (flags & DATUM_BLAKE2B_USE_TIME_OFFSET) {
-		if (ntime < offset) return false;
-		t = ntime - offset;
-		if (t > UINT32_MAX) return false;
-		*out = (uint32_t)t;
+	if (ntime > UINT32_MAX) return false;
+	if (!(flags & DATUM_BLAKE2B_USE_TIME_OFFSET)) {
+		*out = (uint32_t)ntime;
 		return true;
 	}
-	if (ntime > UINT32_MAX) return false;
-	*out = (uint32_t)ntime;
+	if (offset > UINT32_MAX) return false;
+	// Consensus derives the wire time with WrappingSubtract (Knots
+	// src/util/overflow.h, used by CBlockHeader::GetTimeOnWire), so an offset
+	// larger than nTime wraps modulo 2^32 rather than being rejected. The node
+	// adds it back the same way on deserialization, so the round trip holds.
+	*out = (uint32_t)ntime - (uint32_t)offset;
 	return true;
 }
 
