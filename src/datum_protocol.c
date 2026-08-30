@@ -3,10 +3,10 @@
  * DATUM Gateway
  * Decentralized Alternative Templates for Universal Mining
  *
- * This file is part of OCEAN's Bitcoin mining decentralization
+ * This file is part of CONVOY's Bitcoin mining decentralization
  * project, DATUM.
  *
- * https://ocean.xyz
+ * https://convoy.xyz
  *
  * ---
  *
@@ -1312,7 +1312,7 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	if (datum_protocol_mining_cmd_for_session(
 		msg, i, session_generation) != 0) return 0;
 	
-	// spin here for up to 5 seconds while awaiting a coinbaser response from DATUM Prime
+	// spin here for up to 5 seconds while awaiting a coinbaser response from the DATUM server
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += 5; // Set timeout to 5 seconds
 	
@@ -1321,12 +1321,12 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	rc = pthread_cond_timedwait(&datum_protocol_coinbaser_fetch_cond, &datum_protocol_coinbaser_fetch_mutex, &ts);
 	if (rc == ETIMEDOUT) {
 		pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
-		DLOG_DEBUG("Timeout waiting for coinbaser response from DATUM Prime");
+		DLOG_DEBUG("Timeout waiting for coinbaser response from DATUM server");
 		return 0;
 	}
 	
 	if (rc != 0) {
-		DLOG_DEBUG("Error waiting for coinbaser response from DATUM Prime");
+		DLOG_DEBUG("Error waiting for coinbaser response from DATUM server");
 		pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
 		return 0;
 	}

@@ -1,10 +1,10 @@
 # DATUM Gateway
 # Decentralized Alternative Templates for Universal Mining
 #
-# This file is part of OCEAN's Bitcoin mining decentralization
+# This file is part of CONVOY's Bitcoin mining decentralization
 # project, DATUM.
 #
-# https://ocean.xyz
+# https://convoy.xyz
 #
 # ---
 #

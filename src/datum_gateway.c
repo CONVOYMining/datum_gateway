@@ -3,10 +3,10 @@
  * DATUM Gateway
  * Decentralized Alternative Templates for Universal Mining
  *
- * This file is part of OCEAN's Bitcoin mining decentralization
+ * This file is part of CONVOY's Bitcoin mining decentralization
  * project, DATUM.
  *
- * https://ocean.xyz
+ * https://convoy.xyz
  *
  * ---
  *
@@ -65,7 +65,7 @@ const char *datum_gateway_config_filename = NULL;
 
 // ARGP stuff
 const char *argp_program_version = "datum_gateway " DATUM_PROTOCOL_VERSION;
-const char *argp_program_bug_address = "<jason@ocean.xyz>";
+const char *argp_program_bug_address = "<luke+datum@convoy.xyz>";
 static char doc[] = "Decentralized Alternative Templates for Universal Mining - Pool Gateway";
 static char args_doc[] = "";
 static struct argp_option options[] = {
@@ -133,8 +133,7 @@ static struct argp argp = {options, parse_opt, args_doc, doc};
 void datum_print_banner(void) {
 	puts("");
 	puts(" *****************************************************************");
-	puts(" * DATUM Gateway --- Copyright (c) 2024-2026 Bitcoin Ocean, LLC, *");
-	puts(" *                     Jason Hughes, and individual contributors *");
+	puts(" * DATUM Gateway --- Copyright (c) 2024-2026                     *");
 	printf(" * git commit: %-49s *\n", GIT_COMMIT_HASH);
 	puts(" *****************************************************************");
 	puts("");
