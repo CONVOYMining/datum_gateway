@@ -693,6 +693,8 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	datum_test(msg[64] == 0x01 && msg[65] == 0xa0);
 	datum_test(msg[133] == 0x02 && msg[139] == 0xc0 && msg[140] == 0xd0);
 	datum_test(datum_jobs[0].server_sjob == &jobs[0]);
+	datum_test(!memcmp(datum_jobs[0].server_job_id, jobs[0].job_id,
+		sizeof(datum_jobs[0].server_job_id)));
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) > 0);
 	datum_test((msg[35] & DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET) != 0);
 	pow.blake2b_use_time_offset = false;
@@ -754,6 +756,15 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 142);
 	datum_test(msg[65] == 0xa8 && msg[139] == 0xc8 && msg[140] == 0xd8);
 	datum_test(datum_jobs[0].server_sjob == &jobs[MAX_DATUM_PROTOCOL_JOBS]);
+	
+	// Reusing the same local object for a new job must still replace Apex's
+	// cached context. Pointer identity alone cannot distinguish ring reuse.
+	snprintf(jobs[MAX_DATUM_PROTOCOL_JOBS].job_id,
+		sizeof(jobs[MAX_DATUM_PROTOCOL_JOBS].job_id), "same-pointer-reuse");
+	memcpy(pow.stratum_job_id, pow.sjob->job_id, sizeof(pow.stratum_job_id));
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 142);
+	datum_test(!memcmp(datum_jobs[0].server_job_id, pow.stratum_job_id,
+		sizeof(datum_jobs[0].server_job_id)));
 	
 	memset(datum_jobs, 0, sizeof(datum_jobs));
 	datum_protocol_next_job_idx = 0;

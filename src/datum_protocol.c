@@ -1455,8 +1455,9 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	
 	dj = &datum_jobs[job_index];
 	
-	sj = dj->sjob;
-	if (!sj) {
+	sj = dj->server_sjob;
+	if (!sj || memcmp(sj->job_id, dj->server_job_id,
+	    sizeof(dj->server_job_id))) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		// error response to 0x50 0x10
 		msg[i] = 0x50; i++;
@@ -1615,8 +1616,9 @@ int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
 	
 	dj = &datum_jobs[job_index];
 	
-	sj = dj->sjob;
-	if (!sj) {
+	sj = dj->server_sjob;
+	if (!sj || memcmp(sj->job_id, dj->server_job_id,
+	    sizeof(dj->server_job_id))) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		// error response to 0x50 0x11
 		msg[i] = 0x50; i++;
@@ -1763,8 +1765,9 @@ int datum_protocol_job_validation_sblock(unsigned char *data) {
 	
 	dj = &datum_jobs[job_index];
 	
-	sj = dj->sjob;
-	if (!sj) {
+	sj = dj->server_sjob;
+	if (!sj || memcmp(sj->job_id, dj->server_job_id,
+	    sizeof(dj->server_job_id))) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		// error response to 0x50 0x12
 		msg[i] = 0x50; i++;
@@ -2634,7 +2637,9 @@ static int datum_protocol_pow_build_message_mode(
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		return 0;
 	}
-	new_to_server = (pj->server_sjob != sjob);
+	new_to_server = pj->server_sjob != sjob ||
+		memcmp(pj->server_job_id, pow->stratum_job_id,
+			sizeof(pj->server_job_id)) != 0;
 	send_context = force_full || new_to_server ||
 		!pj->server_has_merkle_branches;
 	send_coinbase = force_full || new_to_server ||
@@ -2688,12 +2693,14 @@ static int datum_protocol_pow_build_message_mode(
 	if (record_server_state) {
 		pthread_rwlock_wrlock(&datum_jobs_rwlock);
 		pj = &datum_jobs[pow->datum_job_id];
-		if (pj->server_sjob != sjob) {
+		if (new_to_server) {
 			pj->server_has_merkle_branches = false;
 			memset(pj->server_has_coinbase, 0, sizeof(pj->server_has_coinbase));
 			pj->server_has_coinbase_empty = false;
 		}
 		pj->server_sjob = sjob;
+		memcpy(pj->server_job_id, pow->stratum_job_id,
+			sizeof(pj->server_job_id));
 		if (send_context) pj->server_has_merkle_branches = true;
 		if (send_coinbase && pow->subsidy_only) {
 			pj->server_has_coinbase_empty = true;
@@ -2710,6 +2717,24 @@ int datum_protocol_pow_build_message(
 	T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size) {
 	return datum_protocol_pow_build_message_mode(
 		pow, msg, msg_size, false, true);
+}
+
+static void datum_protocol_pow_forget_failed_send(
+	const T_DATUM_PROTOCOL_POW *pow) {
+	pthread_rwlock_wrlock(&datum_jobs_rwlock);
+	T_DATUM_PROTOCOL_JOB *job = &datum_jobs[pow->datum_job_id];
+	if (!memcmp(job->server_job_id, pow->stratum_job_id,
+	    sizeof(job->server_job_id))) {
+		job->server_sjob = NULL;
+		memset(job->server_job_id, 0, sizeof(job->server_job_id));
+		job->server_has_merkle_branches = false;
+		memset(job->server_has_coinbase, 0,
+			sizeof(job->server_has_coinbase));
+		job->server_has_coinbase_empty = false;
+		job->server_has_short_txnlist = false;
+		job->server_has_validated_block = false;
+	}
+	pthread_rwlock_unlock(&datum_jobs_rwlock);
 }
 
 // {"params": ["mzjP9Hn7aqaCLM5pSgMSQzgs3gnxSFv91B", "662599770700", "f40c000000000000", "66259976", "48220d13", "00d30000"], "id": 182, "method": "mining.submit"}
@@ -2739,8 +2764,11 @@ int datum_protocol_pow(void *arg) {
 		i += j;
 	}
 
-	if (datum_protocol_mining_cmd(msg, i) == 0)
+	if (datum_protocol_mining_cmd(msg, i) == 0) {
 		datum_protocol_replay_mark_sent(pending);
+	} else {
+		datum_protocol_pow_forget_failed_send(pow);
+	}
 	if ((datum_protocol_mainloop_tsms - datum_last_accepted_share_local_tsms) > 25000) {
 		// we don't want to trigger a connection timeout just because we are mining very slowly...
 		// so we'll fake this in that case.
@@ -2789,6 +2817,8 @@ void *datum_protocol_client(void *args) {
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
 	for(i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {
 		datum_jobs[i].server_sjob = NULL;
+		memset(datum_jobs[i].server_job_id, 0,
+			sizeof(datum_jobs[i].server_job_id));
 		datum_jobs[i].server_has_merkle_branches = false;
 		datum_jobs[i].server_has_coinbase_empty = false;
 		datum_jobs[i].server_has_short_txnlist = false;

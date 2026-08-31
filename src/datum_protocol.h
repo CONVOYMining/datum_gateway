@@ -103,6 +103,7 @@ typedef struct T_DATUM_PROTOCOL_JOB {
 	unsigned char datum_job_id;
 	T_DATUM_STRATUM_JOB *sjob;
 	T_DATUM_STRATUM_JOB *server_sjob;
+	char server_job_id[sizeof(((T_DATUM_STRATUM_JOB *)0)->job_id)];
 	
 	bool server_has_merkle_branches;
 	
