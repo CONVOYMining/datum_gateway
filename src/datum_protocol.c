@@ -74,6 +74,7 @@
 #include "datum_stratum.h"
 #include "datum_blocktemplates.h"
 #include "datum_coinbaser.h"
+#include "datum_parent_fetch.h"
 #include "datum_queue.h"
 #include "datum_pow.h"
 #include "datum_submitblock.h"
@@ -121,7 +122,7 @@ static pthread_mutex_t datum_protocol_bulk_lock = PTHREAD_MUTEX_INITIALIZER;
 static T_DATUM_BULK_TRANSFER datum_protocol_bulk_queue[DATUM_BULK_QUEUE_CAPACITY];
 static size_t datum_protocol_bulk_queue_count;
 static uint32_t datum_protocol_bulk_next_id = 1;
-bool datum_protocol_bulk_enabled;
+atomic_bool datum_protocol_bulk_enabled;
 
 unsigned char datum_protocol_next_job_idx = 0;
 pthread_mutex_t datum_protocol_next_job_idx_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -161,7 +162,7 @@ static pthread_mutex_t datum_replay_mutex = PTHREAD_MUTEX_INITIALIZER;
 static T_DATUM_REPLAY_PENDING *datum_replay_head = NULL;
 static T_DATUM_REPLAY_PENDING *datum_replay_tail = NULL;
 size_t datum_replay_count = 0;
-static uint64_t datum_session_generation = 1;
+atomic_uint_fast64_t datum_session_generation = 1;
 static unsigned char datum_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0};
 static unsigned char datum_requested_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0};
 static bool datum_has_resume_token = false;
@@ -298,7 +299,7 @@ int datum_protocol_flush_socket(int sockfd) {
 }
 
 static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
-	int len, bool require_empty_buffer) {
+	int len, bool require_empty_buffer, uint64_t expected_session_generation) {
 	T_DATUM_PROTOCOL_HEADER h;
 	if (!data || len < 0 || (size_t)len + crypto_box_MACBYTES >=
 	    DATUM_PROTOCOL_MAX_CMD_DATA_SIZE) return -1;
@@ -318,7 +319,9 @@ static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
 	// frame that arrives just after it.
 	pthread_mutex_lock(&datum_protocol_sender_stage1_lock);
 	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
-	if ((require_empty_buffer && server_out_buf != 0) ||
+	if ((expected_session_generation && expected_session_generation !=
+	     atomic_load(&datum_session_generation)) ||
+	    (require_empty_buffer && server_out_buf != 0) ||
 	    (size_t)server_out_buf + frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) {
 		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
@@ -345,7 +348,7 @@ static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
 
 int datum_protocol_mining_cmd(void *data, int len) {
 	// Protocol command 5. This can be called from other threads.
-	return datum_protocol_encrypted_cmd(5, data, len, false);
+	return datum_protocol_encrypted_cmd(5, data, len, false, 0);
 }
 
 void datum_protocol_bulk_reset(void) {
@@ -358,17 +361,21 @@ void datum_protocol_bulk_reset(void) {
 	pthread_mutex_unlock(&datum_protocol_bulk_lock);
 }
 
-int datum_protocol_bulk_cmd(const void *data, int len) {
+int datum_protocol_bulk_cmd_for_session(
+	const void *data, int len, const uint64_t expected_session_generation) {
 	if (!data || len <= 0 || len >= DATUM_PROTOCOL_MAX_CMD_DATA_SIZE)
 		return -1;
-	if (!datum_protocol_bulk_enabled)
-		return datum_protocol_mining_cmd((void *)data, len);
+	if (!atomic_load(&datum_protocol_bulk_enabled))
+		return datum_protocol_encrypted_cmd(
+			5, data, len, false, expected_session_generation);
 	unsigned char *copy = malloc((size_t)len);
 	if (!copy) return -1;
 	memcpy(copy, data, (size_t)len);
-
+	
 	pthread_mutex_lock(&datum_protocol_bulk_lock);
-	if (datum_protocol_bulk_queue_count == DATUM_BULK_QUEUE_CAPACITY) {
+	if ((expected_session_generation && expected_session_generation !=
+	     atomic_load(&datum_session_generation)) ||
+	    datum_protocol_bulk_queue_count == DATUM_BULK_QUEUE_CAPACITY) {
 		pthread_mutex_unlock(&datum_protocol_bulk_lock);
 		free(copy);
 		return -1;
@@ -379,6 +386,10 @@ int datum_protocol_bulk_cmd(const void *data, int len) {
 		(T_DATUM_BULK_TRANSFER){id, (uint32_t)len, 0, copy, false};
 	pthread_mutex_unlock(&datum_protocol_bulk_lock);
 	return 0;
+}
+
+int datum_protocol_bulk_cmd(const void *data, int len) {
+	return datum_protocol_bulk_cmd_for_session(data, len, 0);
 }
 
 void datum_protocol_bulk_drain_one(void) {
@@ -401,7 +412,7 @@ void datum_protocol_bulk_drain_one(void) {
 	memcpy(fragment + DATUM_BULK_FRAGMENT_HEADER_SIZE,
 		transfer->data + transfer->offset, chunk_size);
 	if (datum_protocol_encrypted_cmd(6, fragment,
-		DATUM_BULK_FRAGMENT_HEADER_SIZE + chunk_size, true) == 0) {
+		DATUM_BULK_FRAGMENT_HEADER_SIZE + chunk_size, true, 0) == 0) {
 		transfer->offset += chunk_size;
 		transfer->awaiting_ack = true;
 	}
@@ -491,7 +502,7 @@ T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
 static void datum_protocol_replay_mark_sent(T_DATUM_REPLAY_PENDING *pending) {
 	if (!pending) return;
 	pthread_mutex_lock(&datum_replay_mutex);
-	pending->session_generation = datum_session_generation;
+	pending->session_generation = atomic_load(&datum_session_generation);
 	pthread_mutex_unlock(&datum_replay_mutex);
 }
 
@@ -561,7 +572,7 @@ static void datum_protocol_replay_unanswered(void) {
 		
 		pthread_mutex_lock(&datum_replay_mutex);
 		pending = pending ? pending->next : datum_replay_head;
-		while (pending && pending->session_generation == datum_session_generation) {
+		while (pending && pending->session_generation == atomic_load(&datum_session_generation)) {
 			pending = pending->next;
 		}
 		if (pending) {
@@ -1390,8 +1401,8 @@ err:
 		DLOG_ERROR("Invalid data structure in configuration :(  Is this client up to date???");
 		return 0;
 	}
-	datum_protocol_bulk_enabled = i + 6 <= len &&
-		!memcmp(data + i + 2, "DBF\x01", 4);
+	atomic_store(&datum_protocol_bulk_enabled, i + 6 <= len &&
+		!memcmp(data + i + 2, "DBF\x01", 4));
 	
 	memset(msg, 0, (datum_config.override_mining_pool_scriptsig_len<<1)+2);
 	for(i=0;i<datum_config.override_mining_pool_scriptsig_len;i++) {
@@ -1831,6 +1842,72 @@ int datum_protocol_job_validation_sblock(unsigned char *data) {
 	return 1;
 }
 
+static void datum_protocol_parent_fetch_reply(
+	const uint8_t job_id, const uint64_t session_generation,
+	const uint8_t status,
+	const uint8_t parent_hash[32], const uint8_t * const block,
+	const size_t block_size) {
+	if (!datum_protocol_is_active() || session_generation !=
+	    atomic_load(&datum_session_generation)) return;
+	if (block_size > DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 42) return;
+	const size_t message_size = 41 + block_size;
+	unsigned char * const msg = malloc(message_size);
+	if (!msg) return;
+	msg[0] = 0x50;
+	msg[1] = 0x94;
+	msg[2] = job_id;
+	msg[3] = status;
+	memcpy(msg + 4, parent_hash, 32);
+	pk_u32le(msg, 36, (uint32_t)block_size);
+	if (block_size) memcpy(msg + 40, block, block_size);
+	msg[40 + block_size] = 0xFE;
+	const int sent = block_size ?
+		datum_protocol_bulk_cmd_for_session(
+			msg, (int)message_size, session_generation) :
+		datum_protocol_encrypted_cmd(
+			5, msg, (int)message_size, false, session_generation);
+	if (sent) DLOG_WARN("Could not send unknown-parent fetch reply");
+	free(msg);
+}
+
+static int datum_protocol_job_validation_parent_fetch(
+	const int len, unsigned char * const data) {
+	if (len != 33) return 0;
+	const uint8_t job_index = data[0];
+	const uint8_t * const parent_hash = data + 1;
+	const uint64_t session_generation =
+		atomic_load(&datum_session_generation);
+	if (job_index >= MAX_DATUM_PROTOCOL_JOBS) {
+		datum_protocol_parent_fetch_reply(
+			job_index, session_generation,
+			DATUM_PARENT_FETCH_STATUS_JOB_MISMATCH,
+			parent_hash, NULL, 0);
+		return 1;
+	}
+	pthread_rwlock_rdlock(&datum_jobs_rwlock);
+	const T_DATUM_PROTOCOL_JOB * const job = &datum_jobs[job_index];
+	const T_DATUM_STRATUM_JOB * const stratum_job = job->server_sjob;
+	const bool job_matches = stratum_job &&
+		!memcmp(stratum_job->job_id, job->server_job_id,
+		        sizeof(job->server_job_id)) &&
+		!memcmp(stratum_job->prevhash_bin, parent_hash, 32);
+	pthread_rwlock_unlock(&datum_jobs_rwlock);
+	if (!job_matches) {
+		datum_protocol_parent_fetch_reply(
+			job_index, session_generation,
+			DATUM_PARENT_FETCH_STATUS_JOB_MISMATCH,
+			parent_hash, NULL, 0);
+		return 1;
+	}
+	const uint8_t status = datum_parent_fetch_enqueue(
+		job_index, session_generation, parent_hash);
+	if (status != DATUM_PARENT_FETCH_STATUS_QUEUED) {
+		datum_protocol_parent_fetch_reply(
+			job_index, session_generation, status, parent_hash, NULL, 0);
+	}
+	return 1;
+}
+
 int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 	unsigned char cmd = data[0];
 	unsigned char *p = data;
@@ -1858,6 +1935,10 @@ int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 			// send the entire block, except the coinbase txn
 			return datum_protocol_job_validation_sblock(p);
 			break;
+		}
+		
+		case 0x14: {
+			return datum_protocol_job_validation_parent_fetch(len - 1, p);
 		}
 		// TODO: Implement a job differences mechanism to save bandwidth on new work vs stxids
 		
@@ -2466,7 +2547,7 @@ int datum_protocol_server_msg(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data) {
 		case 6: {
 			return datum_protocol_bulk_ack(h->cmd_len, data);
 		}
-
+		
 		case 7: {
 			// display INFO in log
 			if (h->cmd_len) {
@@ -2808,10 +2889,11 @@ void *datum_protocol_client(void *args) {
 	int pool_port;
 	bool break_again = false;
 	T_DATUM_PROTOCOL_HEADER s_header;
-	pthread_mutex_lock(&datum_replay_mutex);
-	datum_session_generation++;
-	if (!datum_session_generation) datum_session_generation++;
-	pthread_mutex_unlock(&datum_replay_mutex);
+	uint64_t next_session_generation =
+		atomic_fetch_add(&datum_session_generation, 1) + 1;
+	if (!next_session_generation) {
+		atomic_store(&datum_session_generation, 1);
+	}
 	datum_connection_configured = false;
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
@@ -2836,7 +2918,7 @@ void *datum_protocol_client(void *args) {
 	server_in_buf = 0;
 	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 	datum_protocol_bulk_reset();
-	datum_protocol_bulk_enabled = false;
+	atomic_store(&datum_protocol_bulk_enabled, false);
 	datum_state = 0;
 	memset(&s_header, 0, sizeof(T_DATUM_PROTOCOL_HEADER));
 	
@@ -3259,6 +3341,10 @@ int datum_protocol_init(void) {
 	
 	if (sodium_init() < 0) {
 		DLOG_FATAL("libsodium initialization failed");
+		return -1;
+	}
+	if (datum_parent_fetch_init(datum_protocol_parent_fetch_reply)) {
+		DLOG_FATAL("Could not start unknown-parent fetch RPC worker");
 		return -1;
 	}
 	

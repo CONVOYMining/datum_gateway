@@ -36,6 +36,8 @@
 #ifndef _DATUM_PROTOCOL_INTERNAL_H_
 #define _DATUM_PROTOCOL_INTERNAL_H_
 
+#include <stdatomic.h>
+
 #include "datum_protocol.h"
 
 typedef struct T_DATUM_REPLAY_PENDING T_DATUM_REPLAY_PENDING;
@@ -46,14 +48,17 @@ extern int server_out_buf;
 extern unsigned char server_send_buffer[DATUM_PROTOCOL_BUFFER_SIZE];
 extern uint32_t sending_header_key;
 extern unsigned char session_nonce_sender[crypto_box_NONCEBYTES];
-extern bool datum_protocol_bulk_enabled;
+extern atomic_bool datum_protocol_bulk_enabled;
 extern size_t datum_replay_count;
+extern atomic_uint_fast64_t datum_session_generation;
 extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
 
 uint32_t datum_header_xor_feedback(uint32_t i);
 int datum_protocol_flush_socket(int sockfd);
 void datum_protocol_bulk_reset(void);
+int datum_protocol_bulk_cmd_for_session(
+	const void *data, int len, uint64_t expected_session_generation);
 int datum_protocol_bulk_cmd(const void *data, int len);
 void datum_protocol_bulk_drain_one(void);
 int datum_protocol_bulk_ack(int len, const unsigned char *data);

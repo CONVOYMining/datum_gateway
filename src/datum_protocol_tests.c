@@ -114,7 +114,7 @@ static int datum_protocol_test_decrypt_frame(const unsigned char *wire,
 }
 
 static void datum_protocol_bulk_tests(void) {
-	const bool saved_enabled = datum_protocol_bulk_enabled;
+	const bool saved_enabled = atomic_load(&datum_protocol_bulk_enabled);
 	const int saved_out = server_out_buf;
 	const uint32_t saved_header_key = sending_header_key;
 	unsigned char saved_nonce[sizeof(session_nonce_sender)];
@@ -127,7 +127,7 @@ static void datum_protocol_bulk_tests(void) {
 	}
 	
 	datum_protocol_bulk_reset();
-	datum_protocol_bulk_enabled = true;
+	atomic_store(&datum_protocol_bulk_enabled, true);
 	server_out_buf = 0;
 	const size_t payload_size = DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 1024;
 	unsigned char *payload = malloc(payload_size);
@@ -141,6 +141,9 @@ static void datum_protocol_bulk_tests(void) {
 		payload[i] = (unsigned char)(i * 131U + 17U);
 	}
 	datum_test(datum_protocol_bulk_cmd(payload, (int)payload_size) == 0);
+	datum_test(datum_protocol_bulk_cmd_for_session(
+		payload, (int)payload_size,
+		atomic_load(&datum_session_generation) + 1) == -1);
 	
 	uint32_t receiver_header_key = sending_header_key;
 	unsigned char receiver_nonce[crypto_box_NONCEBYTES];
@@ -248,7 +251,7 @@ static void datum_protocol_bulk_tests(void) {
 	datum_test(!memcmp(clear, share, sizeof(share)));
 	
 	// Until Apex advertises DBF support, retain the legacy command-5 reply.
-	datum_protocol_bulk_enabled = false;
+	atomic_store(&datum_protocol_bulk_enabled, false);
 	const size_t fallback_size = DATUM_BULK_FRAGMENT_DATA_SIZE + 8;
 	datum_test(datum_protocol_bulk_cmd(payload, (int)fallback_size) == 0);
 	const size_t fallback_wire_size = datum_protocol_test_flush_read(sockets[0], sockets[1], wire, sizeof(wire));
@@ -268,7 +271,7 @@ cleanup:
 	if (sockets[1] >= 0) close(sockets[1]);
 	free(payload);
 	datum_protocol_bulk_reset();
-	datum_protocol_bulk_enabled = saved_enabled;
+	atomic_store(&datum_protocol_bulk_enabled, saved_enabled);
 	server_out_buf = saved_out;
 	if (saved_output) {
 		memcpy(server_send_buffer, saved_output, (size_t)saved_out);
