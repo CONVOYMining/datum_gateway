@@ -35,12 +35,31 @@
 
 #include <string.h>
 
+#include "datum_conf.h"
 #include "datum_stratum.h"
 #include "datum_coinbaser.h"
 #include "datum_utils.h"
 
 int datum_stratum_coinbase_fit_to_template(
 	int max_sz, int fixed_bytes, T_DATUM_STRATUM_JOB *s);
+
+static void datum_prime_id_64bit_tests(void) {
+	const uint64_t saved_prime_id = datum_config.prime_id;
+	const uint16_t saved_unique_id = datum_config.coinbase_unique_id;
+	char coinbase_input[1024] = {0};
+	int target_pot_index = -1;
+	
+	datum_config.prime_id = UINT64_C(0x887766555d965e4e);
+	datum_config.coinbase_unique_id = 0x1234;
+	const int coinbase_input_size = generate_coinbase_input(
+		42, coinbase_input, &target_pot_index);
+	datum_test(coinbase_input_size >= target_pot_index + 11);
+	datum_test(!strncmp(
+		coinbase_input + target_pot_index * 2,
+		"ff34124e5e965d55667788", 22));
+	datum_config.prime_id = saved_prime_id;
+	datum_config.coinbase_unique_id = saved_unique_id;
+}
 
 static void datum_blake2b_coinbase_limit_tests(void) {
 	T_DATUM_TEMPLATE_DATA tdata;
@@ -57,5 +76,6 @@ static void datum_blake2b_coinbase_limit_tests(void) {
 }
 
 void datum_coinbaser_tests(void) {
+	datum_prime_id_64bit_tests();
 	datum_blake2b_coinbase_limit_tests();
 }

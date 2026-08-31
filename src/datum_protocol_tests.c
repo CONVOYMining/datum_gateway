@@ -42,8 +42,38 @@
 #include "datum_utils.h"
 
 int datum_protocol_share_response(int len, unsigned char *data);
+int datum_protocol_client_configure(int len, unsigned char *data);
 extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
+extern unsigned char datum_state;
+
+static void datum_protocol_config_v2_tests(void) {
+	global_config_t saved_config = datum_config;
+	const unsigned char saved_state = datum_state;
+	unsigned char payload[64] = {0};
+	size_t i = 0;
+	
+	payload[i++] = 2;
+	payload[i++] = 1;
+	payload[i++] = 0x51;
+	pk_u64le(payload, i, UINT64_C(0x887766555d965e4e)); i += 8;
+	payload[i++] = 3;
+	memcpy(payload + i, "tag", 3); i += 3;
+	pk_u64le(payload, i, 1024); i += 8;
+	payload[i++] = 0;
+	payload[i++] = 0xFE;
+	datum_state = 3;
+	datum_test(datum_protocol_client_configure((int)i, payload));
+	datum_test(datum_config.prime_id == UINT64_C(0x887766555d965e4e));
+	datum_test(datum_config.override_mining_pool_scriptsig_len == 1);
+	datum_test(datum_config.override_mining_pool_scriptsig[0] == 0x51);
+	datum_test(!strcmp(datum_config.override_mining_coinbase_tag_primary, "tag"));
+	datum_test(datum_config.override_vardiff_min == 1024);
+	payload[0] = 1;
+	datum_test(!datum_protocol_client_configure((int)i, payload));
+	datum_config = saved_config;
+	datum_state = saved_state;
+}
 
 static void datum_pow_response_large_difficulty_test(void) {
 	unsigned char accepted[9] = {DATUM_POW_SHARE_RESPONSE_ACCEPTED};
@@ -219,6 +249,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 }
 
 void datum_protocol_tests(void) {
+	datum_protocol_config_v2_tests();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 }

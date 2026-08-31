@@ -162,7 +162,7 @@ typedef struct {
 	int datum_protocol_global_timeout;
 	uint64_t datum_protocol_global_timeout_ms;
 	
-	uint32_t prime_id;
+	uint64_t prime_id;
 	unsigned char override_mining_pool_scriptsig[256];
 	int override_mining_pool_scriptsig_len;
 	char override_mining_coinbase_tag_primary[256];

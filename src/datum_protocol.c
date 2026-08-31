@@ -419,7 +419,7 @@ int datum_protocol_client_configure(int len, unsigned char *data) {
 	DLOG_DEBUG("client configuration cmd received from DATUM server");
 	char msg[1024];
 	
-	if (i >= len || data[i] != 1) {
+	if (i >= len || data[i] != 2) {
 err:
 		DLOG_ERROR("Bad configuration version from server. Is this client up to date?");
 		return 0;
@@ -435,8 +435,8 @@ err:
 	datum_config.override_mining_pool_scriptsig_len = a;
 	
 	// prime ID
-	if (i + 4 > len) goto err;
-	datum_config.prime_id = upk_u32le(data, i); i+=4;
+	if (i + 8 > len) goto err;
+	datum_config.prime_id = upk_u64le(data, i); i+=8;
 	
 	// pool coinbase tag
 	if (i >= len) goto err;
@@ -465,7 +465,7 @@ err:
 	
 	DLOG_DEBUG("DATUM Pool Payout Scriptsig: (len %d) %s",datum_config.override_mining_pool_scriptsig_len, msg);
 	DLOG_DEBUG("DATUM Pool Coinbase Tag:     \"%s\"",datum_config.override_mining_coinbase_tag_primary);
-	DLOG_DEBUG("DATUM Pool Prime ID:         %8.8lx", (unsigned long)datum_config.prime_id);
+	DLOG_DEBUG("DATUM Pool Prime ID:         %16.16"PRIx64, datum_config.prime_id);
 	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIu64,datum_config.override_vardiff_min);
 	
 	datum_state = 3; // fully ready to make work

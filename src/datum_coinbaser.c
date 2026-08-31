@@ -168,7 +168,7 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 		uchar_to_hex(&cb[i], (datum_config.coinbase_unique_id&0xFF)); i+=2; cb_input_sz++;
 		uchar_to_hex(&cb[i], ((datum_config.coinbase_unique_id>>8)&0xFF)); i+=2; cb_input_sz++;
 	} else {
-		uchar_to_hex(&cb[i], 0x07); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], 0x0B); i+=2; cb_input_sz++;
 		if (target_pot_index != NULL) *target_pot_index = cb_input_sz;
 		uchar_to_hex(&cb[i], 0xFF); i+=2; cb_input_sz++; // placeholder for PoT target
 		uchar_to_hex(&cb[i], (datum_config.coinbase_unique_id&0xFF)); i+=2; cb_input_sz++;
@@ -177,6 +177,10 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 		uchar_to_hex(&cb[i], ((datum_config.prime_id>>8)&0xFF)); i+=2; cb_input_sz++;
 		uchar_to_hex(&cb[i], ((datum_config.prime_id>>16)&0xFF)); i+=2; cb_input_sz++;
 		uchar_to_hex(&cb[i], ((datum_config.prime_id>>24)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>32)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>40)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>48)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>56)&0xFF)); i+=2; cb_input_sz++;
 	}
 	
 	return cb_input_sz;
