@@ -1538,7 +1538,8 @@ int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	}
 	if (new_mdiff) {
 		// we don't currently support miner specified minimum difficulty.
-		i+= snprintf(&sa[i], sizeof(sa)-i, ",\"minimum-difficulty\":false");
+		i+= snprintf(&sa[i], sizeof(sa)-i, "%s\"minimum-difficulty\":false",
+			new_vroll ? "," : "");
 	}
 	i+= snprintf(&sa[i], sizeof(sa)-i, "}}\n");
 	

@@ -226,6 +226,21 @@ static void datum_stratum_string_request_id_tests(void) {
 	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, oversized) == -4);
 }
 
+static void datum_stratum_minimum_difficulty_configure_tests(void) {
+	T_DATUM_CLIENT_DATA client = {0};
+	T_DATUM_MINER_DATA miner = {0};
+	char configure[] =
+		"{\"id\":20,\"method\":\"mining.configure\","
+		"\"params\":[[\"minimum-difficulty\"],{}]}";
+	static const char expected[] =
+		"{\"error\":null,\"id\":20,\"result\":{\"minimum-difficulty\":false}}\n";
+	
+	client.app_client_data = &miner;
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, configure) == 0);
+	datum_test(client.out_buf == (int)strlen(expected));
+	datum_test(!memcmp(client.w_buffer, expected, strlen(expected)));
+}
+
 
 void datum_stratum_mod_username_tests() {
 	const char * const s_umods = "{\"x\":{\"addrA\": 0.3}, \"abc\":{\"addrB\":0.3,\"addrC\":0.3},\":)\":{\"\":0.5}}";
@@ -367,6 +382,7 @@ void datum_stratum_mod_username_tests() {
 
 void datum_stratum_tests(void) {
 	datum_stratum_mod_username_tests();
+	datum_stratum_minimum_difficulty_configure_tests();
 	datum_stratum_string_request_id_tests();
 	datum_blake2b_h_not_zero_tests();
     datum_blake2b_client_pot_commitment_tests();
