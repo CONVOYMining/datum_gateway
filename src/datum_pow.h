@@ -59,6 +59,7 @@ bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, 
  * when it is not. ntime8 is the 8-byte time field as the hasher returned it. */
 uint32_t datum_blake2b_share_ntime(uint32_t time_on_wire, const unsigned char *ntime8, uint8_t flags);
 bool datum_blake2b_share_target(unsigned char *target, unsigned int bits);
+uint32_t datum_blake2b_share_nbits(unsigned int bits);
 long double datum_blake2b_sia_difficulty(uint64_t n);
 int datum_blake2b_format_stratum_difficulty(char *out, size_t out_size, uint64_t n);
 long double datum_blake2b_accounting_difficulty(long double x);

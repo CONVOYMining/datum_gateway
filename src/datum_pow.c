@@ -107,6 +107,33 @@ bool datum_blake2b_share_target(unsigned char *target, unsigned int bits) {
 	return true;
 }
 
+uint32_t datum_blake2b_share_nbits(unsigned int bits) {
+	unsigned char target[32];
+	unsigned int size = sizeof(target);
+	uint32_t mantissa = 0;
+	
+	if (!datum_blake2b_share_target(target, bits)) return 0;
+	while (size && !target[size - 1]) size--;
+	if (size <= 3) {
+		for (unsigned int i = 0; i < size; i++) {
+			mantissa |= (uint32_t)target[i] << (8 * i);
+		}
+		mantissa <<= 8 * (3 - size);
+	} else {
+		mantissa = (uint32_t)target[size - 3] |
+			((uint32_t)target[size - 2] << 8) |
+			((uint32_t)target[size - 1] << 16);
+	}
+	if (mantissa & UINT32_C(0x00800000)) {
+		mantissa >>= 8;
+		size++;
+	}
+	// Compact encoding truncates toward a harder target. This is the closest
+	// representable value that cannot classify work below Gateway's accepted
+	// share target as satisfying the synthetic network target.
+	return (size << 24) | (mantissa & UINT32_C(0x007fffff));
+}
+
 long double datum_blake2b_sia_difficulty(uint64_t n) {
 	return ((long double)n) * 65535.0L / 65536.0L;
 }

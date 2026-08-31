@@ -1446,6 +1446,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	unsigned int cbselect = 0;
 	char s[512];
 	unsigned char tdiff = 0xFF;
+	uint32_t share_nbits;
 	unsigned char blake2b_commitment[32];
 	unsigned char blake2b_sia_coinb1[39];
 	int i;
@@ -1460,7 +1461,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	//coinb2 - Final part of coinbase transaction.
 	//merkle_branch - List of hashes, will be used for calculation of merkle root.
 	//version - Bitcoin block version.
-	//nbits - Encoded current network difficulty
+	//nbits - Compact per-client share target; the consensus target stays hidden
 	//ntime - Current ntime/
 	//clean_jobs
 	
@@ -1516,6 +1517,9 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		m->quickdiff_value = m->last_sent_diff;
 		datum_blake2b_share_target(m->quickdiff_target, floorPoT(m->quickdiff_value));
 	}
+	tdiff = floorPoT(m->last_sent_diff);
+	share_nbits = datum_blake2b_share_nbits(tdiff);
+	if (!share_nbits) return -1;
 	
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
 	datum_socket_send_string_to_client(c, "{\"id\":null,\"method\":\"mining.notify\",\"params\":[");
@@ -1535,8 +1539,8 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// this may look silly, but the send buffer doesn't get emptied until this thread's loop runs. so might as well just utilize it
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
-	tdiff = floorPoT(m->last_sent_diff);
-	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
+	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff,
+		blake2b_commitment, blake2b_sia_coinb1)) {
 		return -1;
 	}
 	for(i=0;i<(int)sizeof(blake2b_sia_coinb1);i++) {
@@ -1546,7 +1550,10 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	datum_socket_send_string_to_client(c, cb1);
 	// BLAKE2b-sia work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
 	datum_socket_send_string_to_client(c, "\",\"\",[],");
-	snprintf(s, sizeof(s), "\"%s\",\"%s\",\"%s\",", j->version, j->nbits, j->ntime);
+	// Do not disclose the consensus target to the hasher. This is the closest
+	// compact target that is not easier than its accepted share target.
+	snprintf(s, sizeof(s), "\"%s\",\"%8.8x\",\"%s\",",
+		j->version, share_nbits, j->ntime);
 	datum_socket_send_string_to_client(c, s);
 	
 	// bunch of reasons we may need to discard old work

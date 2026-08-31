@@ -151,6 +151,17 @@ static void datum_pow_blake2b_vector_tests(void) {
 	datum_test(share_target[27] == 0x0f);
 	for(size_t i=28;i<32;i++) datum_test(share_target[i] == 0);
 	datum_test(!datum_blake2b_share_target(share_target, 224));
+	datum_test(datum_blake2b_share_nbits(0) == UINT32_C(0x1d00ffff));
+	datum_test(datum_blake2b_share_nbits(1) == UINT32_C(0x1c7fffff));
+	datum_test(datum_blake2b_share_nbits(2) == UINT32_C(0x1c3fffff));
+	datum_test(datum_blake2b_share_nbits(8) == UINT32_C(0x1c00ffff));
+	datum_test(datum_blake2b_share_nbits(224) == 0);
+	for(unsigned int pot=0;pot<224;pot++) {
+		unsigned char accepted[32], advertised[32];
+		datum_test(datum_blake2b_share_target(accepted, pot));
+		nbits_to_target(datum_blake2b_share_nbits(pot), advertised);
+		datum_test(compare_hashes(advertised, accepted) <= 0);
+	}
 	datum_test(datum_blake2b_sia_difficulty(1) == 0.9999847412109375L);
 	datum_test(datum_blake2b_sia_difficulty(16) == 15.999755859375L);
 	datum_test(datum_blake2b_accounting_difficulty(65535.0L) == 65536.0L);
