@@ -60,6 +60,11 @@
 #define DATUM_PROTOCOL_BUFFER_SIZE (DATUM_PROTOCOL_MAX_CMD_DATA_SIZE*3)
 #define DATUM_PROTOCOL_MAX_USERNAME_LEN 384
 
+// Protocol command 6 carries sequential DBF1 fragments. Only one small
+// fragment is admitted after the primary send queue drains.
+#define DATUM_BULK_FRAGMENT_HEADER_SIZE 16
+#define DATUM_BULK_FRAGMENT_DATA_SIZE (16 * 1024)
+
 #define MAX_DATUM_CLIENT_EVENTS 32
 
 // Header is only XOR'd with a rotating key.  This is NOT 100% secure, and makes the cmd# and length of the handshake message decipherable.

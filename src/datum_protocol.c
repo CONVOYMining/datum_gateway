@@ -108,6 +108,21 @@ pthread_mutex_t datum_protocol_send_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t datum_protocol_migration_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t datum_protocol_current_migration_deadline_ms;
 
+#define DATUM_BULK_QUEUE_CAPACITY 2
+typedef struct {
+	uint32_t id;
+	uint32_t size;
+	uint32_t offset;
+	unsigned char *data;
+	bool awaiting_ack;
+} T_DATUM_BULK_TRANSFER;
+
+static pthread_mutex_t datum_protocol_bulk_lock = PTHREAD_MUTEX_INITIALIZER;
+static T_DATUM_BULK_TRANSFER datum_protocol_bulk_queue[DATUM_BULK_QUEUE_CAPACITY];
+static size_t datum_protocol_bulk_queue_count;
+static uint32_t datum_protocol_bulk_next_id = 1;
+bool datum_protocol_bulk_enabled;
+
 unsigned char datum_protocol_next_job_idx = 0;
 pthread_mutex_t datum_protocol_next_job_idx_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -259,35 +274,61 @@ int datum_protocol_chars_to_server(unsigned char *s, int len) {
 	return len;
 }
 
-int datum_protocol_mining_cmd(void *data, int len) {
-	// protocol cmd 5
-	// encypt and send a standard mining sub-command
-	// this can be called from other threads so must be thread safe!
+int datum_protocol_flush_socket(int sockfd) {
+	int sent;
+	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
+	if (!server_out_buf) {
+		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+		return 0;
+	}
+	sent = send(sockfd, server_send_buffer, server_out_buf, MSG_DONTWAIT);
+	if (sent > 0) {
+		if (sent < server_out_buf) {
+			memmove(server_send_buffer, server_send_buffer + sent,
+				server_out_buf - sent);
+		}
+		server_out_buf = sent <= server_out_buf ? server_out_buf - sent : 0;
+		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+		return 0;
+	}
+	const int failure = errno;
+	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+	return failure == EAGAIN || failure == EWOULDBLOCK ||
+		failure == ENOTCONN ? 0 : -1;
+}
+
+static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
+	int len, bool require_empty_buffer) {
 	T_DATUM_PROTOCOL_HEADER h;
-	if (len < 0) return -1;
+	if (!data || len < 0 || (size_t)len + crypto_box_MACBYTES >=
+	    DATUM_PROTOCOL_MAX_CMD_DATA_SIZE) return -1;
 	
 	memset(&h, 0, sizeof(T_DATUM_PROTOCOL_HEADER));
 	
 	h.is_encrypted_channel = true;
-	h.proto_cmd = 5;
+	h.proto_cmd = proto_cmd;
 	h.cmd_len = len;
 	h.cmd_len += crypto_box_MACBYTES;
 	const size_t frame_size = sizeof(T_DATUM_PROTOCOL_HEADER) +
 		(size_t)len + crypto_box_MACBYTES;
 	if (frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) return -1;
 	
-	// sends of encrypted data must remain ordered
-	// Reserve the complete frame before advancing either crypto state; an
-	// orphan header would permanently desynchronize the session.
+	// Sends of encrypted data must remain ordered. A bulk fragment is admitted
+	// only to an empty primary buffer, bounding the delay inherited by a mining
+	// frame that arrives just after it.
 	pthread_mutex_lock(&datum_protocol_sender_stage1_lock);
 	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
-	if ((size_t)server_out_buf + frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) {
+	if ((require_empty_buffer && server_out_buf != 0) ||
+	    (size_t)server_out_buf + frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) {
 		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 		return -1;
 	}
 	
-	crypto_box_easy_afternm(data, data, len, session_nonce_sender, session_precomp.precomp_remote);
+	unsigned char *encrypted = server_send_buffer + server_out_buf +
+		sizeof(T_DATUM_PROTOCOL_HEADER);
+	crypto_box_easy_afternm(encrypted, data, len, session_nonce_sender,
+		session_precomp.precomp_remote);
 	//DLOG_DEBUG("mining cmd 5--- len %d, send header key %8.8x, raw %8.8lx", h.cmd_len, sending_header_key, (unsigned long)upk_u32le(h, 0));
 	datum_xor_header_key(&h, sending_header_key);
 	sending_header_key = datum_header_xor_feedback(sending_header_key);
@@ -295,13 +336,104 @@ int datum_protocol_mining_cmd(void *data, int len) {
 	memcpy(server_send_buffer + server_out_buf, &h,
 		sizeof(T_DATUM_PROTOCOL_HEADER));
 	server_out_buf += sizeof(T_DATUM_PROTOCOL_HEADER);
-	memcpy(server_send_buffer + server_out_buf, data,
-		(size_t)len + crypto_box_MACBYTES);
 	server_out_buf += len + crypto_box_MACBYTES;
 	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 	pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 	
 	return 0;
+}
+
+int datum_protocol_mining_cmd(void *data, int len) {
+	// Protocol command 5. This can be called from other threads.
+	return datum_protocol_encrypted_cmd(5, data, len, false);
+}
+
+void datum_protocol_bulk_reset(void) {
+	pthread_mutex_lock(&datum_protocol_bulk_lock);
+	for (size_t i = 0; i < datum_protocol_bulk_queue_count; ++i) {
+		free(datum_protocol_bulk_queue[i].data);
+	}
+	memset(datum_protocol_bulk_queue, 0, sizeof(datum_protocol_bulk_queue));
+	datum_protocol_bulk_queue_count = 0;
+	pthread_mutex_unlock(&datum_protocol_bulk_lock);
+}
+
+int datum_protocol_bulk_cmd(const void *data, int len) {
+	if (!data || len <= 0 || len >= DATUM_PROTOCOL_MAX_CMD_DATA_SIZE)
+		return -1;
+	if (!datum_protocol_bulk_enabled)
+		return datum_protocol_mining_cmd((void *)data, len);
+	unsigned char *copy = malloc((size_t)len);
+	if (!copy) return -1;
+	memcpy(copy, data, (size_t)len);
+
+	pthread_mutex_lock(&datum_protocol_bulk_lock);
+	if (datum_protocol_bulk_queue_count == DATUM_BULK_QUEUE_CAPACITY) {
+		pthread_mutex_unlock(&datum_protocol_bulk_lock);
+		free(copy);
+		return -1;
+	}
+	uint32_t id = datum_protocol_bulk_next_id++;
+	if (!id) id = datum_protocol_bulk_next_id++;
+	datum_protocol_bulk_queue[datum_protocol_bulk_queue_count++] =
+		(T_DATUM_BULK_TRANSFER){id, (uint32_t)len, 0, copy, false};
+	pthread_mutex_unlock(&datum_protocol_bulk_lock);
+	return 0;
+}
+
+void datum_protocol_bulk_drain_one(void) {
+	pthread_mutex_lock(&datum_protocol_bulk_lock);
+	if (!datum_protocol_bulk_queue_count ||
+	    datum_protocol_bulk_queue[0].awaiting_ack) {
+		pthread_mutex_unlock(&datum_protocol_bulk_lock);
+		return;
+	}
+	T_DATUM_BULK_TRANSFER *transfer = &datum_protocol_bulk_queue[0];
+	const uint32_t remaining = transfer->size - transfer->offset;
+	const uint32_t chunk_size = remaining < DATUM_BULK_FRAGMENT_DATA_SIZE ?
+		remaining : DATUM_BULK_FRAGMENT_DATA_SIZE;
+	unsigned char fragment[DATUM_BULK_FRAGMENT_HEADER_SIZE +
+		DATUM_BULK_FRAGMENT_DATA_SIZE];
+	memcpy(fragment, "DBF\x01", 4);
+	pk_u32le(fragment, 4, transfer->id);
+	pk_u32le(fragment, 8, transfer->size);
+	pk_u32le(fragment, 12, transfer->offset);
+	memcpy(fragment + DATUM_BULK_FRAGMENT_HEADER_SIZE,
+		transfer->data + transfer->offset, chunk_size);
+	if (datum_protocol_encrypted_cmd(6, fragment,
+		DATUM_BULK_FRAGMENT_HEADER_SIZE + chunk_size, true) == 0) {
+		transfer->offset += chunk_size;
+		transfer->awaiting_ack = true;
+	}
+	pthread_mutex_unlock(&datum_protocol_bulk_lock);
+}
+
+int datum_protocol_bulk_ack(int len, const unsigned char *data) {
+	if (!data || len != 12 || memcmp(data, "DBA\x01", 4)) return 0;
+	const uint32_t id = upk_u32le(data, 4);
+	const uint32_t next_offset = upk_u32le(data, 8);
+	pthread_mutex_lock(&datum_protocol_bulk_lock);
+	if (!datum_protocol_bulk_queue_count ||
+	    datum_protocol_bulk_queue[0].id != id ||
+	    !datum_protocol_bulk_queue[0].awaiting_ack ||
+	    datum_protocol_bulk_queue[0].offset != next_offset) {
+		pthread_mutex_unlock(&datum_protocol_bulk_lock);
+		return 0;
+	}
+	T_DATUM_BULK_TRANSFER *transfer = &datum_protocol_bulk_queue[0];
+	transfer->awaiting_ack = false;
+	if (transfer->offset == transfer->size) {
+		free(transfer->data);
+		--datum_protocol_bulk_queue_count;
+		if (datum_protocol_bulk_queue_count) {
+			memmove(datum_protocol_bulk_queue, datum_protocol_bulk_queue + 1,
+				datum_protocol_bulk_queue_count * sizeof(*datum_protocol_bulk_queue));
+		}
+		memset(&datum_protocol_bulk_queue[datum_protocol_bulk_queue_count],
+			0, sizeof(*datum_protocol_bulk_queue));
+	}
+	pthread_mutex_unlock(&datum_protocol_bulk_lock);
+	return 1;
 }
 
 void datum_protocol_replay_clear(void) {
@@ -1258,6 +1390,8 @@ err:
 		DLOG_ERROR("Invalid data structure in configuration :(  Is this client up to date???");
 		return 0;
 	}
+	datum_protocol_bulk_enabled = i + 6 <= len &&
+		!memcmp(data + i + 2, "DBF\x01", 4);
 	
 	memset(msg, 0, (datum_config.override_mining_pool_scriptsig_len<<1)+2);
 	for(i=0;i<datum_config.override_mining_pool_scriptsig_len;i++) {
@@ -1435,7 +1569,12 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	j = 1 + (rand() % 111);
 	memset(&msg[i], rand(), j);
 	i+=j;
-	datum_protocol_mining_cmd(msg, i); // let 'er rip
+	if (i > DATUM_BULK_FRAGMENT_DATA_SIZE) {
+		if (datum_protocol_bulk_cmd(msg, i))
+			DLOG_WARN("Could not queue large transaction-validation reply");
+	} else {
+		datum_protocol_mining_cmd(msg, i);
+	}
 	
 	DLOG_DEBUG("sent short txn list to server for job %d (%d bytes)",job_index,i);
 	
@@ -1576,7 +1715,12 @@ int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
 	j = 1 + (rand() % 111);
 	memset(&msg[i], rand(), j);
 	i+=j;
-	datum_protocol_mining_cmd(msg, i); // let 'er rip
+	if (i > DATUM_BULK_FRAGMENT_DATA_SIZE) {
+		if (datum_protocol_bulk_cmd(msg, i))
+			DLOG_WARN("Could not queue large transaction-validation reply");
+	} else {
+		datum_protocol_mining_cmd(msg, i);
+	}
 	
 	DLOG_DEBUG("sent full txns to server for job %d (%d bytes for %d txns)",job_index,i,(int)req_count);
 	
@@ -1678,7 +1822,8 @@ int datum_protocol_job_validation_sblock(unsigned char *data) {
 	pthread_rwlock_unlock(&datum_jobs_rwlock);
 	msg[i] = 0xFE; i++;
 	// no random data here for size safety. this is also already expensive, potentially taking seconds to transmit.
-	datum_protocol_mining_cmd(msg, i); // let 'er rip
+	if (datum_protocol_bulk_cmd(msg, i))
+		DLOG_WARN("Could not queue full template-validation reply");
 	DLOG_DEBUG("sent full block of txns to server for job %d (%d bytes)",job_index,i);
 	return 1;
 }
@@ -2315,6 +2460,10 @@ int datum_protocol_server_msg(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data) {
 			return datum_protocol_mining_cmd5(h, data);
 		}
 		
+		case 6: {
+			return datum_protocol_bulk_ack(h->cmd_len, data);
+		}
+
 		case 7: {
 			// display INFO in log
 			if (h->cmd_len) {
@@ -2630,7 +2779,6 @@ void *datum_protocol_client(void *args) {
 	char pool_pubkey[sizeof(datum_config.datum_pool_pubkey)];
 	int pool_port;
 	bool break_again = false;
-	int sent = 0;
 	T_DATUM_PROTOCOL_HEADER s_header;
 	pthread_mutex_lock(&datum_replay_mutex);
 	datum_session_generation++;
@@ -2657,6 +2805,8 @@ void *datum_protocol_client(void *args) {
 	server_out_buf = 0;
 	server_in_buf = 0;
 	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+	datum_protocol_bulk_reset();
+	datum_protocol_bulk_enabled = false;
 	datum_state = 0;
 	memset(&s_header, 0, sizeof(T_DATUM_PROTOCOL_HEADER));
 	
@@ -2811,29 +2961,9 @@ void *datum_protocol_client(void *args) {
 			datum_protocol_replay_unanswered();
 			datum_protocol_pow_queue_submits();
 		}
+		datum_protocol_bulk_drain_one();
 		
-		pthread_mutex_lock(&datum_protocol_send_buffer_lock);
-		if (server_out_buf) {
-			sent = send(sockfd, server_send_buffer, server_out_buf, MSG_DONTWAIT);
-			if (sent > 0) {
-				if (sent < server_out_buf) {
-					// not a full send. shift remaining data to beginning of w_buffer
-					memmove(server_send_buffer, server_send_buffer + sent, server_out_buf - sent);
-				}
-				if (sent <= server_out_buf) {
-					server_out_buf -= sent;
-				} else {
-					// should never happen
-					server_out_buf = 0;
-				}
-			} else {
-				if (!(errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOTCONN)) {
-					pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
-					break;
-				}
-			}
-		}
-		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+		if (datum_protocol_flush_socket(sockfd)) break;
 		
 		break_again = false;
 		// Basic state machine for connection setup

@@ -33,8 +33,11 @@
  *
  */
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "datum_conf.h"
 #include "datum_pow.h"
@@ -71,6 +74,210 @@ static void datum_protocol_config_v3_tests(void) {
 	datum_config = saved_config;
 	datum_state = saved_state;
 }
+
+static size_t datum_protocol_test_flush_read(int sender, int receiver,
+	unsigned char *output, size_t output_size) {
+	const size_t expected = (size_t)server_out_buf;
+	if (expected > output_size) return 0;
+	size_t received = 0;
+	for (unsigned int attempt = 0; attempt < 10000 &&
+	     (server_out_buf || received < expected); ++attempt) {
+		if (datum_protocol_flush_socket(sender)) return 0;
+		const ssize_t count = recv(receiver, output + received,
+			output_size - received, MSG_DONTWAIT);
+		if (count > 0) received += (size_t)count;
+		else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+			errno != EINTR) return 0;
+		if (server_out_buf || received < expected) usleep(100);
+	}
+	return received == expected ? received : 0;
+}
+
+static int datum_protocol_test_decrypt_frame(const unsigned char *wire,
+	size_t wire_size, size_t *offset, uint32_t *header_key,
+	unsigned char nonce[crypto_box_NONCEBYTES],
+	T_DATUM_PROTOCOL_HEADER *header, unsigned char *clear,
+	size_t clear_size) {
+	if (*offset + sizeof(*header) > wire_size) return -1;
+	memcpy(header, wire + *offset, sizeof(*header));
+	*((uint32_t *)header) ^= *header_key;
+	*header_key = datum_header_xor_feedback(*header_key);
+	*offset += sizeof(*header);
+	if (!header->is_encrypted_channel || header->cmd_len < crypto_box_MACBYTES ||
+	    *offset + header->cmd_len > wire_size ||
+	    header->cmd_len - crypto_box_MACBYTES > clear_size) return -1;
+	if (crypto_box_open_easy_afternm(clear, wire + *offset, header->cmd_len,
+		nonce, session_precomp.precomp_remote)) return -1;
+	*offset += header->cmd_len;
+	datum_increment_session_nonce(nonce);
+	return header->cmd_len - crypto_box_MACBYTES;
+}
+
+static void datum_protocol_bulk_tests(void) {
+	const bool saved_enabled = datum_protocol_bulk_enabled;
+	const int saved_out = server_out_buf;
+	const uint32_t saved_header_key = sending_header_key;
+	unsigned char saved_nonce[sizeof(session_nonce_sender)];
+	memcpy(saved_nonce, session_nonce_sender, sizeof(saved_nonce));
+	unsigned char *saved_output = NULL;
+	if (saved_out > 0) {
+		saved_output = malloc((size_t)saved_out);
+		if (saved_output)
+			memcpy(saved_output, server_send_buffer, (size_t)saved_out);
+	}
+	
+	datum_protocol_bulk_reset();
+	datum_protocol_bulk_enabled = true;
+	server_out_buf = 0;
+	const size_t payload_size = DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 1024;
+	unsigned char *payload = malloc(payload_size);
+	int sockets[2] = {-1, -1};
+	const int socket_result = socketpair(
+		AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, sockets);
+	datum_test(payload != NULL);
+	datum_test(socket_result == 0);
+	if (!payload || socket_result) goto cleanup;
+	for (size_t i = 0; i < payload_size; ++i) {
+		payload[i] = (unsigned char)(i * 131U + 17U);
+	}
+	datum_test(datum_protocol_bulk_cmd(payload, (int)payload_size) == 0);
+	
+	uint32_t receiver_header_key = sending_header_key;
+	unsigned char receiver_nonce[crypto_box_NONCEBYTES];
+	memcpy(receiver_nonce, session_nonce_sender, sizeof(receiver_nonce));
+	unsigned char wire[2 * (sizeof(T_DATUM_PROTOCOL_HEADER) +
+		DATUM_BULK_FRAGMENT_HEADER_SIZE + DATUM_BULK_FRAGMENT_DATA_SIZE +
+		crypto_box_MACBYTES)];
+	unsigned char clear[DATUM_BULK_FRAGMENT_HEADER_SIZE +
+		DATUM_BULK_FRAGMENT_DATA_SIZE];
+	const unsigned char share[] = {0x27, 'S', 'H', 'A', 'R', 'E'};
+	const unsigned char block[] = {0x27, 'B', 'L', 'O', 'C', 'K'};
+	bool share_sent = false;
+	bool block_sent = false;
+	uint32_t bulk_id = 0;
+	uint32_t verified_offset = 0;
+	while (verified_offset < payload_size) {
+		bool expect_share = false;
+		bool expect_block = false;
+		if (!share_sent) {
+			datum_test(datum_protocol_mining_cmd(
+				(void *)share, sizeof(share)) == 0);
+			datum_protocol_bulk_drain_one();
+			share_sent = expect_share = true;
+		} else {
+			datum_protocol_bulk_drain_one();
+			if (!block_sent && verified_offset >=
+			    payload_size / 2) {
+				datum_test(datum_protocol_mining_cmd(
+					(void *)block, sizeof(block)) == 0);
+				block_sent = expect_block = true;
+			}
+		}
+		
+		const size_t wire_size = datum_protocol_test_flush_read(
+			sockets[0], sockets[1], wire, sizeof(wire));
+		datum_test(wire_size != 0);
+		if (!wire_size) break;
+		size_t wire_offset = 0;
+		bool saw_fragment = false;
+		bool saw_share = false;
+		bool saw_block = false;
+		while (wire_offset < wire_size) {
+			T_DATUM_PROTOCOL_HEADER header;
+			const int clear_size = datum_protocol_test_decrypt_frame(
+				wire, wire_size, &wire_offset, &receiver_header_key,
+				receiver_nonce, &header, clear, sizeof(clear));
+			datum_test(clear_size >= 0);
+			if (clear_size < 0) break;
+			if (header.proto_cmd == 5) {
+				if ((size_t)clear_size == sizeof(share) &&
+				    !memcmp(clear, share, sizeof(share))) saw_share = true;
+				if ((size_t)clear_size == sizeof(block) &&
+				    !memcmp(clear, block, sizeof(block))) saw_block = true;
+				continue;
+			}
+			datum_test(header.proto_cmd == 6);
+			datum_test((size_t)clear_size > DATUM_BULK_FRAGMENT_HEADER_SIZE);
+			datum_test(!memcmp(clear, "DBF\x01", 4));
+			if (bulk_id) datum_test(upk_u32le(clear, 4) == bulk_id);
+			else bulk_id = upk_u32le(clear, 4);
+			datum_test(upk_u32le(clear, 8) == payload_size);
+			const uint32_t fragment_offset = upk_u32le(clear, 12);
+			const uint32_t fragment_size = (uint32_t)clear_size -
+				DATUM_BULK_FRAGMENT_HEADER_SIZE;
+			datum_test(fragment_offset == verified_offset);
+			datum_test(!memcmp(clear + DATUM_BULK_FRAGMENT_HEADER_SIZE,
+				payload + fragment_offset, fragment_size));
+			verified_offset += fragment_size;
+			saw_fragment = true;
+		}
+		datum_test(saw_share == expect_share);
+		datum_test(saw_block == expect_block);
+		if (expect_share) datum_test(!saw_fragment);
+		if (expect_block) datum_test(saw_fragment);
+		if (saw_fragment) {
+			unsigned char ack[12] = {'D', 'B', 'A', 1};
+			pk_u32le(ack, 4, bulk_id);
+			pk_u32le(ack, 8, verified_offset);
+			datum_test(datum_protocol_bulk_ack(sizeof(ack), ack));
+		}
+	}
+	datum_test(verified_offset == payload_size);
+	datum_test(share_sent && block_sent);
+	
+	// A disconnect abandons an incomplete transfer without delaying the next
+	// session's primary mining traffic.
+	datum_test(datum_protocol_bulk_cmd(payload, (int)payload_size) == 0);
+	datum_protocol_bulk_drain_one();
+	datum_test(datum_protocol_test_flush_read(sockets[0], sockets[1], wire, sizeof(wire)) != 0);
+	close(sockets[0]); sockets[0] = -1;
+	close(sockets[1]); sockets[1] = -1;
+	datum_protocol_bulk_reset();
+	datum_test(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, sockets) == 0);
+	receiver_header_key = sending_header_key;
+	memcpy(receiver_nonce, session_nonce_sender, sizeof(receiver_nonce));
+	datum_test(datum_protocol_mining_cmd((void *)share, sizeof(share)) == 0);
+	const size_t resumed_size = datum_protocol_test_flush_read(sockets[0], sockets[1], wire, sizeof(wire));
+	size_t resumed_offset = 0;
+	T_DATUM_PROTOCOL_HEADER resumed_header;
+	const int resumed_clear_size = datum_protocol_test_decrypt_frame(
+		wire, resumed_size, &resumed_offset, &receiver_header_key,
+		receiver_nonce, &resumed_header, clear, sizeof(clear));
+	datum_test(resumed_header.proto_cmd == 5);
+	datum_test(resumed_clear_size == sizeof(share));
+	datum_test(!memcmp(clear, share, sizeof(share)));
+	
+	// Until Apex advertises DBF support, retain the legacy command-5 reply.
+	datum_protocol_bulk_enabled = false;
+	const size_t fallback_size = DATUM_BULK_FRAGMENT_DATA_SIZE + 8;
+	datum_test(datum_protocol_bulk_cmd(payload, (int)fallback_size) == 0);
+	const size_t fallback_wire_size = datum_protocol_test_flush_read(sockets[0], sockets[1], wire, sizeof(wire));
+	size_t fallback_wire_offset = 0;
+	T_DATUM_PROTOCOL_HEADER fallback_header;
+	const int fallback_clear_size = datum_protocol_test_decrypt_frame(
+		wire, fallback_wire_size, &fallback_wire_offset,
+		&receiver_header_key, receiver_nonce, &fallback_header, clear,
+		sizeof(clear));
+	datum_test(fallback_header.proto_cmd == 5);
+	datum_test(fallback_clear_size == (int)fallback_size);
+	datum_test(!memcmp(clear, payload, fallback_size));
+	datum_test(fallback_wire_offset == fallback_wire_size);
+	
+cleanup:
+	if (sockets[0] >= 0) close(sockets[0]);
+	if (sockets[1] >= 0) close(sockets[1]);
+	free(payload);
+	datum_protocol_bulk_reset();
+	datum_protocol_bulk_enabled = saved_enabled;
+	server_out_buf = saved_out;
+	if (saved_output) {
+		memcpy(server_send_buffer, saved_output, (size_t)saved_out);
+		free(saved_output);
+	}
+	sending_header_key = saved_header_key;
+	memcpy(session_nonce_sender, saved_nonce, sizeof(saved_nonce));
+}
+
 
 static void datum_protocol_resume_tests(void) {
 	T_DATUM_PROTOCOL_POW pow = {0};
@@ -560,6 +767,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 void datum_protocol_tests(void) {
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
+	datum_protocol_bulk_tests();
 	datum_protocol_resume_tests();
 	datum_protocol_abw_cache_tests();
 	datum_pow_response_large_difficulty_test();

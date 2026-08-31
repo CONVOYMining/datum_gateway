@@ -40,13 +40,23 @@
 
 typedef struct T_DATUM_REPLAY_PENDING T_DATUM_REPLAY_PENDING;
 
+extern DATUM_ENC_PRECOMP session_precomp;
 extern unsigned char datum_state;
 extern int server_out_buf;
+extern unsigned char server_send_buffer[DATUM_PROTOCOL_BUFFER_SIZE];
 extern uint32_t sending_header_key;
 extern unsigned char session_nonce_sender[crypto_box_NONCEBYTES];
+extern bool datum_protocol_bulk_enabled;
 extern size_t datum_replay_count;
 extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
+
+uint32_t datum_header_xor_feedback(uint32_t i);
+int datum_protocol_flush_socket(int sockfd);
+void datum_protocol_bulk_reset(void);
+int datum_protocol_bulk_cmd(const void *data, int len);
+void datum_protocol_bulk_drain_one(void);
+int datum_protocol_bulk_ack(int len, const unsigned char *data);
 
 void datum_protocol_replay_clear(void);
 T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
