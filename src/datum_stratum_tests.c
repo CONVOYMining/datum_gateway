@@ -641,13 +641,14 @@ static void datum_pow_recycled_protocol_job_test(void) {
        strcpy(datum_config.mining_pool_address, "pool");
        pow.username[0] = 0;
 
-       // Cycle the eight protocol IDs. Merely assigning job 8 must leave remote
-       // slot 0 bound to job 0 until a share for the new job is actually sent.
+       // Cycle the eight protocol IDs. Assigning job 8 reuses slot 0 and wipes
+       // the remote cache so the next share must re-upload merkle and coinbase.
        for(size_t i=1;i<MAX_DATUM_PROTOCOL_JOBS + 1;i++) {
                jobs[i].datum_job_idx = datum_protocol_setup_new_job_idx(&jobs[i]);
        }
        datum_test(jobs[MAX_DATUM_PROTOCOL_JOBS].datum_job_idx == 0);
-       datum_test(datum_jobs[0].server_sjob == &jobs[0]);
+       datum_test(datum_jobs[0].sjob == &jobs[MAX_DATUM_PROTOCOL_JOBS]);
+       datum_test(datum_jobs[0].server_sjob == NULL);
 
        pow.sjob = &jobs[MAX_DATUM_PROTOCOL_JOBS];
        memcpy(pow.stratum_job_id, pow.sjob->job_id, sizeof(pow.stratum_job_id));

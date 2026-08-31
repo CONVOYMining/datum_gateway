@@ -142,8 +142,8 @@ unsigned char datum_protocol_setup_new_job_idx(void *sx) {
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
 	
-	// Keep server_sjob / server_has_* so a recycled slot does not drop the
-	// remote cache until a share for the new job is actually sent.
+	memset(&datum_jobs[a], 0, sizeof(T_DATUM_PROTOCOL_JOB));
+	
 	datum_jobs[a].sjob = s;
 	datum_jobs[a].datum_job_id = a;
 	
