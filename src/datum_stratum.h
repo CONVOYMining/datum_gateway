@@ -50,6 +50,7 @@
 #define MAX_STRATUM_JOBS 256
 
 #define MAX_COINBASE_TYPES 6
+#define DATUM_COINBASE_ID_EMPTY 0xff
 #define COINBASE_TYPE_TINY 0 // "empty", just pays pool
 #define COINBASE_TYPE_SMALL 1 // Nicehash needs a tiny coinb1, among other things. Max 500 bytes.
 #define COINBASE_TYPE_ANTMAIN 2 // Hack for antminer stock firmware to 750 bytes

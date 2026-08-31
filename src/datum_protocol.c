@@ -1464,7 +1464,7 @@ int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *m
 				return 0;
 			}
 			msg[i++] = 0x02;
-			msg[i++] = 0xFF;
+			msg[i++] = DATUM_COINBASE_ID_EMPTY;
 			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb1_len); i += 2;
 			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb2_len); i += 2;
 			memcpy(&msg[i], sjob->subsidy_only_coinbase.coinb1_bin, sjob->subsidy_only_coinbase.coinb1_len);

@@ -1108,7 +1108,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// need to build the full coinbase txn
 	coinbase_index = hex2bin_uchar(&job_id_s[0xE]);
 	if (coinbase_index >= MAX_COINBASE_TYPES) {
-		if (!(empty_work && coinbase_index == 255)) {
+		if (!(empty_work && coinbase_index == DATUM_COINBASE_ID_EMPTY)) {
 			send_unknown_work_error(c, id);
 			stratum_note_share(m, false, job_diff);
 			return 0;
