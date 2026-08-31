@@ -952,10 +952,6 @@ const char *datum_stratum_mod_username(const char *username_s, char * const user
 	return username_buf;
 }
 
-static bool stratum_job_is_blake2b(const T_DATUM_STRATUM_JOB *j) {
-	return j && j->block_template && j->block_template->header_version >= 2;
-}
-
 static void stratum_note_share(T_DATUM_MINER_DATA *m, bool accepted, uint64_t diff) {
 	if (accepted) {
 		m->share_count_accepted++;
@@ -1011,7 +1007,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	unsigned char extranonce_bin[12];
 	
 	unsigned char block_header[80];
-	unsigned char digest_temp[40];	unsigned char share_hash[40];
+	unsigned char share_hash[40];
 	unsigned char full_cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
 	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	int i;
@@ -1019,13 +1015,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	bool empty_work = false;
 	bool was_block = false;
 	char new_notify_blockhash[65];
-	
-	// 0 = version 4 bytes
-	// 4 = previous block hash 32 bytes
-	// 36 = merkle root 32 bytes
-	// 68 = ntime
-	// 72 = nbits
-	// 76 = nonce
 	
 	// see if this is a real job
 	job_id = json_array_get(params_obj, 1);
@@ -1089,16 +1078,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	const uint64_t job_diff = quickdiff ? m->quickdiff_value : m->stratum_job_diffs[g_job_index];
-	const bool blake2b_job = stratum_job_is_blake2b(job);
-	
 	// construct block header
 	bver = job->version_uint;
-	
-	// 0 - 4 = version
-	pk_u32le(block_header, 0, bver);
-	
-	// 4 - 35 = previous block hash
-	memcpy(&block_header[4], job->prevhash_bin, 32);
 	
 	// 36 - 67 = merkle root
 	// need to get the extranonce together
@@ -1147,12 +1128,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	memcpy(&full_cb_txn[0], cb->coinb1_bin, cb->coinb1_len);
-	if (blake2b_job) {
-		// Hasher extranonce lives in the v2 header, not the Bitcoin coinbase.
-		memset(&full_cb_txn[cb->coinb1_len], 0, 12);
-	} else {
-		memcpy(&full_cb_txn[cb->coinb1_len], extranonce_bin, 12);
-	}
+	// Hasher extranonce lives in the v2 header, not the Bitcoin coinbase.
+	memset(&full_cb_txn[cb->coinb1_len], 0, 12);
 	memcpy(&full_cb_txn[cb->coinb1_len+12], cb->coinb2_bin, cb->coinb2_len);
 	
 	// if we did a quickdiff work, we need to change our extra data just a little so it's unique.
@@ -1167,30 +1144,12 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// our variable difficulty work (subject to the DATUM server provided global minimum)
 	
 	if (quickdiff) {
-		if (!blake2b_job) {
-			if (upk_u16le(full_cb_txn, cb->coinb1_len - 2) != 0x5144) {
-				pk_u16le(full_cb_txn, cb->coinb1_len - 2, 0x5144);
-			} else {
-				pk_u16le(full_cb_txn, cb->coinb1_len - 2, 0xAEBB);
-			}
-		}
 		full_cb_txn[job->target_pot_index] = floorPoT(m->quickdiff_value);
 	} else {
 		full_cb_txn[job->target_pot_index] = floorPoT(m->stratum_job_diffs[g_job_index]);
 	}
 	
-	if ((job->merklebranch_count) && (!empty_work)) {
-		// hash the CB txn
-		double_sha256(digest_temp, full_cb_txn, cb->coinb1_len+12+cb->coinb2_len);
-		
-		// calc root
-		stratum_job_merkle_root_calc(job, digest_temp, &block_header[36]);
-	} else {
-		// empty block means coinbase txn hash is the merkleroot
-		double_sha256(&block_header[36], full_cb_txn, cb->coinb1_len+12+cb->coinb2_len);
-	}
-	
-	// 68 - 71 = ntime
+	// time offset
 	ntime = json_array_get(params_obj, 3);
 	if (!ntime) {
 		send_unknown_work_error(c, id);
@@ -1204,30 +1163,21 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	ntime_len = strlen(ntime_s);
-	if (blake2b_job) {
-		if (ntime_len != 8 && ntime_len != 16) {
-			send_unknown_work_error(c, id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		if (ntime_len == 8) {
-			ntime_val = (uint32_t)strtoul(ntime_s, NULL, 16);
-			pk_u32le(ntime8, 0, ntime_val);
-		} else {
-			for(i=0;i<8;i++) ntime8[i] = hex2bin_uchar(&ntime_s[i << 1]);
-			ntime_val = upk_u32le(ntime8, 0);
-		}
-		ntime64 = upk_u64le(ntime8, 0);
-	} else {
-		ntime_val = (uint32_t)strtoul(ntime_s, NULL, 16);
-		ntime64 = ntime_val;
-		pk_u32le(block_header, 68, ntime_val);
+	if (ntime_len != 8 && ntime_len != 16) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
 	}
+	if (ntime_len == 8) {
+		ntime_val = (uint32_t)strtoul(ntime_s, NULL, 16);
+		pk_u32le(ntime8, 0, ntime_val);
+	} else {
+		for(i=0;i<8;i++) ntime8[i] = hex2bin_uchar(&ntime_s[i << 1]);
+		ntime_val = upk_u32le(ntime8, 0);
+	}
+	ntime64 = upk_u64le(ntime8, 0);
 	
-	// 72 - 75 = bits
-	memcpy(&block_header[72], &job->nbits_bin[0], sizeof(uint32_t));
-	
-	// 76 - 79 = nonce
+	// nonce
 	nonce = json_array_get(params_obj, 4);
 	if (!nonce) {
 		send_unknown_work_error(c, id);
@@ -1241,49 +1191,37 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	nonce_len = strlen(nonce_s);
-	if (blake2b_job) {
-		if (nonce_len != 8 && nonce_len != 16) {
-			send_unknown_work_error(c, id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		if (nonce_len == 8) {
-			nonce_val = (uint32_t)strtoul(nonce_s, NULL, 16);
-			pk_u32le(nonce8, 0, nonce_val);
-		} else {
-			for(i=0;i<8;i++) nonce8[i] = hex2bin_uchar(&nonce_s[i << 1]);
-			nonce_val = upk_u32le(nonce8, 0);
-		}
-		nonce64 = upk_u64le(nonce8, 0);
-	} else {
+	if (nonce_len != 8 && nonce_len != 16) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
+	}
+	if (nonce_len == 8) {
 		nonce_val = (uint32_t)strtoul(nonce_s, NULL, 16);
-		nonce64 = nonce_val;
-		pk_u32le(block_header, 76, nonce_val);
-	}
-	
-	if (blake2b_job) {
-		if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn, (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len, blake2b_commitment)) {
-			send_unknown_work_error(c, id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		if (!datum_blake2b_work_root(root, blake2b_commitment, extranonce_bin)) {
-			send_unknown_work_error(c, id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		datum_blake2b_build_work_header(work, job->prevhash_bin, nonce8, ntime8, root);
-		memcpy(block_header, work, 80);
-		if (!datum_blake2b_pow_hash_le(share_hash, work, (const unsigned char[16]){0}, 0)) {
-			send_unknown_work_error(c, id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
+		pk_u32le(nonce8, 0, nonce_val);
 	} else {
-		my_sha256(digest_temp, block_header, 80);
-		my_sha256(share_hash, digest_temp, 32);
+		for(i=0;i<8;i++) nonce8[i] = hex2bin_uchar(&nonce_s[i << 1]);
+		nonce_val = upk_u32le(nonce8, 0);
 	}
-
+	nonce64 = upk_u64le(nonce8, 0);
+	
+	if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn, (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len, blake2b_commitment)) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
+	}
+	if (!datum_blake2b_work_root(root, blake2b_commitment, extranonce_bin)) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
+	}
+	datum_blake2b_build_work_header(work, job->prevhash_bin, nonce8, ntime8, root);
+	memcpy(block_header, work, 80);
+	if (!datum_blake2b_pow_hash_le(share_hash, work, (const unsigned char[16]){0}, 0)) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
+	}
 	if (upk_u32le(share_hash, 28) != 0) {
 		send_rejected_hnotzero_error(c, id);
 		stratum_note_share(m, false, job_diff);
@@ -1352,7 +1290,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// For a header-v2 job the node does not read the wire time as nTime: it
 	// adds the hasher's time-offset bytes back when the offset flag is set.
 	// Bound what the node will read, which also bounds hasher time rolling.
-	check_time = blake2b_job ? datum_blake2b_share_ntime(job->blake2b_time_on_wire, ntime8, job->blake2b_flags) : ntime_val;
+	check_time = datum_blake2b_share_ntime(job->blake2b_time_on_wire, ntime8, job->blake2b_flags);
 	if (check_time < job->block_template->mintime) {
 		send_rejected_time_too_old(c, id);
 		stratum_note_share(m, false, job_diff);
@@ -1518,7 +1456,6 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	T_DATUM_STRATUM_COINBASE *cb;
 	char cb1[STRATUM_COINBASE1_MAX_LEN+2];
 	unsigned int cbselect = 0;
-	bool full_coinbase = false;
 	char s[512];
 	unsigned char tdiff = 0xFF;
 	unsigned char blake2b_commitment[32];
@@ -1583,57 +1520,22 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// if this is a quick diff change, the job is likely identical to one we've already sent
 	// in which case, we don't want to clobber the normal target table and reject shares that we shouldn't
 	if (!quickdiff) {
-		if (stratum_job_is_blake2b(j)) {
-			if (!datum_blake2b_share_target(m->stratum_job_targets[j->global_index], floorPoT(m->last_sent_diff))) {
-				get_target_from_diff(m->stratum_job_targets[j->global_index], m->last_sent_diff);
-			}
-		} else {
-			get_target_from_diff(m->stratum_job_targets[j->global_index], m->last_sent_diff);
-		}
+		datum_blake2b_share_target(m->stratum_job_targets[j->global_index], floorPoT(m->last_sent_diff));
 		m->stratum_job_diffs[j->global_index] = m->last_sent_diff;
 		m->quickdiff_active = false;
 	} else {
 		m->quickdiff_active = true;
 		m->quickdiff_value = m->last_sent_diff;
-		if (stratum_job_is_blake2b(j)) {
-			if (!datum_blake2b_share_target(m->quickdiff_target, floorPoT(m->quickdiff_value))) {
-				get_target_from_diff(m->quickdiff_target, m->quickdiff_value);
-			}
-		} else {
-			get_target_from_diff(m->quickdiff_target, m->quickdiff_value);
-		}
+		datum_blake2b_share_target(m->quickdiff_target, floorPoT(m->quickdiff_value));
 	}
 	
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
 	datum_socket_send_string_to_client(c, "{\"id\":null,\"method\":\"mining.notify\",\"params\":[");
 	
-	if (j->job_state >= JOB_STATE_FULL_PRIORITY_WAIT_COINBASER) {
-		if (((T_DATUM_STRATUM_THREADPOOL_DATA *)t->app_thread_data)->full_coinbase_ready) {
-			full_coinbase = true;
-		}
-	}
-	
-	// coinbase selection is tacked on to the job ID
-	// prepending a Q means it's a duplicate job, but with a new diff (needed per stratum protocol "spec")
-	// prepending an N means this is an empty (subsidy-only) block with a small coinbase and has coinbase ID 255/0xff
-	if (new_block || stratum_job_is_blake2b(j)) {
-		cbselect = 0;
-	} else {
-		if (full_coinbase) {
-			cbselect = m->coinbase_selection;
-		} else {
-			cbselect = 0;
-		}
-	}
-	
 	cb = &j->coinbase[cbselect];
-	// new block work always is just a blank coinbase, for now
 	
 	if (quickdiff) {
 		snprintf(s, sizeof(s), "\"Q%s%2.2x\",\"%s\",\"", j->job_id, cbselect, j->prevhash);
-	} else if (new_block && !stratum_job_is_blake2b(j)) {
-		snprintf(s, sizeof(s), "\"N%s%2.2x\",\"%s\",\"", j->job_id, (unsigned int)255, j->prevhash); // empty coinbase for new block
-		cb = &j->subsidy_only_coinbase;
 	} else {
 		snprintf(s, sizeof(s), "\"%s%2.2x\",\"%s\",\"", j->job_id, cbselect, j->prevhash);
 	}
@@ -1641,66 +1543,18 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// this may look silly, but the send buffer doesn't get emptied until this thread's loop runs. so might as well just utilize it
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
-	if (stratum_job_is_blake2b(j)) {
-		tdiff = floorPoT(m->last_sent_diff);
-		if (!datum_stratum_job_blake2b_commitment(j, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
-			return -1;
-		}
-		for(i=0;i<(int)sizeof(blake2b_sia_coinb1);i++) {
-			uchar_to_hex(&cb1[i << 1], blake2b_sia_coinb1[i]);
-		}
-		cb1[sizeof(blake2b_sia_coinb1) << 1] = 0;
-		datum_socket_send_string_to_client(c, cb1);
-		// BLAKE2b-sia work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
-		// Emit a real JSON array [] (not the string "[]") so clients can parse mining.notify.
-		datum_socket_send_string_to_client(c, "\",\"\",[],");
-		snprintf(s, sizeof(s), "\"%s\",\"%s\",\"%s\",", j->version, j->nbits, j->ntime);
-		datum_socket_send_string_to_client(c, s);
-		if ((clean) || (quickdiff) || (new_block)) {
-			datum_socket_send_string_to_client(c, "true]}\n");
-		} else {
-			datum_socket_send_string_to_client(c, "false]}\n");
-		}
-		m->last_sent_stratum_job_index = j->global_index;
-		return 0;
-	}
-
-	memcpy(cb1, cb->coinb1, cb->coinb1_len<<1); // copy coinb1 to temp buffer for user-specific modifications
-	cb1[cb->coinb1_len<<1] = 0;
-	
-	// the miner's PoT diff needs to be encoded here.
-	// TODO: Rework job ID to include the target byte.  This is gateway side, and the server doesn't care at all about the SV1 job ID.
 	tdiff = floorPoT(m->last_sent_diff);
-	uchar_to_hex(&cb1[j->target_pot_index<<1], tdiff);
-	
-	if (quickdiff) {
-		// in a quickdiff, we need to replace the last two bytes of coinb1 to make the work unique
-		// while the quickdiff value here is non-unique per user in the case of multiple quickdiffs for the same job, the extranonce1
-		// is still unique per user and mitigates this.
-		
-		// NOTE: These constants are also used by the DATUM server.  DO NOT CHANGE THEM.
-		datum_socket_send_chars_to_client(c, cb1, (cb->coinb1_len<<1)-4);
-		
-		if (upk_u16le(cb->coinb1_bin, cb->coinb1_len - 2) != 0x5144) {
-			datum_socket_send_string_to_client(c, "4451");
-		} else {
-			datum_socket_send_string_to_client(c, "BBAE");
-		}
-	} else {
-		datum_socket_send_string_to_client(c, cb1);
+	if (!datum_stratum_job_blake2b_commitment(j, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
+		return -1;
 	}
-	datum_socket_send_string_to_client(c, "\",\"");
-	datum_socket_send_string_to_client(c, cb->coinb2);
-	datum_socket_send_string_to_client(c, "\",");
-	
-	if (!new_block) {
-		// send job merkle leafs
-		datum_socket_send_string_to_client(c, j->merklebranches_full);
-	} else {
-		// send empty merkle leafs
-		datum_socket_send_string_to_client(c, "[]");
+	for(i=0;i<(int)sizeof(blake2b_sia_coinb1);i++) {
+		uchar_to_hex(&cb1[i << 1], blake2b_sia_coinb1[i]);
 	}
-	snprintf(s, sizeof(s), ",\"%s\",\"%s\",\"%s\",", j->version, j->nbits, j->ntime);
+	cb1[sizeof(blake2b_sia_coinb1) << 1] = 0;
+	datum_socket_send_string_to_client(c, cb1);
+	// BLAKE2b-sia work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
+	datum_socket_send_string_to_client(c, "\",\"\",[],");
+	snprintf(s, sizeof(s), "\"%s\",\"%s\",\"%s\",", j->version, j->nbits, j->ntime);
 	datum_socket_send_string_to_client(c, s);
 	
 	// bunch of reasons we may need to discard old work
@@ -1723,7 +1577,10 @@ int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c) {
 		m->current_diff = datum_config.stratum_v1_vardiff_min;
 	}
 	
-	snprintf(s, sizeof(s), "{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[%"PRIu64"]}\n", (uint64_t)m->current_diff);
+	const long double difficulty = datum_blake2b_sia_difficulty(m->current_diff);
+	snprintf(s, sizeof(s),
+		"{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[%.20Lf]}\n",
+		difficulty);
 	datum_socket_send_string_to_client(c, s);
 	
 	m->last_sent_diff = m->current_diff;
@@ -2107,7 +1964,7 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	unsigned char merkle[32];
 	const T_DATUM_TEMPLATE_DATA *td;
 	
-	if (!s || !s->block_template || s->block_template->header_version < 2) return false;
+	if (!s || !s->block_template) return false;
 	if (!cb_txn || !commitment || !cb_len) return false;
 	td = s->block_template;
 	double_sha256(cb_hash, cb_txn, cb_len);
@@ -2146,7 +2003,7 @@ void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	uint32_t time_on_wire;
 	int i;
 
-	if (!s || !s->block_template || s->block_template->header_version < 2) return;
+	if (!s || !s->block_template) return;
 	block_template = s->block_template;
 	time_on_wire = (uint32_t)block_template->curtime;
 
@@ -2202,17 +2059,13 @@ void update_stratum_job(T_DATUM_TEMPLATE_DATA *block_template, bool new_block, i
 	// TODO: Should we use local time, and just verify is valid for the block?
 	// Perhaps as an option.
 	// The template's time is 100% safe, so we'll use that for now.
-	if (block_template->header_version >= 2) {
-		memset(ntime8, 0, sizeof(ntime8));
-		s->blake2b_flags = datum_config.mining_allow_hasher_time_rolling ? DATUM_BLAKE2B_USE_TIME_OFFSET : 0;
-		pk_u32le(ntime8, 4, (uint32_t)block_template->curtime);
-		for(i=0;i<8;i++) {
-			uchar_to_hex(&s->ntime[i << 1], ntime8[i]);
-		}
-		s->ntime[16] = 0;
-	} else {
-		snprintf(s->ntime, sizeof(s->ntime), "%8.8llx", (unsigned long long)block_template->curtime);
+	memset(ntime8, 0, sizeof(ntime8));
+	s->blake2b_flags = datum_config.mining_allow_hasher_time_rolling ? DATUM_BLAKE2B_USE_TIME_OFFSET : 0;
+	pk_u32le(ntime8, 4, (uint32_t)block_template->curtime);
+	for(i=0;i<8;i++) {
+		uchar_to_hex(&s->ntime[i << 1], ntime8[i]);
 	}
+	s->ntime[16] = 0;
 	
 	// Set the coinbase value of this job based on the template
 	s->coinbase_value = block_template->coinbasevalue;
@@ -2394,25 +2247,19 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	
 	ptr = submitblock_req;
 	ptr += sprintf(ptr, "{\"jsonrpc\":\"1.0\",\"id\":\"%llu\",\"method\":\"submitblock\",\"params\":[\"",(unsigned long long)time(NULL));
-	if (stratum_job_is_blake2b(job)) {
-		td = job->block_template;
-		txcount = (uint16_t)((empty_work ? 0 : td->txn_count) + 1);
-		if ((job->merklebranch_count) && (!empty_work)) {
-			double_sha256(cbh, coinbase_txn, coinbase_txn_size);
-			stratum_job_merkle_root_calc(job, cbh, merkle);
-		} else {
-			double_sha256(merkle, coinbase_txn, coinbase_txn_size);
-		}
-		memset(en, 0, sizeof(en));
-		if (extranonce) memcpy(en, extranonce, 12);
-		datum_blake2b_serialize_block_header(v2hdr, job->version_uint, job->prevhash_bin, merkle, job->blake2b_time_on_wire, job->nbits_uint, block_header + 32, block_header + 40, en, txcount, job->blake2b_flags, 0, (const unsigned char[16]){0}, (uint32_t)job->height, (const unsigned char[32]){0});
-		for(i=0;i<DATUM_BLAKE2B_BLOCK_HEADER_SIZE;i++) {
-			ptr += sprintf(ptr, "%2.2x", v2hdr[i]);
-		}
+	td = job->block_template;
+	txcount = (uint16_t)((empty_work ? 0 : td->txn_count) + 1);
+	if ((job->merklebranch_count) && (!empty_work)) {
+		double_sha256(cbh, coinbase_txn, coinbase_txn_size);
+		stratum_job_merkle_root_calc(job, cbh, merkle);
 	} else {
-		for(i=0;i<80;i++) {
-			ptr += sprintf(ptr, "%2.2x", block_header[i]);
-		}
+		double_sha256(merkle, coinbase_txn, coinbase_txn_size);
+	}
+	memset(en, 0, sizeof(en));
+	if (extranonce) memcpy(en, extranonce, 12);
+	datum_blake2b_serialize_block_header(v2hdr, job->version_uint, job->prevhash_bin, merkle, job->blake2b_time_on_wire, job->nbits_uint, block_header + 32, block_header + 40, en, txcount, job->blake2b_flags, 0, (const unsigned char[16]){0}, (uint32_t)job->height, (const unsigned char[32]){0});
+	for(i=0;i<DATUM_BLAKE2B_BLOCK_HEADER_SIZE;i++) {
+		ptr += sprintf(ptr, "%2.2x", v2hdr[i]);
 	}
 	
 	// txn count

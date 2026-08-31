@@ -1358,15 +1358,6 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		if (val_bool == datum_config.datum_always_pay_self) return true;
 		datum_config.datum_always_pay_self = val_bool;
 		datum_api_json_modify_new("datum", "always_pay_self", json_boolean(val_bool));
-	} else if (0 == strcmp(key, "mining_pow_algorithm")) {
-		if (strcmp(val, "auto") && strcmp(val, "blake2b") && strcmp(val, "sha256d")) {
-			json_array_append_new(errors, json_string_nocheck("PoW algorithm must be auto, blake2b, or sha256d"));
-			return false;
-		}
-		if (0 == strcmp(val, datum_config.mining_pow_algorithm)) return true;
-		strcpy(datum_config.mining_pow_algorithm, val);
-		datum_api_json_modify_new("mining", "pow_algorithm", json_string(val));
-		status->need_restart = true;
 	} else if (0 == strcmp(key, "mining_allow_hasher_time_rolling")) {
 		bool val_bool;
 		if (!datum_str_to_bool_strict(val, &val_bool)) {

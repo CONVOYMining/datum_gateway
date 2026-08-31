@@ -122,10 +122,6 @@ int datum_template_init(void) {
 	return 1;
 }
 
-static void datum_template_clear_header_fields(T_DATUM_TEMPLATE_DATA *p) {
-	p->header_version = 0;
-}
-
 void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
 	p->coinbasevalue = 0;
 	p->txn_count = 0;
@@ -134,12 +130,6 @@ void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
 	p->txn_total_weight = 0;
 	p->txn_total_sigops = 0;
 	p->txns = p->local_data;
-	datum_template_clear_header_fields(p);
-}
-
-bool datum_gbt_advertise_blake2b(void) {
-	// BIP22: advertise blake2b so a mandatory !blake2b response is understood.
-	return strcmp(datum_config.mining_pow_algorithm, "sha256d") != 0;
 }
 
 bool datum_gbt_rules_want_blake2b(json_t *gbt) {
@@ -237,11 +227,9 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 	}
 
 	want_blake2b = datum_gbt_rules_want_blake2b(gbt);
-	if (!want_blake2b && !strcmp(datum_config.mining_pow_algorithm, "blake2b")) {
-		want_blake2b = true;
-	}
-	if (want_blake2b && strcmp(datum_config.mining_pow_algorithm, "sha256d")) {
-		tdata->header_version = 2;
+	if (!want_blake2b) {
+		DLOG_ERROR("GBT does not support the blake2b rule");
+		return NULL;
 	}
 	
 	jval = json_object_get(gbt, "bits");
@@ -482,11 +470,7 @@ void *datum_gateway_template_thread(void *args) {
 		i++;
 		
 		// fetch latest template
-		if (datum_gbt_advertise_blake2b()) {
-			snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
-		} else {
-			snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
-		}
+		snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
 		gbt = bitcoind_json_rpc_call(tcurl, &datum_config, gbt_req);
 		
 		if (!gbt) {

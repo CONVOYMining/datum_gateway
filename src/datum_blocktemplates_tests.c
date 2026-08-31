@@ -34,25 +34,13 @@
  */
 
 #include <jansson.h>
-#include <string.h>
 
 #include "datum_blocktemplates.h"
-#include "datum_conf.h"
 #include "datum_utils.h"
 
 static void datum_gbt_rules_blake2b_tests(void) {
 	json_error_t error;
 	json_t *gbt;
-	char saved_pow[sizeof(datum_config.mining_pow_algorithm)];
-	
-	memcpy(saved_pow, datum_config.mining_pow_algorithm, sizeof(saved_pow));
-	
-	strcpy(datum_config.mining_pow_algorithm, "auto");
-	datum_test(datum_gbt_advertise_blake2b());
-	strcpy(datum_config.mining_pow_algorithm, "blake2b");
-	datum_test(datum_gbt_advertise_blake2b());
-	strcpy(datum_config.mining_pow_algorithm, "sha256d");
-	datum_test(!datum_gbt_advertise_blake2b());
 	
 	gbt = json_loads("{\"rules\":[\"segwit\"]}", 0, &error);
 	datum_test(gbt != NULL);
@@ -79,8 +67,6 @@ static void datum_gbt_rules_blake2b_tests(void) {
 	datum_test(gbt != NULL);
 	datum_test(!datum_gbt_rules_want_blake2b(gbt));
 	json_decref(gbt);
-	
-	memcpy(datum_config.mining_pow_algorithm, saved_pow, sizeof(saved_pow));
 }
 void datum_blocktemplates_tests(void) {
 	datum_gbt_rules_blake2b_tests();

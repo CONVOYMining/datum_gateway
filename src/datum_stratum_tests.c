@@ -53,7 +53,6 @@ static void datum_blake2b_refresh_time_offset_tests(void) {
 	memset(&tdata, 0, sizeof(tdata));
 	memset(&job, 0, sizeof(job));
 	job.block_template = &tdata;
-	tdata.header_version = 2;
 	tdata.curtime = 2000000000;
 	job.blake2b_flags = DATUM_BLAKE2B_USE_TIME_OFFSET;
 	datum_stratum_job_refresh_blake2b(&job);
@@ -84,7 +83,6 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	
 	memset(&tdata, 0, sizeof(tdata));
 	memset(&job, 0, sizeof(job));
-	tdata.header_version = 2;
 	tdata.version = 0x20000000;
 	tdata.height = 12345;
 	tdata.bits_uint = 0x1d00ffff;
@@ -129,7 +127,6 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	job.target_pot_index = 0;
 	job.coinbase[0].coinb1_len = 1;
 	job.coinbase[0].coinb1_bin[0] = 0xff;
-	tdata.header_version = 2;
 	strcpy(job.job_id, "0000000000c0de00");
 	miner.stratum_job_diffs[0] = 1;
 	global_cur_stratum_jobs[0] = &job;

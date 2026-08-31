@@ -52,13 +52,10 @@ static void datum_blake2b_coinbase_limit_tests(void) {
 	tdata.sizelimit = 85 + 36 + 950;
 	tdata.weightlimit = 4000000;
 	
-	/* SHA256d (80-byte header) keeps the original leftover size. */
-	datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 950);
-	
-	/* Header v2 is 84 bytes larger; shrink the coinbase leftover by that. */
-	tdata.header_version = 2;
+	/* The 164-byte header shrinks the coinbase leftover by 84 bytes. */
 	datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 866);
 }
+
 void datum_coinbaser_tests(void) {
 	datum_blake2b_coinbase_limit_tests();
 }

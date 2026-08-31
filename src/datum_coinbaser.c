@@ -48,6 +48,7 @@
 #include <unistd.h>
 
 #include "datum_conf.h"
+#include "datum_pow.h"
 #include "datum_utils.h"
 #include "datum_stratum.h"
 #include "datum_jsonrpc.h"
@@ -312,15 +313,13 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 }
 
 int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_STRATUM_JOB *s) {
-	int j,i,msz1,header_extra;
+	int j,i,msz1;
 	
 	i = fixed_bytes + max_sz;
 	msz1 = max_sz+fixed_bytes;
 	
-	// Header-v2 is 164 bytes vs 80; only reserve the extra 84 on blake2b templates.
-	header_extra = (s->block_template && s->block_template->header_version >= 2) ? 84 : 0;
-	if ((i+s->block_template->txn_total_size+85+36+header_extra) > s->block_template->sizelimit) {
-		j = s->block_template->sizelimit - (s->block_template->txn_total_size+85+36+header_extra) - fixed_bytes;
+	if ((i+s->block_template->txn_total_size+DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5+36) > s->block_template->sizelimit) {
+		j = s->block_template->sizelimit - (s->block_template->txn_total_size+DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5+36) - fixed_bytes;
 		if (j < 0) return 0;
 		msz1 = j;
 	}

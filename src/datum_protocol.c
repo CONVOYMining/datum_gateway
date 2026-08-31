@@ -1337,22 +1337,13 @@ int datum_protocol_pow_submit(
 	pow.quickdiff = quickdiff;
 	pow.target_byte_index = job->target_pot_index; // just a sanity check on the server side. server hunts for this in the correct place anyway.
 	pow.target_byte = full_cb_tx[job->target_pot_index];
-	if (job->block_template && job->block_template->header_version >= 2) {
-		pow.sjob = (T_DATUM_STRATUM_JOB *)job;
-		memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
-		pow.blake2b_use_time_offset = (job->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
-		pow.ntime = upk_u64le(block_header, 40);
-		pow.nonce = upk_u64le(block_header, 32);
-		pow.time_on_wire = job->blake2b_time_on_wire;
-		pow.version = job->version_uint;
-	} else {
-		pow.sjob = NULL;
-		pow.blake2b_use_time_offset = false;
-		pow.ntime = upk_u32le(block_header, 68);
-		pow.nonce = upk_u32le(block_header, 76);
-		pow.time_on_wire = 0;
-		pow.version = upk_u32le(block_header, 0);
-	}
+	pow.sjob = (T_DATUM_STRATUM_JOB *)job;
+	memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
+	pow.blake2b_use_time_offset = (job->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
+	pow.ntime = upk_u64le(block_header, 40);
+	pow.nonce = upk_u64le(block_header, 32);
+	pow.time_on_wire = job->blake2b_time_on_wire;
+	pow.version = job->version_uint;
 	
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
 	
@@ -1365,28 +1356,21 @@ int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *m
 	const T_DATUM_STRATUM_COINBASE *cb;
 	int i = 0, j;
 	bool w = false;
-	bool blake2b;
 	bool new_to_server;
 	size_t merkle_bytes;
 
 	if (!pow || !msg) return 0;
 	if (msg_size < 64) return 0;
 
-	// blake2b shares attach the stratum job; SHA256d leaves sjob NULL
-	blake2b = (pow->sjob != NULL);
-
-	if (blake2b) {
-		if (pow->subsidy_only) return 0;
-		if (pow->coinbase_id >= MAX_COINBASE_TYPES) return 0;
-	} else if ((pow->coinbase_id > 7) && !((pow->coinbase_id == 0xff) && pow->subsidy_only)) {
-		return 0;
-	}
+	if (!pow->sjob) return 0;
+	if (pow->subsidy_only) return 0;
+	if (pow->coinbase_id >= MAX_COINBASE_TYPES) return 0;
 
 	msg[i++] = 0x27; // submit POW
 	msg[i++] = pow->datum_job_id; // job ID 0
 	msg[i++] = pow->coinbase_id; // which coinbase 1
 	msg[i] = (unsigned char)((pow->is_block ? 1 : 0) | (pow->subsidy_only ? 2 : 0) | (pow->quickdiff ? 4 : 0)); // flags 2
-	if (blake2b) msg[i] |= DATUM_POW_FLAG_BLAKE2B;
+	msg[i] |= DATUM_POW_FLAG_BLAKE2B;
 	i++;
 	msg[i++] = pow->target_byte; // PoT target byte 3
 	pk_u32le(msg, i, (uint32_t)pow->ntime); i += 4; // ntime 4
@@ -1418,20 +1402,18 @@ int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *m
 
 	// reserve 4 bytes for future use
 	memset(&msg[i], 0, 4);
-	if (blake2b && pow->blake2b_use_time_offset) {
+	if (pow->blake2b_use_time_offset) {
 		msg[i] |= DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET;
 	}
 	i += 4;
 
-	if (blake2b) {
-		if ((size_t)i + 23 >= msg_size) return 0;
-		msg[i++] = 0x03;
-		msg[i++] = DATUM_POW_BLAKE2B;
-		pk_u64le(msg, i, pow->ntime); i += 8;
-		pk_u64le(msg, i, pow->nonce); i += 8;
-		msg[i++] = 0x04;
-		pk_u32le(msg, i, pow->time_on_wire); i += 4;
-	}
+	if ((size_t)i + 23 >= msg_size) return 0;
+	msg[i++] = 0x03;
+	msg[i++] = DATUM_POW_BLAKE2B;
+	pk_u64le(msg, i, pow->ntime); i += 8;
+	pk_u64le(msg, i, pow->nonce); i += 8;
+	msg[i++] = 0x04;
+	pk_u32le(msg, i, pow->time_on_wire); i += 4;
 
 	pthread_rwlock_rdlock(&datum_jobs_rwlock);
 
