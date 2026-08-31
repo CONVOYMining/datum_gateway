@@ -1447,6 +1447,16 @@ int client_mining_authorize(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	return 0;
 }
 
+unsigned int datum_stratum_coinbase_index(
+	const T_DATUM_STRATUM_THREADPOOL_DATA *sdata,
+	const T_DATUM_MINER_DATA *miner) {
+	if (!sdata || !miner || !sdata->cur_stratum_job ||
+	    sdata->cur_stratum_job->job_state < JOB_STATE_FULL_PRIORITY_WAIT_COINBASER ||
+	    !sdata->full_coinbase_ready ||
+	    miner->coinbase_selection >= MAX_COINBASE_TYPES) return 0;
+	return miner->coinbase_selection;
+}
+
 int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool new_block) {
 	// send the current job to the miner
 	
@@ -1532,6 +1542,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
 	datum_socket_send_string_to_client(c, "{\"id\":null,\"method\":\"mining.notify\",\"params\":[");
 	
+	cbselect = datum_stratum_coinbase_index(t->app_thread_data, m);
 	cb = &j->coinbase[cbselect];
 	
 	if (quickdiff) {
@@ -1544,7 +1555,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
 	tdiff = floorPoT(m->last_sent_diff);
-	if (!datum_stratum_job_blake2b_commitment(j, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
+	if (!datum_stratum_job_blake2b_commitment(j, cb, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
 		return -1;
 	}
 	for(i=0;i<(int)sizeof(blake2b_sia_coinb1);i++) {
@@ -1976,13 +1987,11 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 		(const unsigned char[16]){0}, (const unsigned char[32]){0});
 }
 
-bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
+bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
 	unsigned char cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
-	const T_DATUM_STRATUM_COINBASE *cb;
 	size_t cb_len;
 	
-	if (!s || !commitment) return false;
-	cb = &s->coinbase[0];
+	if (!s || !cb || !commitment) return false;
 	if (cb->coinb1_len < 1) return false;
 	cb_len = (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len;
 	if (cb_len > sizeof(cb_txn)) return false;
