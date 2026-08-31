@@ -1205,7 +1205,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	nonce64 = upk_u64le(nonce8, 0);
 	
-	if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn, (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len, blake2b_commitment)) {
+	if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn, (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len, empty_work, blake2b_commitment)) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
@@ -1449,7 +1449,8 @@ int client_mining_authorize(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 
 unsigned int datum_stratum_coinbase_index(
 	const T_DATUM_STRATUM_THREADPOOL_DATA *sdata,
-	const T_DATUM_MINER_DATA *miner) {
+	const T_DATUM_MINER_DATA *miner, bool new_block) {
+	if (new_block) return DATUM_COINBASE_ID_EMPTY;
 	if (!sdata || !miner || !sdata->cur_stratum_job ||
 	    sdata->cur_stratum_job->job_state < JOB_STATE_FULL_PRIORITY_WAIT_COINBASER ||
 	    !sdata->full_coinbase_ready ||
@@ -1461,7 +1462,8 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// send the current job to the miner
 	
 	T_DATUM_THREAD_DATA *t = (T_DATUM_THREAD_DATA *)c->datum_thread;
-	T_DATUM_STRATUM_JOB *j = ((T_DATUM_STRATUM_THREADPOOL_DATA *)t->app_thread_data)->cur_stratum_job;
+	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = t->app_thread_data;
+	T_DATUM_STRATUM_JOB *j = sdata->cur_stratum_job;
 	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	T_DATUM_STRATUM_COINBASE *cb;
 	char cb1[STRATUM_COINBASE1_MAX_LEN+2];
@@ -1542,11 +1544,14 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
 	datum_socket_send_string_to_client(c, "{\"id\":null,\"method\":\"mining.notify\",\"params\":[");
 	
-	cbselect = datum_stratum_coinbase_index(t->app_thread_data, m);
-	cb = &j->coinbase[cbselect];
+	cbselect = datum_stratum_coinbase_index(sdata, m, new_block);
+	const bool subsidy_only = cbselect == DATUM_COINBASE_ID_EMPTY;
+	cb = subsidy_only ? &j->subsidy_only_coinbase : &j->coinbase[cbselect];
 	
 	if (quickdiff) {
 		snprintf(s, sizeof(s), "\"Q%s%2.2x\",\"%s\",\"", j->job_id, cbselect, j->prevhash);
+	} else if (subsidy_only) {
+		snprintf(s, sizeof(s), "\"N%s%2.2x\",\"%s\",\"", j->job_id, cbselect, j->prevhash);
 	} else {
 		snprintf(s, sizeof(s), "\"%s%2.2x\",\"%s\",\"", j->job_id, cbselect, j->prevhash);
 	}
@@ -1555,7 +1560,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
 	tdiff = floorPoT(m->last_sent_diff);
-	if (!datum_stratum_job_blake2b_commitment(j, cb, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
+	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, blake2b_commitment, blake2b_sia_coinb1)) {
 		return -1;
 	}
 	for(i=0;i<(int)sizeof(blake2b_sia_coinb1);i++) {
@@ -1970,7 +1975,7 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 	}
 }
 
-bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char *commitment) {
+bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, bool subsidy_only, unsigned char *commitment) {
 	unsigned char cb_hash[32];
 	unsigned char merkle[32];
 	const T_DATUM_TEMPLATE_DATA *td;
@@ -1979,15 +1984,19 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	if (!cb_txn || !commitment || !cb_len) return false;
 	td = s->block_template;
 	double_sha256(cb_hash, cb_txn, cb_len);
-	stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
+	if (subsidy_only) {
+		memcpy(merkle, cb_hash, sizeof(merkle));
+	} else {
+		stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
+	}
 	return datum_blake2b_header_commitment(
 		commitment, td->version, td->previousblockhash_bin,
 		(uint32_t)td->height, merkle, s->blake2b_time_on_wire, td->bits_uint,
-		td->txn_count + 1, s->blake2b_flags, 0,
+		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags, 0,
 		(const unsigned char[16]){0}, (const unsigned char[32]){0});
 }
 
-bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
+bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
 	unsigned char cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
 	size_t cb_len;
 	
@@ -2001,7 +2010,7 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_
 	if (s->target_pot_index >= 0 && s->target_pot_index < cb->coinb1_len) {
 		cb_txn[s->target_pot_index] = pot;
 	}
-	if (!datum_stratum_job_blake2b_commitment_from_txn(s, cb_txn, cb_len, commitment)) return false;
+	if (!datum_stratum_job_blake2b_commitment_from_txn(s, cb_txn, cb_len, subsidy_only, commitment)) return false;
 	if (sia_coinb1) datum_blake2b_sia_coinb1(sia_coinb1, commitment);
 	return true;
 }

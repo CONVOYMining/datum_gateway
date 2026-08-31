@@ -116,6 +116,10 @@ static void datum_pow_recycled_protocol_job_test(void) {
 		job->coinbase[2].coinb2_len = 1;
 		job->coinbase[2].coinb1_bin[0] = (unsigned char)(0xc0 + i);
 		job->coinbase[2].coinb2_bin[0] = (unsigned char)(0xd0 + i);
+		job->subsidy_only_coinbase.coinb1_len = 1;
+		job->subsidy_only_coinbase.coinb2_len = 1;
+		job->subsidy_only_coinbase.coinb1_bin[0] = (unsigned char)(0xe0 + i);
+		job->subsidy_only_coinbase.coinb2_bin[0] = (unsigned char)(0xf0 + i);
 		snprintf(job->job_id, sizeof(job->job_id), "job-%02zu", i);
 	}
 	
@@ -153,7 +157,14 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	pow.coinbase_id = 2;
 	pow.subsidy_only = true;
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 0);
+	pow.coinbase_id = DATUM_COINBASE_ID_EMPTY;
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 71);
+	datum_test((msg[3] & 0x02) != 0);
+	datum_test(msg[62] == 0x02 && msg[63] == DATUM_COINBASE_ID_EMPTY);
+	datum_test(msg[68] == 0xe0 && msg[69] == 0xf0);
+	datum_test(datum_jobs[0].server_has_coinbase_empty);
 	pow.subsidy_only = false;
+	pow.coinbase_id = 2;
 	
 	// snprintf returns the untruncated length. Ensure a long address+worker is
 	// capped to the actual bytes in the protocol username field.

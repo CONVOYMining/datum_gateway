@@ -1363,8 +1363,8 @@ int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *m
 	if (msg_size < 64) return 0;
 
 	if (!pow->sjob) return 0;
-	if (pow->subsidy_only) return 0;
-	if (pow->coinbase_id >= MAX_COINBASE_TYPES) return 0;
+	if ((pow->subsidy_only && pow->coinbase_id != DATUM_COINBASE_ID_EMPTY) ||
+	    (!pow->subsidy_only && pow->coinbase_id >= MAX_COINBASE_TYPES)) return 0;
 
 	msg[i++] = 0x27; // submit POW
 	msg[i++] = pow->datum_job_id; // job ID 0
