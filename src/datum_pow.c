@@ -211,13 +211,13 @@ static void datum_blake2b_xor_key_mask(unsigned char *mask, const unsigned char 
 	}
 }
 
-void datum_blake2b_sia_coinb1(unsigned char *out, const unsigned char *commitment) {
+void datum_blake2b_coinb1(unsigned char *out, const unsigned char *commitment) {
 	memset(out, 0, 3);
 	memcpy(out + 3, commitment, 32);
 	memset(out + 35, 0, 4);
 }
 
-void datum_blake2b_sia_prevhash(unsigned char *out, const unsigned char *prevhash) {
+void datum_blake2b_prevblock_hidden(unsigned char *out, const unsigned char *prevhash) {
 	unsigned char ordered[32];
 	datum_reverse32(ordered, prevhash);
 	datum_sha256_tagged(out, "Bitcoin prevblock header, hashed", ordered, 32);
@@ -225,7 +225,7 @@ void datum_blake2b_sia_prevhash(unsigned char *out, const unsigned char *prevhas
 }
 
 void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root) {
-	datum_blake2b_sia_prevhash(work, prevhash);
+	datum_blake2b_prevblock_hidden(work, prevhash);
 	memcpy(work + 32, nonce, 8);
 	memcpy(work + 40, ntime, 8);
 	memcpy(work + 48, root, 32);
@@ -298,7 +298,7 @@ bool datum_blake2b_work_root(unsigned char *root, const unsigned char *commitmen
 	unsigned char leaf[52];
 	if (!root || !commitment || !extranonce) return false;
 	leaf[0] = 0;
-	datum_blake2b_sia_coinb1(leaf + 1, commitment);
+	datum_blake2b_coinb1(leaf + 1, commitment);
 	memcpy(leaf + 40, extranonce, 12);
 	return datum_blake2b_256(root, leaf, sizeof(leaf));
 }

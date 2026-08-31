@@ -64,8 +64,8 @@ int datum_blake2b_format_stratum_difficulty(char *out, size_t out_size, uint64_t
 long double datum_blake2b_accounting_difficulty(long double x);
 
 bool datum_blake2b_256(unsigned char *out, const unsigned char *in, size_t len);
-void datum_blake2b_sia_coinb1(unsigned char *out, const unsigned char *commitment);
-void datum_blake2b_sia_prevhash(unsigned char *out, const unsigned char *prevhash);
+void datum_blake2b_coinb1(unsigned char *out, const unsigned char *commitment);
+void datum_blake2b_prevblock_hidden(unsigned char *out, const unsigned char *prevhash);
 void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root);
 
 /* version may be with or without 0x80000000; H1 always includes the v2 bit. */

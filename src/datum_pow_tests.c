@@ -128,7 +128,7 @@ static void datum_pow_blake2b_vector_tests(void) {
 	unsigned char merkle[32], xor_key[16], rhs[32], extranonce[12], prevhash[32];
 	unsigned char nonce[8], ntime[8], commitment[32], root[32], work[80], hash_le[32];
 	unsigned char share_target[32];
-	unsigned char sia_coinb1[39], arbitrary_tx[51], leaf_preimage[52] = {0};
+	unsigned char coinb1[39], arbitrary_tx[51], leaf_preimage[52] = {0};
 	unsigned char header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE], expected[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
 	uint32_t time_on_wire;
 	
@@ -192,16 +192,16 @@ static void datum_pow_blake2b_vector_tests(void) {
 	datum_test(datum_blake2b_work_root(root, commitment, extranonce));
 	datum_test(datum_pow_decode_hex_exact(expected_root_hex, 32, expected));
 	datum_test(!memcmp(root, expected, 32));
-	datum_blake2b_sia_coinb1(sia_coinb1, commitment);
-	memcpy(arbitrary_tx, sia_coinb1, sizeof(sia_coinb1));
-	memcpy(arbitrary_tx + sizeof(sia_coinb1), extranonce, sizeof(extranonce));
+	datum_blake2b_coinb1(coinb1, commitment);
+	memcpy(arbitrary_tx, coinb1, sizeof(coinb1));
+	memcpy(arbitrary_tx + sizeof(coinb1), extranonce, sizeof(extranonce));
 	memcpy(leaf_preimage + 1, arbitrary_tx, sizeof(arbitrary_tx));
 	datum_test(datum_blake2b_256(expected, leaf_preimage, sizeof(leaf_preimage)));
 	datum_test(!memcmp(root, expected, 32));
 	datum_blake2b_build_work_header(work, prevhash, nonce, ntime, root);
 	datum_test(datum_pow_decode_hex_exact(expected_work_hex, sizeof(work), expected));
 	datum_test(!memcmp(work, expected, sizeof(work)));
-	datum_blake2b_sia_prevhash(expected, prevhash);
+	datum_blake2b_prevblock_hidden(expected, prevhash);
 	datum_test(!memcmp(expected, work, 32));
 	datum_test(datum_blake2b_pow_hash_le(hash_le, work, xor_key, 13));
 	datum_test(datum_pow_decode_hex_exact(expected_hash_le_hex, 32, expected));

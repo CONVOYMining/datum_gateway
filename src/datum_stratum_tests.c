@@ -78,7 +78,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	T_DATUM_STRATUM_JOB job;
 	unsigned char c_ff[32], c_pot[32], c_variant[32], c_subsidy[32];
 	unsigned char c_from_txn[32];
-	unsigned char sia_ff[39], sia_pot[39];
+	unsigned char ff[39], pot[39];
 	unsigned char cb_txn[64];
 	size_t cb_len;
 	
@@ -105,10 +105,10 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	job.target_pot_index = 4;
 	tdata.txn_count = 1;
 	
-	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 0xFF, c_ff, sia_ff));
-	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 14, c_pot, sia_pot));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 0xFF, c_ff, ff));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 14, c_pot, pot));
 	datum_test(memcmp(c_ff, c_pot, 32) != 0);
-	datum_test(memcmp(sia_ff, sia_pot, 39) != 0);
+	datum_test(memcmp(ff, pot, 39) != 0);
 	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[2], false, 14, c_variant, NULL));
 	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.subsidy_only_coinbase, true, 14, c_subsidy, NULL));
 	datum_test(memcmp(c_variant, c_pot, 32) != 0);

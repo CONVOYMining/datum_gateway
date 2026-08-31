@@ -1448,7 +1448,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	unsigned char tdiff = 0xFF;
 	uint32_t share_nbits;
 	unsigned char blake2b_commitment[32];
-	unsigned char blake2b_sia_coinb1[39];
+	unsigned char blake2bcoinb1[39];
 	int i;
 	
 	if (!j) {
@@ -1540,15 +1540,15 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
 	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff,
-		blake2b_commitment, blake2b_sia_coinb1)) {
+		blake2b_commitment, blake2bcoinb1)) {
 		return -1;
 	}
-	for(i=0;i<(int)sizeof(blake2b_sia_coinb1);i++) {
-		uchar_to_hex(&cb1[i << 1], blake2b_sia_coinb1[i]);
+	for(i=0;i<(int)sizeof(blake2bcoinb1);i++) {
+		uchar_to_hex(&cb1[i << 1], blake2bcoinb1[i]);
 	}
-	cb1[sizeof(blake2b_sia_coinb1) << 1] = 0;
+	cb1[sizeof(blake2bcoinb1) << 1] = 0;
 	datum_socket_send_string_to_client(c, cb1);
-	// BLAKE2b-sia work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
+	// BLAKE2b work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
 	datum_socket_send_string_to_client(c, "\",\"\",[],");
 	// Do not disclose the consensus target to the hasher. This is the closest
 	// compact target that is not easier than its accepted share target.
@@ -1985,7 +1985,7 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 		(const unsigned char[32]){0});
 }
 
-bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
+bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1) {
 	unsigned char cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
 	size_t cb_len;
 	
@@ -2001,7 +2001,7 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_
 	}
 	if (!datum_stratum_job_blake2b_commitment_from_txn(
 		s, cb_txn, cb_len, pot, subsidy_only, commitment)) return false;
-	if (sia_coinb1) datum_blake2b_sia_coinb1(sia_coinb1, commitment);
+	if (coinb1) datum_blake2b_coinb1(coinb1, commitment);
 	return true;
 }
 
@@ -2033,7 +2033,7 @@ void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	}
 	s->blake2b_time_on_wire = time_on_wire;
 
-	datum_blake2b_sia_prevhash(prevblock_hidden, block_template->previousblockhash_bin);
+	datum_blake2b_prevblock_hidden(prevblock_hidden, block_template->previousblockhash_bin);
 
 	for(i=0;i<32;i++) {
 		uchar_to_hex(&s->prevhash[i << 1], prevblock_hidden[i]);

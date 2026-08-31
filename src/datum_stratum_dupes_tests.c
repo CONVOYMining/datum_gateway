@@ -39,7 +39,7 @@
 #include "datum_stratum_dupes.h"
 #include "datum_utils.h"
 
-static void datum_pow_sia_dupe_tests(void) {
+static void datum_pow_dupe_tests(void) {
 	T_DATUM_STRATUM_DUPE_ITEM items[8] = {0};
 	T_DATUM_STRATUM_DUPES * const dupes = calloc(1, sizeof(*dupes));
 	T_DATUM_STRATUM_THREADPOOL_DATA * const thread_data = calloc(1, sizeof(*thread_data));
@@ -70,5 +70,5 @@ static void datum_pow_sia_dupe_tests(void) {
 }
 
 void datum_stratum_dupes_tests(void) {
-	datum_pow_sia_dupe_tests();
+	datum_pow_dupe_tests();
 }
