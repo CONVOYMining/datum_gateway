@@ -768,10 +768,6 @@ static inline void send_rejected_hnotzero_error(T_DATUM_CLIENT_DATA *c, uint64_t
 	send_error_to_client(c, id, "[23,\"H-not-zero\",null]");
 }
 
-static inline void send_bad_version_error(T_DATUM_CLIENT_DATA *c, uint64_t id) {
-	send_error_to_client(c, id, "[23,\"bad-version\",null]");
-}
-
 static inline void send_rejected_duplicate(T_DATUM_CLIENT_DATA *c, uint64_t id) {
 	send_error_to_client(c, id, "[22,\"duplicate\",null]");
 }
@@ -975,32 +971,27 @@ static void stratum_note_share(T_DATUM_MINER_DATA *m, bool accepted, uint64_t di
 }
 
 int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
-	// {"params": ["username", "job", "extranonce2", "time", "nonce", "version"], "id": 1, "method": "mining.submit"}
+	// {"params": ["username", "job", "extranonce2", "time", "nonce"], "id": 1, "method": "mining.submit"}
 	// 0 = username
 	// 1 = jobid
 	// 2 = extranonce2
 	// 3 = ntime
 	// 4 = nonce
-	// 5 = version roll (OR with version)
 	
 	json_t *username;
 	json_t *job_id;
 	json_t *extranonce2;
 	json_t *ntime;
 	json_t *nonce;
-	json_t *vroll;
 	
 	T_DATUM_STRATUM_JOB *job = NULL;
 	
 	const char *job_id_s;
-	const char *vroll_s;
 	const char *username_s;
 	char username_buf[0x100];
 	const char *extranonce2_s;
 	const char *ntime_s;
 	const char *nonce_s;
-	
-	uint32_t vroll_uint;
 	
 	uint16_t g_job_index;
 	uint32_t bver;
@@ -1102,30 +1093,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	
 	// construct block header
 	bver = job->version_uint;
-	if (m->extension_version_rolling) {
-		vroll = json_array_get(params_obj, 5);
-		if (!vroll) {
-			// version rolling requested, but missing from this work submission
-			send_bad_version_error(c,id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		vroll_s = json_string_value(vroll);
-		if (!vroll_s) {
-			// couldn't get string
-			send_bad_version_error(c,id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		vroll_uint = strtoul(vroll_s, NULL, 16);
-		if ((vroll_uint & m->extension_version_rolling_mask) != vroll_uint) {
-			// tried to roll bits we didn't approve
-			send_bad_version_error(c,id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
-		bver |= vroll_uint;
-	}
 	
 	// 0 - 4 = version
 	pk_u32le(block_header, 0, bver);
@@ -1461,27 +1428,12 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 }
 
 int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
-	// {"id":0,"method":"mining.configure","params":[["version-rolling"],{"version-rolling.mask":"1fffe000","version-rolling.min-bit-count":16}]}
-	// {"id": 9966, "method": "mining.configure", "params": [["version-rolling", "subscribe-extranonce"], {"version-rolling.mask": "1fffe000", "version-rolling.min-bit-count": 16}]}
-	// {"id":1,"method":"mining.configure","params":[["version-rolling","minimum-difficulty","subscribe-extranonce"],{"version-rolling.mask":"1fffe000","version-rolling.min-bit-count":16,"minimum-difficulty.value":2048}]}
-	
-	// prompts the following responses:
-	// {"error": null, "id": 0, "result": {"version-rolling": true, "version-rolling.mask": "1fffe000", "minimum-difficulty": false}}
-	// {"id": null, "method": "mining.set_version_mask", "params": ["1fffe000"]}
-	
 	// need to parse params...
 	
-	json_t *p1, *p2, *t;
-	const char *s, *s2;
-	char sx[1024];
+	json_t *p1, *p2;
+	const char *s;
 	char sa[1024];
-	int sxl = 0;
-	sx[0] = 0;
 	int i;
-	
-	T_DATUM_MINER_DATA * const m = c->app_client_data;
-	
-	bool new_vroll = false;
 	bool new_mdiff = false;
 	
 	if (!json_is_array(params_obj)) {
@@ -1499,25 +1451,6 @@ int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 		if (json_is_string(value)) {
 			s = json_string_value(value);
 			switch(s[0]) {
-				case 'v': {
-					if (!strcmp("version-rolling", s)) {
-						new_vroll = true;
-						m->extension_version_rolling = true;
-						m->extension_version_rolling_mask = 0x1fffe000;
-						m->extension_version_rolling_bits = 16;
-						t = json_object_get(p2, "version-rolling.mask");
-						if (t) {
-							s2 = json_string_value(t);
-							if (s2) {
-								m->extension_version_rolling_mask = strtoul(s2, NULL, 16) & m->extension_version_rolling_mask;
-							}
-						}
-						
-						sxl = sprintf(&sx[sxl], "{\"id\":null,\"method\":\"mining.set_version_mask\",\"params\":[\"%08x\"]}\n", m->extension_version_rolling_mask);
-					}
-					break;
-				}
-				
 				case 'm': {
 					if (!strcmp("minimum-difficulty", s)) {
 						new_mdiff = true;
@@ -1533,22 +1466,14 @@ int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	char idbuf[160];
 	stratum_rpc_id_text(c, id, idbuf, sizeof(idbuf));
 	i = snprintf(sa, sizeof(sa), "{\"error\":null,\"id\":%s,\"result\":{", idbuf);
-	if (new_vroll) {
-		i+= snprintf(&sa[i], sizeof(sa)-i, "\"version-rolling\":true,\"version-rolling.mask\":\"%08x\"", m->extension_version_rolling_mask);
-	}
 	if (new_mdiff) {
 		// we don't currently support miner specified minimum difficulty.
-		i+= snprintf(&sa[i], sizeof(sa)-i, "%s\"minimum-difficulty\":false",
-			new_vroll ? "," : "");
+		i+= snprintf(&sa[i], sizeof(sa)-i, "\"minimum-difficulty\":false");
 	}
 	i+= snprintf(&sa[i], sizeof(sa)-i, "}}\n");
 	
 	datum_socket_send_string_to_client(c, sa);
 	stratum_rpc_id_clear(c);
-	
-	if (sxl) {
-		datum_socket_send_string_to_client(c, sx);
-	}
 	
 	return 0;
 }

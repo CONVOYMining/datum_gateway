@@ -220,10 +220,6 @@ typedef struct {
 	char useragent[128];
 	char last_auth_username[192];
 	
-	bool extension_version_rolling;
-	uint32_t extension_version_rolling_mask;
-	unsigned char extension_version_rolling_bits;
-	
 	bool extension_minimum_difficulty;
 	double extension_minimum_difficulty_value;
 	
