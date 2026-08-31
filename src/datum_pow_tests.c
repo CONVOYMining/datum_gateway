@@ -124,6 +124,16 @@ static void datum_pow_blake2b_vector_tests(void) {
 	datum_test(datum_blake2b_sia_difficulty(1) == 0.9999847412109375L);
 	datum_test(datum_blake2b_sia_difficulty(16) == 15.999755859375L);
 	datum_test(datum_blake2b_accounting_difficulty(65535.0L) == 65536.0L);
+	char difficulty[64];
+	datum_test(datum_blake2b_format_stratum_difficulty(
+		difficulty, sizeof(difficulty), 1) > 0);
+	datum_test(!strcmp(difficulty, "0.9999847412109375"));
+	datum_test(datum_blake2b_format_stratum_difficulty(
+		difficulty, sizeof(difficulty), 16384) > 0);
+	datum_test(!strcmp(difficulty, "16383.75"));
+	datum_test(datum_blake2b_format_stratum_difficulty(
+		difficulty, sizeof(difficulty), 65536) > 0);
+	datum_test(!strcmp(difficulty, "65535"));
 	
 	for(size_t i=0;i<32;i++) {
 		merkle[i] = i;

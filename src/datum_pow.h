@@ -57,6 +57,7 @@ bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, 
 uint32_t datum_blake2b_share_ntime(uint32_t time_on_wire, const unsigned char *ntime8, uint8_t flags);
 bool datum_blake2b_share_target(unsigned char *target, unsigned int bits);
 long double datum_blake2b_sia_difficulty(uint64_t n);
+int datum_blake2b_format_stratum_difficulty(char *out, size_t out_size, uint64_t n);
 long double datum_blake2b_accounting_difficulty(long double x);
 
 bool datum_blake2b_256(unsigned char *out, const unsigned char *in, size_t len);

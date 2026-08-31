@@ -1593,10 +1593,14 @@ int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c) {
 		m->current_diff = datum_config.stratum_v1_vardiff_min;
 	}
 	
-	const long double difficulty = datum_blake2b_sia_difficulty(m->current_diff);
+	char stratum_difficulty[64];
+	if (datum_blake2b_format_stratum_difficulty(
+	    stratum_difficulty, sizeof(stratum_difficulty), m->current_diff) < 0) {
+		return -1;
+	}
 	snprintf(s, sizeof(s),
-		"{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[%.20Lf]}\n",
-		difficulty);
+		"{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[%s]}\n",
+		stratum_difficulty);
 	datum_socket_send_string_to_client(c, s);
 	
 	m->last_sent_diff = m->current_diff;
