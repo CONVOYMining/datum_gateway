@@ -27,6 +27,7 @@
 		"log_level_file": 1
 	},
 	"datum": {
+		"migration_max_seconds": 86400,
 		"pool_pass_workers": true,
 		"pool_pass_full_users": true,
 		"pooled_mining_only": true

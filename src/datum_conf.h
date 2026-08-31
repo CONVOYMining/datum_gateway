@@ -154,6 +154,11 @@ typedef struct {
 	
 	char datum_pool_host[1024];
 	int datum_pool_port;
+	char datum_pool_migration_host[1024];
+	int datum_pool_migration_port;
+	char datum_pool_migration_pubkey[129];
+	uint64_t datum_pool_migration_deadline_ms;
+	int datum_pool_migration_max_seconds;
 	bool datum_pool_pass_workers;
 	bool datum_pool_pass_full_users;
 	bool datum_always_pay_self;

@@ -43,6 +43,7 @@
 
 int datum_protocol_share_response(int len, unsigned char *data);
 int datum_protocol_client_configure(int len, unsigned char *data);
+int datum_protocol_mining_cmd5(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data);
 extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
 extern unsigned char datum_state;
@@ -73,6 +74,173 @@ static void datum_protocol_config_v2_tests(void) {
 	datum_test(!datum_protocol_client_configure((int)i, payload));
 	datum_config = saved_config;
 	datum_state = saved_state;
+}
+
+static void datum_protocol_migration_tests(void) {
+	global_config_t saved_config = datum_config;
+	unsigned char payload[192] = {0};
+	unsigned char command[193] = {0xA4};
+	unsigned char home_payload[192] = {0};
+	T_DATUM_PROTOCOL_HEADER header = {0};
+	char endpoint[sizeof(datum_config.datum_pool_host)];
+	char endpoint_pubkey[sizeof(datum_config.datum_pool_pubkey)];
+	char configured_pubkey[129];
+	char migrated_pubkey[129];
+	const char host[] = "next.pool.example";
+	const unsigned char return_home[] = {0, 1, 0xFE};
+	int port;
+	size_t i = 0;
+	size_t key_offset;
+	size_t home_i = 0;
+	
+	for (size_t j = 0; j < 32; ++j) {
+		uchar_to_hex(configured_pubkey + j * 2, j);
+		uchar_to_hex(configured_pubkey + 64 + j * 2, 32 + j);
+	}
+	configured_pubkey[128] = '\0';
+	strcpy(datum_config.datum_pool_host, "configured.pool.example");
+	datum_config.datum_pool_port = 28915;
+	strcpy(datum_config.datum_pool_pubkey, configured_pubkey);
+	datum_config.datum_pool_migration_host[0] = '\0';
+	datum_config.datum_pool_migration_port = 0;
+	datum_config.datum_pool_migration_pubkey[0] = '\0';
+	datum_config.datum_pool_migration_deadline_ms = 0;
+	datum_config.datum_pool_migration_max_seconds = 86400;
+	
+	payload[i++] = 0; // revision
+	payload[i++] = 0; // migrate
+	pk_u16le(payload, i, sizeof(host) - 1); i += 2;
+	memcpy(payload + i, host, sizeof(host) - 1); i += sizeof(host) - 1;
+	pk_u16le(payload, i, 29634); i += 2;
+	key_offset = i;
+	for (size_t j = 0; j < 64; ++j) payload[i++] = j;
+	payload[i++] = 0xFE;
+	memcpy(command + 1, payload, i);
+	header.cmd_len = i + 1;
+	
+	datum_test(datum_protocol_mining_cmd5(&header, command) == 0);
+	datum_test(!datum_config.datum_pool_migration_host[0]);
+	header.is_signed = true;
+	datum_test(datum_protocol_mining_cmd5(&header, command) == -1);
+	datum_test(!strcmp(datum_config.datum_pool_host, "configured.pool.example"));
+	datum_test(datum_config.datum_pool_port == 28915);
+	datum_test(!strcmp(datum_config.datum_pool_migration_host, host));
+	datum_test(datum_config.datum_pool_migration_port == 29634);
+	datum_test(!strcmp(datum_config.datum_pool_migration_pubkey, configured_pubkey));
+	datum_test(datum_config.datum_pool_migration_deadline_ms > current_time_millis());
+	
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, host));
+	datum_test(port == 29634);
+	datum_test(!strcmp(endpoint_pubkey, configured_pubkey));
+	datum_test(!datum_config.datum_pool_migration_host[0]);
+	datum_test(datum_config.datum_pool_migration_port == 0);
+	datum_test(!datum_config.datum_pool_migration_pubkey[0]);
+	datum_test(datum_config.datum_pool_migration_deadline_ms == 0);
+	datum_test(!datum_protocol_migration_expired(current_time_millis()));
+	
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "configured.pool.example"));
+	datum_test(port == 28915);
+	datum_test(!strcmp(endpoint_pubkey, configured_pubkey));
+	datum_test(!datum_protocol_migration_expired(UINT64_MAX));
+	datum_test(datum_protocol_migration_request(
+		(int)sizeof(return_home), return_home) == 1);
+	
+	for (size_t j = 0; j < 64; ++j) {
+		payload[key_offset + j] = 0x80 + j;
+		uchar_to_hex(migrated_pubkey + j * 2, 0x80 + j);
+	}
+	migrated_pubkey[128] = '\0';
+	datum_test(datum_protocol_migration_request((int)i, payload) == -1);
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint_pubkey, migrated_pubkey));
+	datum_config.datum_pool_migration_max_seconds = 0;
+	datum_test(datum_protocol_migration_request(
+		(int)sizeof(return_home), return_home) == 1);
+	datum_test(datum_protocol_migration_expired(UINT64_MAX));
+	datum_config.datum_pool_migration_max_seconds = 86400;
+	datum_test(datum_protocol_migration_request(
+		(int)sizeof(return_home), return_home) == -1);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, datum_config.datum_pool_host));
+	datum_test(port == datum_config.datum_pool_port);
+	datum_test(!strcmp(endpoint_pubkey, datum_config.datum_pool_pubkey));
+	datum_test(!datum_protocol_migration_expired(UINT64_MAX));
+	
+	datum_config.datum_pool_migration_max_seconds = 0;
+	datum_test(datum_protocol_migration_request((int)i, payload) == 1);
+	datum_test(!datum_config.datum_pool_migration_host[0]);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, datum_config.datum_pool_host));
+	datum_test(port == datum_config.datum_pool_port);
+	datum_test(!strcmp(endpoint_pubkey, datum_config.datum_pool_pubkey));
+	datum_config.datum_pool_migration_max_seconds = 86400;
+	
+	datum_test(datum_protocol_migration_request((int)i, payload) == -1);
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	
+	home_payload[home_i++] = 0; // revision
+	home_payload[home_i++] = 0; // migrate
+	pk_u16le(home_payload, home_i, strlen(datum_config.datum_pool_host)); home_i += 2;
+	memcpy(home_payload + home_i, datum_config.datum_pool_host,
+		strlen(datum_config.datum_pool_host));
+	home_i += strlen(datum_config.datum_pool_host);
+	pk_u16le(home_payload, home_i, datum_config.datum_pool_port); home_i += 2;
+	for (size_t j = 0; j < 64; ++j) home_payload[home_i++] = j;
+	home_payload[home_i++] = 0xFE;
+	datum_test(datum_protocol_migration_request((int)home_i, home_payload) == -1);
+	datum_test(datum_config.datum_pool_migration_deadline_ms == 0);
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, datum_config.datum_pool_host));
+	datum_test(port == datum_config.datum_pool_port);
+	datum_test(!strcmp(endpoint_pubkey, datum_config.datum_pool_pubkey));
+	datum_test(!datum_protocol_migration_expired(UINT64_MAX));
+	datum_test(datum_protocol_migration_request((int)home_i, home_payload) == 1);
+	
+	datum_config.datum_pool_migration_host[0] = 'x';
+	datum_config.datum_pool_migration_host[1] = '\0';
+	datum_config.datum_pool_migration_port = 1;
+	strcpy(datum_config.datum_pool_migration_pubkey, configured_pubkey);
+	datum_config.datum_pool_migration_deadline_ms = current_time_millis() - 1;
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(datum_protocol_migration_expired(current_time_millis()));
+	datum_test(datum_protocol_migration_request((int)i, payload) == -1);
+	datum_test(!datum_config.datum_pool_migration_host[0]);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!datum_protocol_migration_expired(UINT64_MAX));
+	
+	payload[0] = 1;
+	datum_test(datum_protocol_migration_request((int)i, payload) == 0);
+	payload[0] = 0;
+	payload[1] = 2;
+	datum_test(datum_protocol_migration_request((int)i, payload) == 0);
+	payload[1] = 0;
+	payload[i - 1] = 0;
+	datum_test(datum_protocol_migration_request((int)i, payload) == 0);
+	pk_u16le(payload, 4 + sizeof(host) - 1, 0);
+	payload[i - 1] = 0xFE;
+	datum_test(datum_protocol_migration_request((int)i, payload) == 0);
+	
+	datum_config = saved_config;
 }
 
 static void datum_pow_response_large_difficulty_test(void) {
@@ -250,6 +418,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 
 void datum_protocol_tests(void) {
 	datum_protocol_config_v2_tests();
+	datum_protocol_migration_tests();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 }

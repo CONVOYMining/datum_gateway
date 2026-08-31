@@ -127,6 +127,15 @@ bool datum_protocol_is_active(void);
 void datum_increment_session_nonce(void *s);
 int datum_protocol_fetch_coinbaser(uint64_t value);
 int datum_protocol_coinbaser_fetch(void *s);
+int datum_protocol_migration_request(int len, const unsigned char *data);
+bool datum_protocol_take_connect_endpoint(
+	char *host,
+	size_t host_size,
+	int *port,
+	char *pubkey,
+	size_t pubkey_size
+);
+bool datum_protocol_migration_expired(uint64_t now_ms);
 int datum_protocol_pow_submit(
 	const T_DATUM_CLIENT_DATA *c,
 	const T_DATUM_STRATUM_JOB *job,

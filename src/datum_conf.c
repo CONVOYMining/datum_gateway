@@ -180,6 +180,9 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.datum_pool_port, .default_int = 28915 },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "datum", 		.name = "pool_pubkey",					.description = "Public key of the DATUM server for initiating encrypted connection. Get from secure location, or set to empty to auto-fetch.",
 		.required = false, .ptr = datum_config.datum_pool_pubkey,		.default_string[0] = "f21f2f0ef0aa1970468f22bad9bb7f4535146f8e4a8f646bebc93da3d89b1406f40d032f09a417d94dc068055df654937922d2c89522e3e8f6f0e649de473003", .max_string_len = sizeof(datum_config.datum_pool_pubkey) },
+	{ .var_type = DATUM_CONF_INT, 		.category = "datum", 		.name = "migration_max_seconds",		.description = "Maximum time to remain away from the configured DATUM server after a server-requested migration (0 disables migration)",
+		.example_default = true,
+		.required = false, .ptr = &datum_config.datum_pool_migration_max_seconds, .default_int = 86400 },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pool_pass_workers",			.description = "Pass stratum miner usernames as sub-worker names to the pool (pool_username.miner's username)",
 		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pool_pass_workers, 		.default_bool = true },
@@ -505,6 +508,10 @@ int datum_read_config(const char *conffile) {
 	}
 	if (datum_config.bitcoind_work_update_seconds > 120) {
 		datum_config.bitcoind_work_update_seconds = 120;
+	}
+	if (datum_config.datum_pool_migration_max_seconds < 0) {
+		DLOG_FATAL("Configuration option datum.migration_max_seconds cannot be negative");
+		return -1;
 	}
 	
 	if (datum_config.bitcoind_rpcuser[0]) {

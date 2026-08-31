@@ -103,6 +103,8 @@ unsigned char session_nonce_receiver[crypto_box_NONCEBYTES];
 
 pthread_mutex_t datum_protocol_sender_stage1_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t datum_protocol_send_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t datum_protocol_migration_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t datum_protocol_current_migration_deadline_ms;
 
 unsigned char datum_protocol_next_job_idx = 0;
 pthread_mutex_t datum_protocol_next_job_idx_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -960,11 +962,195 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 	return 1;
 }
 
+static void datum_protocol_log_migration_target(
+	const char *message, const unsigned char *host, size_t host_len,
+	uint16_t port) {
+	char escaped_host[sizeof(datum_config.datum_pool_migration_host) * 4];
+	size_t out = 0;
+	
+	for (size_t i = 0; i < host_len; ++i) {
+		const unsigned char c = host[i];
+		if (c >= 0x21 && c <= 0x7e && c != '"' && c != '\\') {
+			escaped_host[out++] = c;
+		} else if (c == '"' || c == '\\') {
+			escaped_host[out++] = '\\';
+			escaped_host[out++] = c;
+		} else {
+			escaped_host[out++] = '\\';
+			escaped_host[out++] = 'x';
+			uchar_to_hex(&escaped_host[out], c); out += 2;
+		}
+	}
+	escaped_host[out] = '\0';
+	DLOG_INFO("%s host=\"%s\" port=%u", message, escaped_host,
+		(unsigned int)port);
+}
+
+int datum_protocol_migration_request(int len, const unsigned char *data) {
+	size_t host_len;
+	size_t expected_len;
+	uint16_t port;
+	char pubkey[129];
+	uint64_t deadline_ms;
+	bool returning_to_configured;
+	
+	if (!data || len < 3 || data[0] != 0) return 0;
+	// revision=0 | action=1 | FE returns to the configured endpoint.
+	if (data[1] == 1) {
+		if (len != 3 || data[2] != 0xFE) return 0;
+		pthread_mutex_lock(&datum_protocol_migration_lock);
+		if (!datum_config.datum_pool_migration_max_seconds) {
+			pthread_mutex_unlock(&datum_protocol_migration_lock);
+			DLOG_INFO("Ignoring DATUM return-home request because migration is disabled");
+			return 1;
+		}
+		if (!datum_protocol_current_migration_deadline_ms) {
+			pthread_mutex_unlock(&datum_protocol_migration_lock);
+			DLOG_INFO("Ignoring DATUM return-home request because the configured server is active");
+			return 1;
+		}
+		datum_config.datum_pool_migration_host[0] = '\0';
+		datum_config.datum_pool_migration_port = 0;
+		datum_config.datum_pool_migration_pubkey[0] = '\0';
+		datum_config.datum_pool_migration_deadline_ms = 0;
+		datum_protocol_current_migration_deadline_ms = 0;
+		pthread_mutex_unlock(&datum_protocol_migration_lock);
+		DLOG_INFO("DATUM server requested return to configured server");
+		return -1;
+	}
+	
+	// revision=0 | action=0 | host_len:u16 | host | port:u16 | pubkey:64 | FE
+	if (data[1] != 0 || len < 72) return 0;
+	host_len = upk_u16le(data, 2);
+	if (!host_len || host_len >= sizeof(datum_config.datum_pool_migration_host)) return 0;
+	expected_len = host_len + 71;
+	if (expected_len != (size_t)len || data[len - 1] != 0xFE) return 0;
+	if (memchr(data + 4, 0, host_len)) return 0;
+	port = upk_u16le(data, 4 + host_len);
+	if (!port) return 0;
+	for (size_t i = 0; i < 64; ++i) {
+		uchar_to_hex(pubkey + i * 2, data[6 + host_len + i]);
+	}
+	pubkey[128] = '\0';
+	if (!datum_config.datum_pool_migration_max_seconds) {
+		datum_protocol_log_migration_target(
+			"Ignoring disabled DATUM migration target",
+			data + 4, host_len, port);
+		return 1;
+	}
+	
+	pthread_mutex_lock(&datum_protocol_migration_lock);
+	returning_to_configured =
+		host_len == strlen(datum_config.datum_pool_host) &&
+		memcmp(data + 4, datum_config.datum_pool_host, host_len) == 0 &&
+		port == datum_config.datum_pool_port &&
+		strcmp(pubkey, datum_config.datum_pool_pubkey) == 0;
+	if (returning_to_configured) {
+		if (!datum_protocol_current_migration_deadline_ms) {
+			pthread_mutex_unlock(&datum_protocol_migration_lock);
+			datum_protocol_log_migration_target(
+				"Ignoring DATUM migration target because it is already active",
+				data + 4, host_len, port);
+			return 1;
+		}
+		deadline_ms = 0;
+	} else {
+		deadline_ms = datum_protocol_current_migration_deadline_ms;
+		if (!deadline_ms) {
+			deadline_ms = current_time_millis() +
+				(uint64_t)datum_config.datum_pool_migration_max_seconds * 1000;
+		}
+		if (deadline_ms <= current_time_millis()) {
+			pthread_mutex_unlock(&datum_protocol_migration_lock);
+			DLOG_WARN("Ignoring DATUM redirect because the migration time limit expired");
+			return -1;
+		}
+	}
+	memcpy(datum_config.datum_pool_migration_host, data + 4, host_len);
+	datum_config.datum_pool_migration_host[host_len] = '\0';
+	datum_config.datum_pool_migration_port = port;
+	memcpy(datum_config.datum_pool_migration_pubkey, pubkey, sizeof(pubkey));
+	datum_config.datum_pool_migration_deadline_ms = deadline_ms;
+	pthread_mutex_unlock(&datum_protocol_migration_lock);
+	
+	datum_protocol_log_migration_target(
+		"DATUM server requested migration to", data + 4, host_len, port);
+	return -1;
+}
+
+bool datum_protocol_take_connect_endpoint(
+	char *host,
+	size_t host_size,
+	int *port,
+	char *pubkey,
+	size_t pubkey_size
+) {
+	bool migrated = false;
+	const char *selected_host;
+	const char *selected_pubkey;
+	int selected_port;
+	
+	if (!host || !host_size || !port || !pubkey || !pubkey_size) return false;
+	
+	pthread_mutex_lock(&datum_protocol_migration_lock);
+	if (datum_config.datum_pool_migration_host[0]) {
+		selected_host = datum_config.datum_pool_migration_host;
+		selected_port = datum_config.datum_pool_migration_port;
+		selected_pubkey = datum_config.datum_pool_migration_pubkey;
+		datum_protocol_current_migration_deadline_ms =
+			datum_config.datum_pool_migration_deadline_ms;
+		migrated = true;
+	} else {
+		selected_host = datum_config.datum_pool_host;
+		selected_port = datum_config.datum_pool_port;
+		selected_pubkey = datum_config.datum_pool_pubkey;
+		datum_protocol_current_migration_deadline_ms = 0;
+	}
+	
+	if (strlen(selected_host) >= host_size || strlen(selected_pubkey) >= pubkey_size) {
+		host[0] = '\0';
+		*port = 0;
+		pubkey[0] = '\0';
+		migrated = false;
+	} else {
+		strcpy(host, selected_host);
+		*port = selected_port;
+		strcpy(pubkey, selected_pubkey);
+	}
+	
+	if (migrated) {
+		datum_config.datum_pool_migration_host[0] = '\0';
+		datum_config.datum_pool_migration_port = 0;
+		datum_config.datum_pool_migration_pubkey[0] = '\0';
+		datum_config.datum_pool_migration_deadline_ms = 0;
+	}
+	pthread_mutex_unlock(&datum_protocol_migration_lock);
+	return migrated;
+}
+
+bool datum_protocol_migration_expired(uint64_t now_ms) {
+	bool expired;
+	
+	pthread_mutex_lock(&datum_protocol_migration_lock);
+	expired = datum_protocol_current_migration_deadline_ms &&
+		now_ms >= datum_protocol_current_migration_deadline_ms;
+	pthread_mutex_unlock(&datum_protocol_migration_lock);
+	return expired;
+}
+
 // Main mining related command.  Has sub commands
 int datum_protocol_mining_cmd5(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data) {
 	if (!h->cmd_len) return 0;
 	
 	switch(*data) {
+		case 0xA4: {
+			if (!h->is_signed) {
+				DLOG_ERROR("Received unsigned migration request from DATUM server!");
+				return 0;
+			}
+			return datum_protocol_migration_request(h->cmd_len-1, &data[1]);
+		}
+		
 		case 0x99: {
 			if (!h->is_signed) {
 				DLOG_ERROR("Received unsigned client configuration from DATUM server!");
@@ -1589,6 +1775,9 @@ void *datum_protocol_client(void *args) {
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	char port_str[7];  // To hold the port number as a string
+	char pool_host[sizeof(datum_config.datum_pool_host)];
+	char pool_pubkey[sizeof(datum_config.datum_pool_pubkey)];
+	int pool_port;
 	bool break_again = false;
 	int sent = 0;
 	T_DATUM_PROTOCOL_HEADER s_header;
@@ -1621,10 +1810,26 @@ void *datum_protocol_client(void *args) {
 		return 0;
 	}
 	
-	snprintf(port_str, sizeof(port_str)-1, "%d", datum_config.datum_pool_port);
+	const bool migrated = datum_protocol_take_connect_endpoint(
+		pool_host, sizeof(pool_host), &pool_port,
+		pool_pubkey, sizeof(pool_pubkey));
+	if (migrated) {
+		datum_protocol_log_migration_target(
+			"Connecting to one-time DATUM migration endpoint",
+			(const unsigned char *)pool_host, strlen(pool_host),
+			(uint16_t)pool_port);
+	}
+	memset(&pool_keys, 0, sizeof(DATUM_ENC_KEYS));
+	if (datum_pubkey_to_struct(pool_pubkey, &pool_keys) != 0) {
+		DLOG_ERROR("DATUM connection public key is invalid");
+		datum_protocol_client_active = 0;
+		return NULL;
+	}
+	pool_keys.is_remote = true;
+	snprintf(port_str, sizeof(port_str)-1, "%d", pool_port);
 	port_str[6] = 0;
 	
-	if ((ret = getaddrinfo(datum_config.datum_pool_host, port_str, &hints, &res)) != 0) {
+	if ((ret = getaddrinfo(pool_host, port_str, &hints, &res)) != 0) {
 		DLOG_ERROR("getaddrinfo: %s", gai_strerror(ret));
 		datum_protocol_client_active = 0;
 		return NULL;
@@ -1720,6 +1925,10 @@ void *datum_protocol_client(void *args) {
 		i++;
 		
 		datum_protocol_mainloop_tsms = current_time_millis();
+		if (datum_protocol_migration_expired(datum_protocol_mainloop_tsms)) {
+			DLOG_INFO("DATUM migration time limit reached; returning to configured server");
+			break;
+		}
 		
 		// Sanity check.  If we haven't received anything at all from the server in the set time, then it's pretty likely there's a connection issue.
 		if ((datum_protocol_mainloop_tsms - latest_server_msg_tsms) >= datum_config.datum_protocol_global_timeout_ms) {
