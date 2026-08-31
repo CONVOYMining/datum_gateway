@@ -136,8 +136,14 @@ void datum_utils_tests_scriptnum(void) {
 	datum_test(!strcmp(encoded, "03008000"));
 }
 
+static void datum_utils_tests_pdiff_to_bdiff(void) {
+	datum_test(datum_pdiff_to_bdiff(1) == 0.9999847412109375L);
+	datum_test(datum_pdiff_to_bdiff(16) == 15.999755859375L);
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
 	datum_utils_tests_secure_strequals();
 	datum_utils_tests_scriptnum();
+	datum_utils_tests_pdiff_to_bdiff();
 }

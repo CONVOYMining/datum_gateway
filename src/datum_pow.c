@@ -134,13 +134,9 @@ uint32_t datum_blake2b_share_nbits(unsigned int bits) {
 	return (size << 24) | (mantissa & UINT32_C(0x007fffff));
 }
 
-long double datum_blake2b_sia_difficulty(uint64_t n) {
-	return ((long double)n) * 65535.0L / 65536.0L;
-}
-
 int datum_blake2b_format_stratum_difficulty(char *out, size_t out_size, uint64_t n) {
 	if (!out || !out_size) return -1;
-	int len = snprintf(out, out_size, "%.20Lf", datum_blake2b_sia_difficulty(n));
+	int len = snprintf(out, out_size, "%.20Lf", datum_pdiff_to_bdiff(n));
 	if (len < 0 || (size_t)len >= out_size) return -1;
 	while (len > 0 && out[len - 1] == '0') out[--len] = '\0';
 	if (len > 0 && out[len - 1] == '.') out[--len] = '\0';

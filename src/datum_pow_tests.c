@@ -162,8 +162,6 @@ static void datum_pow_blake2b_vector_tests(void) {
 		nbits_to_target(datum_blake2b_share_nbits(pot), advertised);
 		datum_test(compare_hashes(advertised, accepted) <= 0);
 	}
-	datum_test(datum_blake2b_sia_difficulty(1) == 0.9999847412109375L);
-	datum_test(datum_blake2b_sia_difficulty(16) == 15.999755859375L);
 	datum_test(datum_blake2b_accounting_difficulty(65535.0L) == 65536.0L);
 	char difficulty[64];
 	datum_test(datum_blake2b_format_stratum_difficulty(
