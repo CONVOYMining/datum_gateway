@@ -93,6 +93,23 @@ static void datum_protocol_resume_tests(void) {
 	datum_protocol_replay_mark_responded_legacy(9, 10, 3);
 	datum_test(datum_replay_count == 2);
 	datum_protocol_replay_clear();
+	
+	unsigned char backpressure_message[32] = {0x27, 0xFE};
+	unsigned char backpressure_before[sizeof(backpressure_message)];
+	unsigned char nonce_before[sizeof(session_nonce_sender)];
+	memcpy(backpressure_before, backpressure_message,
+		sizeof(backpressure_message));
+	memcpy(nonce_before, session_nonce_sender, sizeof(nonce_before));
+	const uint32_t header_key_before = sending_header_key;
+	const int buffered_before = server_out_buf;
+	server_out_buf = DATUM_PROTOCOL_BUFFER_SIZE - 1;
+	datum_test(datum_protocol_mining_cmd(backpressure_message, 2) == -1);
+	datum_test(sending_header_key == header_key_before);
+	datum_test(!memcmp(session_nonce_sender, nonce_before, sizeof(nonce_before)));
+	datum_test(!memcmp(backpressure_message, backpressure_before,
+		sizeof(backpressure_message)));
+	datum_test(server_out_buf == DATUM_PROTOCOL_BUFFER_SIZE - 1);
+	server_out_buf = buffered_before;
 }
 
 static void datum_protocol_migration_tests(void) {

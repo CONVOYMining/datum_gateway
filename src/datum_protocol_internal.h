@@ -41,6 +41,9 @@
 typedef struct T_DATUM_REPLAY_PENDING T_DATUM_REPLAY_PENDING;
 
 extern unsigned char datum_state;
+extern int server_out_buf;
+extern uint32_t sending_header_key;
+extern unsigned char session_nonce_sender[crypto_box_NONCEBYTES];
 extern size_t datum_replay_count;
 extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
@@ -52,6 +55,7 @@ T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
 void datum_protocol_replay_mark_responded_legacy(
 	uint32_t nonce, uint8_t target_pot, uint8_t job_id);
 
+int datum_protocol_mining_cmd(void *data, int len);
 int datum_protocol_client_configure(int len, unsigned char *data);
 int datum_protocol_mining_cmd5(
 	T_DATUM_PROTOCOL_HEADER *header, unsigned char *data);

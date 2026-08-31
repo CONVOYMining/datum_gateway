@@ -261,7 +261,7 @@ int datum_protocol_mining_cmd(void *data, int len) {
 	// encypt and send a standard mining sub-command
 	// this can be called from other threads so must be thread safe!
 	T_DATUM_PROTOCOL_HEADER h;
-	int i;
+	if (len < 0) return -1;
 	
 	memset(&h, 0, sizeof(T_DATUM_PROTOCOL_HEADER));
 	
@@ -269,27 +269,33 @@ int datum_protocol_mining_cmd(void *data, int len) {
 	h.proto_cmd = 5;
 	h.cmd_len = len;
 	h.cmd_len += crypto_box_MACBYTES;
+	const size_t frame_size = sizeof(T_DATUM_PROTOCOL_HEADER) +
+		(size_t)len + crypto_box_MACBYTES;
+	if (frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) return -1;
 	
 	// sends of encrypted data must remain ordered
-	// we have to lock here for both the header obfuscation and the nonce increment
+	// Reserve the complete frame before advancing either crypto state; an
+	// orphan header would permanently desynchronize the session.
 	pthread_mutex_lock(&datum_protocol_sender_stage1_lock);
+	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
+	if ((size_t)server_out_buf + frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) {
+		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
+		return -1;
+	}
 	
 	crypto_box_easy_afternm(data, data, len, session_nonce_sender, session_precomp.precomp_remote);
 	//DLOG_DEBUG("mining cmd 5--- len %d, send header key %8.8x, raw %8.8lx", h.cmd_len, sending_header_key, (unsigned long)upk_u32le(h, 0));
 	datum_xor_header_key(&h, sending_header_key);
 	sending_header_key = datum_header_xor_feedback(sending_header_key);
 	datum_increment_session_nonce(session_nonce_sender);
-	
-	i = datum_protocol_chars_to_server((unsigned char *)&h, sizeof(T_DATUM_PROTOCOL_HEADER));
-	if (i < 1) {
-		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
-		return -1;
-	}
-	i = datum_protocol_chars_to_server((unsigned char *)data, len + crypto_box_MACBYTES);
-	if (i < 1) {
-		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
-		return -1;
-	}
+	memcpy(server_send_buffer + server_out_buf, &h,
+		sizeof(T_DATUM_PROTOCOL_HEADER));
+	server_out_buf += sizeof(T_DATUM_PROTOCOL_HEADER);
+	memcpy(server_send_buffer + server_out_buf, data,
+		(size_t)len + crypto_box_MACBYTES);
+	server_out_buf += len + crypto_box_MACBYTES;
+	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 	pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 	
 	return 0;
