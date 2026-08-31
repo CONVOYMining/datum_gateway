@@ -346,9 +346,15 @@ static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
 	return 0;
 }
 
-int datum_protocol_mining_cmd(void *data, int len) {
+int datum_protocol_mining_cmd_for_session(
+	void *data, int len, const uint64_t expected_session_generation) {
 	// Protocol command 5. This can be called from other threads.
-	return datum_protocol_encrypted_cmd(5, data, len, false, 0);
+	return datum_protocol_encrypted_cmd(
+		5, data, len, false, expected_session_generation);
+}
+
+int datum_protocol_mining_cmd(void *data, int len) {
+	return datum_protocol_mining_cmd_for_session(data, len, 0);
 }
 
 void datum_protocol_bulk_reset(void) {
@@ -1297,11 +1303,14 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	memset(&msg[i], rand(), j);
 	i+=j;
 	
+	const uint64_t session_generation =
+		atomic_load(&datum_session_generation);
 	if (datum_protocol_client_active != 3) {
 		return 0;
 	}
 	
-	datum_protocol_mining_cmd(msg, i);
+	if (datum_protocol_mining_cmd_for_session(
+		msg, i, session_generation) != 0) return 0;
 	
 	// spin here for up to 5 seconds while awaiting a coinbaser response from DATUM Prime
 	clock_gettime(CLOCK_REALTIME, &ts);
@@ -2889,11 +2898,6 @@ void *datum_protocol_client(void *args) {
 	int pool_port;
 	bool break_again = false;
 	T_DATUM_PROTOCOL_HEADER s_header;
-	uint64_t next_session_generation =
-		atomic_fetch_add(&datum_session_generation, 1) + 1;
-	if (!next_session_generation) {
-		atomic_store(&datum_session_generation, 1);
-	}
 	datum_connection_configured = false;
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
@@ -2910,13 +2914,20 @@ void *datum_protocol_client(void *args) {
 		}
 	}
 	pthread_rwlock_unlock(&datum_jobs_rwlock);
+	pthread_mutex_lock(&datum_protocol_sender_stage1_lock);
 	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
+	uint64_t next_session_generation =
+		atomic_fetch_add(&datum_session_generation, 1) + 1;
+	if (!next_session_generation) {
+		atomic_store(&datum_session_generation, 1);
+	}
 	sending_header_key = 0xDC871829;
 	receiving_header_key = 0;
 	protocol_state = 0;
 	server_out_buf = 0;
 	server_in_buf = 0;
 	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+	pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 	datum_protocol_bulk_reset();
 	atomic_store(&datum_protocol_bulk_enabled, false);
 	datum_state = 0;

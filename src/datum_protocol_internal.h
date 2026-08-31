@@ -63,6 +63,8 @@ int datum_protocol_bulk_cmd(const void *data, int len);
 void datum_protocol_bulk_drain_one(void);
 int datum_protocol_bulk_ack(int len, const unsigned char *data);
 
+int datum_protocol_mining_cmd_for_session(
+	void *data, int len, uint64_t expected_session_generation);
 void datum_protocol_replay_clear(void);
 T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
 	const T_DATUM_PROTOCOL_POW *pow, const unsigned char *message,

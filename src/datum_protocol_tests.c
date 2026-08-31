@@ -320,6 +320,13 @@ static void datum_protocol_resume_tests(void) {
 		sizeof(backpressure_message)));
 	datum_test(server_out_buf == DATUM_PROTOCOL_BUFFER_SIZE - 1);
 	server_out_buf = buffered_before;
+	
+	const uint64_t current_generation = atomic_load(&datum_session_generation);
+	datum_test(datum_protocol_mining_cmd_for_session(
+		backpressure_message, 2, current_generation + 1) == -1);
+	datum_test(sending_header_key == header_key_before);
+	datum_test(!memcmp(session_nonce_sender, nonce_before, sizeof(nonce_before)));
+	datum_test(server_out_buf == buffered_before);
 }
 
 static void datum_protocol_migration_tests(void) {
