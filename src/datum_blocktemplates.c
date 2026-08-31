@@ -124,12 +124,6 @@ int datum_template_init(void) {
 
 static void datum_template_clear_header_fields(T_DATUM_TEMPLATE_DATA *p) {
 	p->header_version = 0;
-	p->header_transaction_count = 0;
-	p->header_flags = 0;
-	p->header_time_offset = 0;
-	p->xor_key_mask_clear_bits = 0;
-	memset(p->xor_key, 0, sizeof(p->xor_key));
-	memset(p->merge_mining_rhs, 0, sizeof(p->merge_mining_rhs));
 }
 
 void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
@@ -248,9 +242,6 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 	}
 	if (want_blake2b && strcmp(datum_config.mining_pow_algorithm, "sha256d")) {
 		tdata->header_version = 2;
-		if (datum_config.mining_allow_hasher_time_rolling) {
-			tdata->header_flags = DATUM_BLAKE2B_USE_TIME_OFFSET;
-		}
 	}
 	
 	jval = json_object_get(gbt, "bits");

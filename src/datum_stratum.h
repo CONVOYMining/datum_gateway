@@ -132,11 +132,9 @@ typedef struct {
 	uint32_t nbits_uint;
 	char ntime[18];
 	unsigned char block_target[32];
-	// BLAKE2b / Knots header-v2 job fields (unused when header_version < 2)
-	unsigned char blake2b_commitment[32];
-	unsigned char blake2b_sia_prevhash[32];
-	unsigned char blake2b_sia_coinb1[39];
+	// BLAKE2b job fields
 	uint32_t blake2b_time_on_wire;
+	uint8_t blake2b_flags;
 	
 	T_DATUM_TEMPLATE_DATA *block_template;
 	

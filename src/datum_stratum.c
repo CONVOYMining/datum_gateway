@@ -1307,7 +1307,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		}
 		datum_blake2b_build_work_header(work, job->prevhash_bin, nonce8, ntime8, root);
 		memcpy(block_header, work, 80);
-		if (!datum_blake2b_pow_hash_le(share_hash, work, job->block_template->xor_key, job->block_template->xor_key_mask_clear_bits)) {
+		if (!datum_blake2b_pow_hash_le(share_hash, work, (const unsigned char[16]){0}, 0)) {
 			send_unknown_work_error(c, id);
 			stratum_note_share(m, false, job_diff);
 			return 0;
@@ -1385,7 +1385,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// For a header-v2 job the node does not read the wire time as nTime: it
 	// adds the hasher's time-offset bytes back when the offset flag is set.
 	// Bound what the node will read, which also bounds hasher time rolling.
-	check_time = blake2b_job ? datum_blake2b_share_ntime(job->blake2b_time_on_wire, ntime8, job->block_template->header_flags) : ntime_val;
+	check_time = blake2b_job ? datum_blake2b_share_ntime(job->blake2b_time_on_wire, ntime8, job->blake2b_flags) : ntime_val;
 	if (check_time < job->block_template->mintime) {
 		send_rejected_time_too_old(c, id);
 		stratum_note_share(m, false, job_diff);
@@ -2180,23 +2180,17 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	unsigned char cb_hash[32];
 	unsigned char merkle[32];
 	const T_DATUM_TEMPLATE_DATA *td;
-	uint32_t txcount;
 	
 	if (!s || !s->block_template || s->block_template->header_version < 2) return false;
 	if (!cb_txn || !commitment || !cb_len) return false;
 	td = s->block_template;
-	if (td->header_transaction_count) {
-		txcount = td->header_transaction_count;
-	} else {
-		txcount = td->txn_count + 1;
-	}
 	double_sha256(cb_hash, cb_txn, cb_len);
 	stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
 	return datum_blake2b_header_commitment(
 		commitment, td->version, td->previousblockhash_bin,
 		(uint32_t)td->height, merkle, s->blake2b_time_on_wire, td->bits_uint,
-		txcount, td->header_flags, td->xor_key_mask_clear_bits,
-		td->xor_key, td->merge_mining_rhs);
+		td->txn_count + 1, s->blake2b_flags, 0,
+		(const unsigned char[16]){0}, (const unsigned char[32]){0});
 }
 
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
@@ -2222,6 +2216,7 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, unsigned char 
 
 void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	T_DATUM_TEMPLATE_DATA *block_template;
+	unsigned char prevblock_hidden[32];
 	uint32_t time_on_wire;
 	int i;
 
@@ -2229,31 +2224,28 @@ void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	block_template = s->block_template;
 	time_on_wire = (uint32_t)block_template->curtime;
 
-	if (block_template->header_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) {
+	if (s->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) {
 		if (!datum_blake2b_time_on_wire(&time_on_wire, block_template->curtime,
-				block_template->header_time_offset, block_template->header_flags)) {
+				0, s->blake2b_flags)) {
 			// The offset cannot be applied, so the header must not claim it was.
 			// A node adds the offset back to the wire time on deserialization,
 			// and a commitment that keeps the flag over an unadjusted time
 			// would have the block's nTime land off by the offset with
-			// nothing here noticing. Clear the flag and the offset on the
-			// template, since the commitment, the notify and the DATUM
-			// submission all read them from there, and say so. time_on_wire
-			// already holds curtime: the helper only writes on success.
-			DLOG_ERROR("Could not derive the BLAKE2b wire time from curtime %llu and time offset %u; mining this template without the time offset",
-				(unsigned long long)block_template->curtime, (unsigned int)block_template->header_time_offset);
-			block_template->header_flags &= ~DATUM_BLAKE2B_USE_TIME_OFFSET;
-			block_template->header_time_offset = 0;
+			// nothing here noticing. Clear the flag on the job, since the
+			// commitment, notify and DATUM submission all read it from there.
+			// time_on_wire already holds curtime: the helper only writes on
+			// success.
+			DLOG_ERROR("Could not derive the BLAKE2b wire time from curtime %llu; mining this template without the time offset",
+				(unsigned long long)block_template->curtime);
+			s->blake2b_flags &= ~DATUM_BLAKE2B_USE_TIME_OFFSET;
 		}
 	}
 	s->blake2b_time_on_wire = time_on_wire;
 
-	// Job-level H2 keeps the 0xFF placeholder; notify/submit rebuild with the client's floorPoT.
-	datum_stratum_job_blake2b_commitment(s, 0xFF, s->blake2b_commitment, s->blake2b_sia_coinb1);
-	datum_blake2b_sia_prevhash(s->blake2b_sia_prevhash, block_template->previousblockhash_bin);
+	datum_blake2b_sia_prevhash(prevblock_hidden, block_template->previousblockhash_bin);
 
 	for(i=0;i<32;i++) {
-		uchar_to_hex(&s->prevhash[i << 1], s->blake2b_sia_prevhash[i]);
+		uchar_to_hex(&s->prevhash[i << 1], prevblock_hidden[i]);
 	}
 	s->prevhash[64] = 0;
 }
@@ -2286,7 +2278,7 @@ void update_stratum_job(T_DATUM_TEMPLATE_DATA *block_template, bool new_block, i
 	// The template's time is 100% safe, so we'll use that for now.
 	if (block_template->header_version >= 2) {
 		memset(ntime8, 0, sizeof(ntime8));
-		pk_u32le(ntime8, 0, block_template->header_time_offset);
+		s->blake2b_flags = datum_config.mining_allow_hasher_time_rolling ? DATUM_BLAKE2B_USE_TIME_OFFSET : 0;
 		pk_u32le(ntime8, 4, (uint32_t)block_template->curtime);
 		for(i=0;i<8;i++) {
 			uchar_to_hex(&s->ntime[i << 1], ntime8[i]);
@@ -2478,11 +2470,7 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	ptr += sprintf(ptr, "{\"jsonrpc\":\"1.0\",\"id\":\"%llu\",\"method\":\"submitblock\",\"params\":[\"",(unsigned long long)time(NULL));
 	if (stratum_job_is_blake2b(job)) {
 		td = job->block_template;
-		if (td->header_transaction_count) {
-			txcount = (uint16_t)td->header_transaction_count;
-		} else {
-			txcount = (uint16_t)((empty_work ? 0 : td->txn_count) + 1);
-		}
+		txcount = (uint16_t)((empty_work ? 0 : td->txn_count) + 1);
 		if ((job->merklebranch_count) && (!empty_work)) {
 			double_sha256(cbh, coinbase_txn, coinbase_txn_size);
 			stratum_job_merkle_root_calc(job, cbh, merkle);
@@ -2491,7 +2479,7 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 		}
 		memset(en, 0, sizeof(en));
 		if (extranonce) memcpy(en, extranonce, 12);
-		datum_blake2b_serialize_block_header(v2hdr, job->version_uint, job->prevhash_bin, merkle, job->blake2b_time_on_wire, job->nbits_uint, block_header + 32, block_header + 40, en, txcount, td->header_flags, td->xor_key_mask_clear_bits, td->xor_key, (uint32_t)job->height, td->merge_mining_rhs);
+		datum_blake2b_serialize_block_header(v2hdr, job->version_uint, job->prevhash_bin, merkle, job->blake2b_time_on_wire, job->nbits_uint, block_header + 32, block_header + 40, en, txcount, job->blake2b_flags, 0, (const unsigned char[16]){0}, (uint32_t)job->height, (const unsigned char[32]){0});
 		for(i=0;i<DATUM_BLAKE2B_BLOCK_HEADER_SIZE;i++) {
 			ptr += sprintf(ptr, "%2.2x", v2hdr[i]);
 		}

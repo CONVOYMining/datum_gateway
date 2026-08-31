@@ -174,12 +174,6 @@ typedef struct {
 	uint8_t		block_target[32]; // calculated from bits
 
 	uint32_t	header_version; // 0 = SHA256d / BIP22; 2 = Knots header-v2 / BLAKE2b
-	uint32_t	header_transaction_count; //
-	uint8_t		header_flags; //
-	uint32_t	header_time_offset; //
-	uint8_t		xor_key_mask_clear_bits; //
-	uint8_t		xor_key[16]; //
-	uint8_t		merge_mining_rhs[32]; //
 	
 	uint32_t 	txn_count;
 	uint32_t	txn_total_weight;

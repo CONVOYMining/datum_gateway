@@ -1340,7 +1340,7 @@ int datum_protocol_pow_submit(
 	if (job->block_template && job->block_template->header_version >= 2) {
 		pow.sjob = (T_DATUM_STRATUM_JOB *)job;
 		memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
-		pow.blake2b_use_time_offset = (job->block_template->header_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
+		pow.blake2b_use_time_offset = (job->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
 		pow.ntime = upk_u64le(block_header, 40);
 		pow.nonce = upk_u64le(block_header, 32);
 		pow.time_on_wire = job->blake2b_time_on_wire;
