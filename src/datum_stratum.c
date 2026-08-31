@@ -1315,12 +1315,12 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	} else {
 		my_sha256(digest_temp, block_header, 80);
 		my_sha256(share_hash, digest_temp, 32);
+	}
 
-		if (upk_u32le(share_hash, 28) != 0) {
-			send_rejected_hnotzero_error(c, id);
-			stratum_note_share(m, false, job_diff);
-			return 0;
-		}
+	if (upk_u32le(share_hash, 28) != 0) {
+		send_rejected_hnotzero_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
 	}
 	
 	username = json_array_get(params_obj, 0);

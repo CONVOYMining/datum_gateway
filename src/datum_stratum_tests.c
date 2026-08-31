@@ -111,6 +111,37 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	datum_test(!memcmp(c_from_txn, c_pot, 32));
 }
 
+static void datum_blake2b_h_not_zero_tests(void) {
+	T_DATUM_CLIENT_DATA client = {0};
+	T_DATUM_MINER_DATA miner = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_TEMPLATE_DATA tdata = {0};
+	T_DATUM_STRATUM_JOB *saved_job = global_cur_stratum_jobs[0];
+	char submit[] =
+		"{\"id\":7,\"method\":\"mining.submit\",\"params\":["
+		"\"miner\",\"0000000000c0de00\",\"0000000000000000\","
+		"\"00000000\",\"00000000\"]}";
+	static const char expected[] =
+		"{\"error\":[23,\"H-not-zero\",null],\"id\":7,\"result\":null}\n";
+	
+	client.app_client_data = &miner;
+	job.block_template = &tdata;
+	job.target_pot_index = 0;
+	job.coinbase[0].coinb1_len = 1;
+	job.coinbase[0].coinb1_bin[0] = 0xff;
+	tdata.header_version = 2;
+	strcpy(job.job_id, "0000000000c0de00");
+	miner.stratum_job_diffs[0] = 1;
+	global_cur_stratum_jobs[0] = &job;
+	
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, submit) == 0);
+	datum_test(miner.share_count_rejected == 1);
+	datum_test(client.out_buf == (int)strlen(expected));
+	datum_test(!memcmp(client.w_buffer, expected, strlen(expected)));
+	
+	global_cur_stratum_jobs[0] = saved_job;
+}
+
 static void datum_block_coinbase_witness_tests(void) {
 	static const unsigned char stripped[] = {
 		0x01, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00,
@@ -337,6 +368,7 @@ void datum_stratum_mod_username_tests() {
 void datum_stratum_tests(void) {
 	datum_stratum_mod_username_tests();
 	datum_stratum_string_request_id_tests();
+	datum_blake2b_h_not_zero_tests();
     datum_blake2b_client_pot_commitment_tests();
     datum_blake2b_refresh_time_offset_tests();
     datum_block_coinbase_witness_tests();
