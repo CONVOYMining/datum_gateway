@@ -54,6 +54,7 @@
 #include "datum_conf.h"
 #include "datum_stratum.h"
 #include "datum_pow.h"
+#include "datum_protocol.h"
 
 volatile sig_atomic_t new_notify = 0;
 atomic_int new_notify_threadsafe = 0;
@@ -87,6 +88,7 @@ void datum_blocktemplates_notify_othercause() {
 T_DATUM_TEMPLATE_DATA *template_data = NULL;
 
 int next_template_index = 0;
+static uint64_t next_template_generation = 1;
 
 const char *datum_blocktemplates_error = NULL;
 
@@ -156,6 +158,8 @@ T_DATUM_TEMPLATE_DATA *get_next_template_ptr(void) {
 	p = &template_data[next_template_index];
 	
 	datum_template_clear(p);
+	p->generation = next_template_generation++;
+	if (!next_template_generation) next_template_generation = 1;
 	
 	next_template_index++;
 	if (next_template_index >= MAX_TEMPLATES_IN_MEMORY) {
@@ -486,6 +490,10 @@ void *datum_gateway_template_thread(void *args) {
 			} else {
 				DLOG_DEBUG("DEBUG: calling datum_gbt_parser (new=%d)", was_notified?1:0);
 				t = datum_gbt_parser(res_val);
+				if (t && !datum_protocol_abw_apply_active(t)) {
+					DLOG_DEBUG("Waiting for the active BLAKE2b anti-withholding assignment");
+					t = NULL;
+				}
 				
 				if (t) {
 					datum_blocktemplates_error = NULL;

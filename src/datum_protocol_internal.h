@@ -55,6 +55,17 @@ T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
 void datum_protocol_replay_mark_responded_legacy(
 	uint32_t nonce, uint8_t target_pot, uint8_t job_id);
 
+void datum_protocol_abw_reset(void);
+bool datum_protocol_abw_assignment_revealed(uint8_t assignment_id);
+bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
+	const unsigned char *full_cb_tx, size_t full_cb_tx_size,
+	const unsigned char raw_pow_hash[32]);
+int datum_protocol_abw_candidate_receipt(int len, unsigned char *data);
+int datum_protocol_abw_candidate_release(int len, unsigned char *data);
+int datum_protocol_abw_activation(int len, unsigned char *data);
+int datum_protocol_abw_assignment_notice(int len, unsigned char *data);
+int datum_protocol_abw_reveal(int len, unsigned char *data);
+
 int datum_protocol_mining_cmd(void *data, int len);
 int datum_protocol_client_configure(int len, unsigned char *data);
 int datum_protocol_mining_cmd5(

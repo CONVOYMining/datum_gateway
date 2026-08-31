@@ -77,6 +77,36 @@ static void datum_blake2b_share_ntime_tests(void) {
 	datum_test(header[110] == DATUM_BLAKE2B_USE_TIME_OFFSET);
 	datum_test(datum_blake2b_share_ntime(upk_u32le(header, 68), header + 104, header[110]) == curtime + 10000);
 }
+
+static void datum_blake2b_abw_pow_tests(void) {
+	unsigned char xor_key[16];
+	unsigned char key_hash[32];
+	unsigned char legacy_commitment[32], committed_hash[32];
+	unsigned char prevhash[32] = {0}, merkle[32] = {0}, rhs[32] = {0};
+	unsigned char raw_hash[32], masked_hash[32];
+	for (size_t i = 0; i < sizeof(xor_key); ++i) {
+		xor_key[i] = (unsigned char)(i + 1);
+	}
+	for (size_t i = 0; i < sizeof(raw_hash); ++i) {
+		raw_hash[i] = (unsigned char)(0x80 + i);
+	}
+	datum_test(datum_blake2b_xor_key_hash(key_hash, xor_key));
+	datum_test(datum_blake2b_xor_key_matches_hash(key_hash, xor_key));
+	datum_test(datum_blake2b_header_commitment(legacy_commitment,
+		0x20000000, prevhash, 42, merkle, 1000, 0x1d00ffff, 1,
+		0, 42, xor_key, rhs));
+	datum_test(datum_blake2b_header_commitment_from_key_hash(committed_hash,
+		0x20000000, prevhash, 42, merkle, 1000, 0x1d00ffff, 1,
+		0, 42, key_hash, rhs));
+	datum_test(!memcmp(legacy_commitment, committed_hash, 32));
+	datum_test(datum_blake2b_abw_clear_bits(0) == 32);
+	datum_test(datum_blake2b_abw_clear_bits(10) == 42);
+	datum_test(datum_blake2b_abw_clear_bits(223) == 255);
+	datum_test(datum_blake2b_apply_xor_mask_le(
+		masked_hash, raw_hash, xor_key, 42));
+	datum_test(!memcmp(masked_hash + 27, raw_hash + 27, 5));
+}
+
 static void datum_pow_blake2b_vector_tests(void) {
 	/* H1+H2 match Knots CBlockHeader::GetHash with wire version bit 0x80000000 in H1. */
 	static const char expected_commitment_hex[] =
@@ -229,5 +259,6 @@ static void datum_pow_blake2b_vector_tests(void) {
 
 void datum_pow_tests(void) {
 	datum_blake2b_share_ntime_tests();
+	datum_blake2b_abw_pow_tests();
 	datum_pow_blake2b_vector_tests();
 }

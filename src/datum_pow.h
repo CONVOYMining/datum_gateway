@@ -42,6 +42,9 @@
 
 #define DATUM_BLAKE2B_BLOCK_HEADER_SIZE 164
 #define DATUM_BLAKE2B_USE_TIME_OFFSET 4
+#define DATUM_BLAKE2B_ABW_SHARE_TARGET_BASE_BITS 32
+#define DATUM_BLAKE2B_HEADER_XOR_CLEAR_BITS_OFFSET 111
+#define DATUM_BLAKE2B_HEADER_XOR_KEY_OFFSET 112
 
 #define DATUM_POW_BLAKE2B 1
 #define DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET 0x01
@@ -80,8 +83,21 @@ bool datum_blake2b_header_commitment(
 	const unsigned char *xor_key,
 	const unsigned char *rhs
 );
+bool datum_blake2b_header_commitment_from_key_hash(
+	unsigned char *commitment, uint32_t version, const unsigned char *prevhash,
+	uint32_t height, const unsigned char *merkle, uint32_t time_on_wire,
+	uint32_t nbits, uint32_t txcount, uint8_t flags,
+	uint8_t xor_key_mask_clear_bits, const unsigned char *xor_key_hash,
+	const unsigned char *rhs);
+bool datum_blake2b_xor_key_hash(unsigned char *out, const unsigned char *xor_key);
+bool datum_blake2b_xor_key_matches_hash(
+	const unsigned char *expected, const unsigned char *xor_key);
+uint8_t datum_blake2b_abw_clear_bits(uint8_t target_pot);
 bool datum_blake2b_work_root(unsigned char *root, const unsigned char *commitment, const unsigned char *extranonce);
 bool datum_blake2b_pow_hash_le(unsigned char *hash_le, const unsigned char *work, const unsigned char *xor_key, uint8_t xor_key_mask_clear_bits);
+bool datum_blake2b_apply_xor_mask_le(unsigned char *out,
+	const unsigned char *raw_hash, const unsigned char *xor_key,
+	uint8_t xor_key_mask_clear_bits);
 void datum_blake2b_serialize_block_header(
 	unsigned char *header,
 	uint32_t version,

@@ -47,6 +47,12 @@
 // Works out to over 5 minutes of jobs at 30-40 second work change intervals. No miner should be holding on to work this long.
 #define MAX_DATUM_PROTOCOL_JOBS 8
 
+// Pre-v1 draft discriminator. This is not a released DATUM protocol version.
+#define DATUM_ABW_DRAFT_REVISION 0
+#define DATUM_ABW_SHARE_TARGET_BASE_BITS 32
+#define DATUM_ABW_ASSIGNMENT_SLOTS 16
+#define DATUM_ABW_ASSIGNMENT_ACTIVE 0x01
+
 #define DATUM_PROTOCOL_VERSION "v0.4.1-beta" // this is sent to the server as a UA
 #define DATUM_PROTOCOL_CONNECT_TIMEOUT 30
 
@@ -113,6 +119,9 @@ typedef struct {
 	bool is_block;
 	bool quickdiff;
 	bool blake2b_use_time_offset;
+	// Internal token is wire slot + 1 so zero remains an unset sentinel.
+	uint8_t abw_assignment_id;
+	unsigned char raw_pow_hash[32];
 	unsigned char target_byte;
 	uint16_t target_byte_index;
 	uint64_t ntime;
@@ -146,6 +155,8 @@ int datum_protocol_pow_submit(
 	const unsigned char *block_header,
 	const uint64_t target_diff,
 	const unsigned char *full_cb_tx,
+	const size_t full_cb_tx_size,
+	const unsigned char *raw_pow_hash,
 	const T_DATUM_STRATUM_COINBASE *cb,
 	unsigned char *extranonce,
 	unsigned char coinbase_index
@@ -155,6 +166,8 @@ bool datum_protocol_thread_is_active(void);
 void datum_protocol_start_connector(void);
 unsigned char datum_protocol_setup_new_job_idx(void *sx);
 int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size);
+bool datum_protocol_abw_apply_active(T_DATUM_TEMPLATE_DATA *block_template);
+bool datum_protocol_abw_health_ok(void);
 
 extern uint64_t datum_accepted_share_count;
 extern uint64_t datum_accepted_share_diff;

@@ -76,6 +76,7 @@
 #include "datum_coinbaser.h"
 #include "datum_queue.h"
 #include "datum_pow.h"
+#include "datum_submitblock.h"
 #include "git_version.h"
 
 atomic_int datum_protocol_client_active = 0;
@@ -134,6 +135,8 @@ typedef struct T_DATUM_REPLAY_PENDING {
 	uint64_t session_generation;
 	uint8_t target_pot;
 	uint8_t job_id;
+	uint8_t assignment_id;
+	unsigned char raw_pow_hash[32];
 	size_t message_size;
 	unsigned char *message;
 	struct T_DATUM_REPLAY_PENDING *next;
@@ -332,6 +335,8 @@ T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
 	pending->nonce = pow->nonce;
 	pending->target_pot = pow->target_byte;
 	pending->job_id = pow->datum_job_id;
+	pending->assignment_id = pow->abw_assignment_id;
+	memcpy(pending->raw_pow_hash, pow->raw_pow_hash, 32);
 	
 	pthread_mutex_lock(&datum_replay_mutex);
 	if (datum_replay_count >= DATUM_REPLAY_MAX_PENDING) {
@@ -395,6 +400,26 @@ void datum_protocol_replay_mark_responded_legacy(
 	pthread_mutex_unlock(&datum_replay_mutex);
 }
 
+static void datum_protocol_replay_mark_responded_exact(uint8_t assignment_id, const unsigned char raw_pow_hash[32]) {
+	T_DATUM_REPLAY_PENDING *previous = NULL;
+	pthread_mutex_lock(&datum_replay_mutex);
+	for (T_DATUM_REPLAY_PENDING *pending = datum_replay_head; pending; pending = pending->next) {
+		if (pending->assignment_id != assignment_id ||
+		    sodium_memcmp(pending->raw_pow_hash, raw_pow_hash, 32) != 0) {
+			previous = pending;
+			continue;
+		}
+		if (previous) previous->next = pending->next;
+		else datum_replay_head = pending->next;
+		if (datum_replay_tail == pending) datum_replay_tail = previous;
+		datum_replay_count--;
+		free(pending->message);
+		free(pending);
+		break;
+	}
+	pthread_mutex_unlock(&datum_replay_mutex);
+}
+
 static void datum_protocol_replay_unanswered(void) {
 	T_DATUM_REPLAY_PENDING *pending = NULL;
 	
@@ -427,6 +452,601 @@ static void datum_protocol_replay_unanswered(void) {
 		free(message);
 		datum_protocol_replay_mark_sent(pending);
 	}
+}
+
+#define DATUM_ABW_PENDING_CACHE 65536
+#define DATUM_ABW_TEMPLATE_CACHE 256
+
+typedef struct {
+	uint8_t id;
+	unsigned char key_hash[32];
+	bool revealed;
+} T_DATUM_ABW_ASSIGNMENT;
+
+typedef struct {
+	uint8_t assignment_id;
+	uint64_t source_generation;
+	uint32_t transaction_count;
+	char *transactions_hex;
+	size_t transactions_hex_size;
+	size_t refs;
+	bool needs_witness;
+} T_DATUM_ABW_TEMPLATE;
+
+typedef struct {
+	uint8_t assignment_id;
+	uint32_t nonce;
+	uint8_t target_pot;
+	uint8_t job_id;
+	uint8_t xor_clear_bits;
+	unsigned char raw_pow_hash[32];
+	unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
+	unsigned char *coinbase;
+	size_t coinbase_size;
+	T_DATUM_ABW_TEMPLATE *block_template;
+	bool subsidy_only;
+	bool pool_handled;
+} T_DATUM_ABW_PENDING;
+
+static pthread_mutex_t datum_abw_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint8_t datum_abw_active_assignment_id = 0;
+static unsigned char datum_abw_active_key_hash[32] = {0};
+static T_DATUM_ABW_ASSIGNMENT datum_abw_assignments[DATUM_ABW_ASSIGNMENT_SLOTS] = {{0}};
+static T_DATUM_ABW_PENDING datum_abw_pending[DATUM_ABW_PENDING_CACHE] = {{0}};
+static T_DATUM_ABW_TEMPLATE datum_abw_templates[DATUM_ABW_TEMPLATE_CACHE] = {{0}};
+static atomic_bool datum_abw_health_latched = true;
+
+bool datum_protocol_abw_health_ok(void) {
+	return atomic_load(&datum_abw_health_latched);
+}
+
+static void datum_protocol_abw_pending_clear(T_DATUM_ABW_PENDING *pending) {
+	if (!pending) return;
+	free(pending->coinbase);
+	if (pending->block_template && pending->block_template->refs) {
+		pending->block_template->refs--;
+		if (!pending->block_template->refs) {
+			free(pending->block_template->transactions_hex);
+			memset(pending->block_template, 0,
+				sizeof(*pending->block_template));
+		}
+	}
+	memset(pending, 0, sizeof(*pending));
+}
+
+void datum_protocol_abw_reset(void) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+		datum_protocol_abw_pending_clear(&datum_abw_pending[i]);
+	}
+	for (size_t i = 0; i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
+		free(datum_abw_templates[i].transactions_hex);
+		memset(&datum_abw_templates[i], 0, sizeof(datum_abw_templates[i]));
+	}
+	memset(datum_abw_assignments, 0, sizeof(datum_abw_assignments));
+	datum_abw_active_assignment_id = 0;
+	memset(datum_abw_active_key_hash, 0, sizeof(datum_abw_active_key_hash));
+	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
+bool datum_protocol_abw_assignment_revealed(uint8_t assignment_id) {
+	bool revealed = false;
+	pthread_mutex_lock(&datum_abw_mutex);
+	if (assignment_id && assignment_id <= DATUM_ABW_ASSIGNMENT_SLOTS &&
+	    datum_abw_assignments[assignment_id - 1].id == assignment_id) {
+		revealed = datum_abw_assignments[assignment_id - 1].revealed;
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return revealed;
+}
+
+static bool datum_protocol_abw_mark_assignment_revealed_locked(
+	uint8_t assignment_id, const unsigned char key_hash[32]) {
+	if (!assignment_id || assignment_id > DATUM_ABW_ASSIGNMENT_SLOTS) {
+		return false;
+	}
+	T_DATUM_ABW_ASSIGNMENT *assignment = &datum_abw_assignments[assignment_id - 1];
+	if (assignment->id != assignment_id ||
+	    sodium_memcmp(assignment->key_hash, key_hash, 32) != 0) return false;
+	assignment->revealed = true;
+	if (datum_abw_active_assignment_id == assignment_id) {
+		datum_abw_active_assignment_id = 0;
+		memset(datum_abw_active_key_hash, 0,
+			sizeof(datum_abw_active_key_hash));
+	}
+	return true;
+}
+
+static bool datum_protocol_abw_install_assignment_locked(
+	uint8_t assignment_id, const unsigned char key_hash[32]) {
+	if (!assignment_id || assignment_id > DATUM_ABW_ASSIGNMENT_SLOTS ||
+	    sodium_is_zero(key_hash, 32)) return false;
+	T_DATUM_ABW_ASSIGNMENT *entry = &datum_abw_assignments[assignment_id - 1];
+	if (entry->id == assignment_id && !entry->revealed) {
+		return sodium_memcmp(entry->key_hash, key_hash, 32) == 0;
+	}
+	if (entry->id && !entry->revealed) return false;
+	if (entry->id) {
+		for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+			if (datum_abw_pending[i].assignment_id == entry->id) return false;
+		}
+	}
+	entry->id = assignment_id;
+	memcpy(entry->key_hash, key_hash, 32);
+	entry->revealed = false;
+	return true;
+}
+
+static bool datum_protocol_abw_assignment_available_locked(
+	uint8_t assignment_id) {
+	if (!assignment_id || assignment_id > DATUM_ABW_ASSIGNMENT_SLOTS) {
+		return false;
+	}
+	const T_DATUM_ABW_ASSIGNMENT *entry =
+		&datum_abw_assignments[assignment_id - 1];
+	return entry->id == assignment_id && !entry->revealed;
+}
+
+static bool datum_protocol_abw_apply_active_locked(
+	T_DATUM_TEMPLATE_DATA *block_template) {
+	if (!block_template || !datum_abw_active_assignment_id) return false;
+	block_template->abw_enabled = true;
+	block_template->abw_assignment_id = datum_abw_active_assignment_id;
+	memcpy(block_template->xor_key_hash, datum_abw_active_key_hash, 32);
+	return true;
+}
+
+bool datum_protocol_abw_apply_active(T_DATUM_TEMPLATE_DATA *block_template) {
+	bool applied;
+	pthread_mutex_lock(&datum_abw_mutex);
+	applied = datum_protocol_abw_apply_active_locked(block_template);
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return applied;
+}
+
+static bool datum_protocol_abw_template_matches_source(
+	const T_DATUM_ABW_TEMPLATE *block_template,
+	const T_DATUM_TEMPLATE_DATA *source, bool needs_witness) {
+	if (!block_template || !source ||
+	    block_template->source_generation != source->generation ||
+	    block_template->transaction_count != source->txn_count ||
+	    block_template->transactions_hex_size !=
+		(size_t)source->txn_total_size * 2 ||
+	    block_template->needs_witness != needs_witness) return false;
+	return true;
+}
+
+// Caller holds datum_abw_mutex and transfers ownership of coinbase.
+static void datum_protocol_abw_populate_pending(
+	T_DATUM_ABW_PENDING *pending, T_DATUM_ABW_TEMPLATE *block_template,
+	const T_DATUM_PROTOCOL_POW *pow, unsigned char *coinbase,
+	size_t coinbase_size, const unsigned char raw_pow_hash[32],
+	const unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE]) {
+	pending->assignment_id = pow->abw_assignment_id;
+	pending->nonce = (uint32_t)pow->nonce;
+	pending->target_pot = pow->target_byte;
+	pending->job_id = pow->datum_job_id;
+	pending->xor_clear_bits = datum_blake2b_abw_clear_bits(pow->target_byte);
+	memcpy(pending->raw_pow_hash, raw_pow_hash, 32);
+	memcpy(pending->block_header, block_header,
+		DATUM_BLAKE2B_BLOCK_HEADER_SIZE);
+	pending->coinbase = coinbase;
+	pending->coinbase_size = coinbase_size;
+	pending->block_template = block_template;
+	pending->subsidy_only = pow->subsidy_only;
+	if (block_template) block_template->refs++;
+}
+
+bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
+	const unsigned char *full_cb_tx, size_t full_cb_tx_size,
+	const unsigned char *raw_pow_hash) {
+	static const unsigned char no_xor_key[16] = {0};
+	if (!pow || !pow->sjob || !pow->sjob->block_template ||
+	    !full_cb_tx || !raw_pow_hash || !pow->abw_assignment_id ||
+	    !full_cb_tx_size ||
+	    full_cb_tx_size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2) return false;
+	
+	unsigned char *coinbase = malloc(full_cb_tx_size);
+	if (!coinbase) return false;
+	memcpy(coinbase, full_cb_tx, full_cb_tx_size);
+	const T_DATUM_TEMPLATE_DATA *const source = pow->sjob->block_template;
+	if (!pow->subsidy_only && source->txn_count >= UINT16_MAX) {
+		free(coinbase);
+		return false;
+	}
+	const bool needs_witness =
+		datum_stratum_block_needs_witness(pow->sjob, pow->subsidy_only);
+	unsigned char coinbase_hash[32], merkle[32];
+	unsigned char nonce8[8], ntime8[8];
+	unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
+	if (!double_sha256(coinbase_hash, full_cb_tx, full_cb_tx_size)) {
+		free(coinbase);
+		return false;
+	}
+	if (pow->subsidy_only) {
+		memcpy(merkle, coinbase_hash, sizeof(merkle));
+	} else {
+		stratum_job_merkle_root_calc(pow->sjob, coinbase_hash, merkle);
+	}
+	pk_u64le(nonce8, 0, pow->nonce);
+	pk_u64le(ntime8, 0, pow->ntime);
+	datum_blake2b_serialize_block_header(block_header,
+		pow->sjob->version_uint, pow->sjob->prevhash_bin, merkle,
+		pow->sjob->blake2b_time_on_wire, pow->sjob->nbits_uint,
+		nonce8, ntime8, pow->extranonce,
+		(uint16_t)(pow->subsidy_only ? 1 : source->txn_count + 1),
+		pow->sjob->blake2b_flags,
+		datum_blake2b_abw_clear_bits(pow->target_byte), no_xor_key,
+		(uint32_t)pow->sjob->height, (const unsigned char[32]){0});
+	
+	pthread_mutex_lock(&datum_abw_mutex);
+	T_DATUM_ABW_PENDING *pending = NULL;
+	T_DATUM_ABW_TEMPLATE *block_template = NULL;
+	if (datum_protocol_abw_assignment_available_locked(
+		pow->abw_assignment_id)) {
+		for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+			if (!datum_abw_pending[i].assignment_id) {
+				pending = &datum_abw_pending[i];
+				break;
+			}
+		}
+	}
+	for (size_t i = 0; pending && !pow->subsidy_only &&
+	     i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
+		if (datum_abw_templates[i].assignment_id == pow->abw_assignment_id &&
+		    datum_protocol_abw_template_matches_source(
+			&datum_abw_templates[i], source, needs_witness)) {
+			block_template = &datum_abw_templates[i];
+			break;
+		}
+	}
+	if (pending && block_template) {
+		datum_protocol_abw_populate_pending(pending, block_template, pow,
+			coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+		pthread_mutex_unlock(&datum_abw_mutex);
+		return true;
+	}
+	if (pending && pow->subsidy_only) {
+		datum_protocol_abw_populate_pending(pending, NULL, pow,
+			coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+		pthread_mutex_unlock(&datum_abw_mutex);
+		return true;
+	}
+	const bool pending_cache_full = !pending;
+	pthread_mutex_unlock(&datum_abw_mutex);
+	if (pending_cache_full) {
+		free(coinbase);
+		return false;
+	}
+	
+	char *transactions_hex = NULL;
+	const size_t transactions_hex_size = (size_t)source->txn_total_size * 2;
+	if (source->txn_total_size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2 -
+	    full_cb_tx_size || (source->txn_count && !source->txns)) {
+		free(coinbase);
+		return false;
+	}
+	if (transactions_hex_size) {
+		transactions_hex = malloc(transactions_hex_size);
+		if (!transactions_hex) {
+			free(coinbase);
+			return false;
+		}
+		size_t offset = 0;
+		for (uint32_t i = 0; i < source->txn_count; ++i) {
+			const size_t size = (size_t)source->txns[i].size * 2;
+			if (!source->txns[i].txn_data_hex ||
+			    size > transactions_hex_size - offset) {
+				free(transactions_hex);
+				free(coinbase);
+				return false;
+			}
+			memcpy(transactions_hex + offset,
+				source->txns[i].txn_data_hex, size);
+			offset += size;
+		}
+		if (offset != transactions_hex_size) {
+			free(transactions_hex);
+			free(coinbase);
+			return false;
+		}
+	}
+	
+	pthread_mutex_lock(&datum_abw_mutex);
+	pending = NULL;
+	if (datum_protocol_abw_assignment_available_locked(
+		pow->abw_assignment_id)) {
+		for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+			if (!datum_abw_pending[i].assignment_id) {
+				pending = &datum_abw_pending[i];
+				break;
+			}
+		}
+	}
+	block_template = NULL;
+	if (pending) {
+		for (size_t i = 0; i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
+			if (datum_abw_templates[i].assignment_id == pow->abw_assignment_id &&
+			    datum_protocol_abw_template_matches_source(
+				&datum_abw_templates[i], source, needs_witness)) {
+				block_template = &datum_abw_templates[i];
+				break;
+			}
+		}
+		if (!block_template) {
+			for (size_t i = 0; i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
+				if (!datum_abw_templates[i].assignment_id) {
+					block_template = &datum_abw_templates[i];
+					break;
+				}
+			}
+			if (block_template) {
+				block_template->assignment_id = pow->abw_assignment_id;
+				block_template->source_generation = source->generation;
+				block_template->transaction_count = source->txn_count;
+				block_template->transactions_hex = transactions_hex;
+				block_template->transactions_hex_size = transactions_hex_size;
+				block_template->needs_witness = needs_witness;
+				transactions_hex = NULL;
+			} else {
+				pending = NULL;
+			}
+		}
+	}
+	if (!pending) {
+		pthread_mutex_unlock(&datum_abw_mutex);
+		free(transactions_hex);
+		free(coinbase);
+		return false;
+	}
+	free(transactions_hex);
+	datum_protocol_abw_populate_pending(pending, block_template, pow,
+		coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return true;
+}
+
+static void datum_protocol_abw_forget_exact(
+	uint8_t assignment_id, const unsigned char raw_pow_hash[32]) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+		T_DATUM_ABW_PENDING *pending = &datum_abw_pending[i];
+		if (pending->assignment_id == assignment_id &&
+		    sodium_memcmp(pending->raw_pow_hash, raw_pow_hash, 32) == 0) {
+			datum_protocol_abw_pending_clear(pending);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
+static bool datum_protocol_abw_mark_handled_exact(
+	uint8_t assignment_id, const unsigned char raw_pow_hash[32]) {
+	bool found = false;
+	pthread_mutex_lock(&datum_abw_mutex);
+	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+		T_DATUM_ABW_PENDING *pending = &datum_abw_pending[i];
+		if (pending->assignment_id == assignment_id &&
+		    sodium_memcmp(pending->raw_pow_hash, raw_pow_hash, 32) == 0) {
+			pending->pool_handled = true;
+			found = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return found;
+}
+
+int datum_protocol_abw_candidate_receipt(int len, unsigned char *data) {
+	if (len != 35 || data[0] != DATUM_ABW_DRAFT_REVISION ||
+	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[34] != 0xFE) {
+		DLOG_ERROR("Invalid BLAKE2b anti-withholding candidate receipt");
+		return 0;
+	}
+	const uint8_t assignment_id = data[1] + 1;
+	if (datum_config.mining_abw_verify_all_shares_on_disclosure) {
+		if (!datum_protocol_abw_mark_handled_exact(assignment_id, data + 2)) {
+			DLOG_ERROR("ABW candidate receipt did not match a retained proof");
+			return 0;
+		}
+	} else {
+		datum_protocol_abw_forget_exact(assignment_id, data + 2);
+	}
+	return 1;
+}
+
+int datum_protocol_abw_candidate_release(int len, unsigned char *data) {
+	if (len != 35 || data[0] != DATUM_ABW_DRAFT_REVISION ||
+	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[34] != 0xFE) {
+		DLOG_ERROR("Invalid BLAKE2b anti-withholding candidate release");
+		return 0;
+	}
+	if (!datum_config.mining_abw_verify_all_shares_on_disclosure) {
+		datum_protocol_abw_forget_exact(data[1] + 1, data + 2);
+	}
+	return 1;
+}
+
+int datum_protocol_abw_activation(int len, unsigned char *data) {
+	if (len != 3 || data[0] != DATUM_ABW_DRAFT_REVISION ||
+	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[2] != 0xFE) {
+		DLOG_ERROR("Invalid BLAKE2b anti-withholding activation");
+		return 0;
+	}
+	const uint8_t assignment_id = data[1] + 1;
+	bool activated = false;
+	pthread_mutex_lock(&datum_abw_mutex);
+	const T_DATUM_ABW_ASSIGNMENT *assignment =
+		&datum_abw_assignments[assignment_id - 1];
+	if (assignment->id == assignment_id && !assignment->revealed) {
+		datum_abw_active_assignment_id = assignment_id;
+		memcpy(datum_abw_active_key_hash, assignment->key_hash, 32);
+		activated = true;
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+	if (!activated) DLOG_ERROR("Activated ABW slot was not preseeded");
+	return activated ? 1 : 0;
+}
+
+int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
+	if (len != 36 || data[0] != DATUM_ABW_DRAFT_REVISION ||
+	    (data[1] & ~DATUM_ABW_ASSIGNMENT_ACTIVE) ||
+	    data[2] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[35] != 0xFE) {
+		DLOG_ERROR("Invalid BLAKE2b anti-withholding assignment notice");
+		return 0;
+	}
+	const uint8_t assignment_id = data[2] + 1;
+	bool installed;
+	pthread_mutex_lock(&datum_abw_mutex);
+	installed = datum_protocol_abw_install_assignment_locked(assignment_id, data + 3);
+	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
+		datum_abw_active_assignment_id = assignment_id;
+		memcpy(datum_abw_active_key_hash, data + 3, 32);
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+	if (!installed) {
+		DLOG_ERROR("Could not retain BLAKE2b anti-withholding assignment");
+	}
+	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
+		datum_blocktemplates_notifynew(NULL, 0);
+	}
+	return installed ? 1 : 0;
+}
+
+static char *datum_protocol_abw_take_revealed_candidate_locked(
+	uint8_t assignment_id, const unsigned char xor_key[16],
+	const unsigned char expected_pow_hash[32], char block_hash[65],
+	bool *pool_handled) {
+	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+		T_DATUM_ABW_PENDING *pending = &datum_abw_pending[i];
+		if (pending->assignment_id != assignment_id) continue;
+		unsigned char actual_pow_hash[32], target[32];
+		if (!datum_blake2b_apply_xor_mask_le(actual_pow_hash,
+			pending->raw_pow_hash, xor_key, pending->xor_clear_bits)) {
+			datum_protocol_abw_pending_clear(pending);
+			continue;
+		}
+		if (expected_pow_hash) {
+			if (sodium_memcmp(actual_pow_hash, expected_pow_hash, 32) != 0) {
+				continue;
+			}
+		} else {
+			nbits_to_target(upk_u32le(pending->block_header, 72), target);
+			if (compare_hashes(actual_pow_hash, target) > 0) {
+				datum_protocol_abw_pending_clear(pending);
+				continue;
+			}
+		}
+		const size_t transactions_hex_size = pending->block_template ?
+			pending->block_template->transactions_hex_size : 0;
+		if (pending->coinbase_size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2 ||
+		    transactions_hex_size > MAX_SUBMITBLOCK_SIZE - 1024 -
+			pending->coinbase_size * 2) {
+			datum_protocol_abw_pending_clear(pending);
+			continue;
+		}
+		const size_t capacity = 1024 + pending->coinbase_size * 2 +
+			transactions_hex_size;
+		char *candidate = malloc(capacity);
+		size_t header_hex_offset = 0;
+		const size_t request_size = candidate ?
+			datum_stratum_build_block_request_parts(candidate, capacity,
+				pending->block_header, pending->coinbase,
+				pending->coinbase_size,
+				pending->block_template &&
+					pending->block_template->needs_witness,
+				pending->block_template ?
+					pending->block_template->transaction_count : 0,
+				pending->block_template ?
+					pending->block_template->transactions_hex : NULL,
+				transactions_hex_size, pending->subsidy_only,
+				&header_hex_offset) : 0;
+		if (request_size && datum_stratum_abw_finalize_block_request(
+			candidate, request_size, header_hex_offset,
+			pending->raw_pow_hash, pending->xor_clear_bits, xor_key,
+			actual_pow_hash, block_hash)) {
+			if (pool_handled) *pool_handled = pending->pool_handled;
+			datum_protocol_abw_pending_clear(pending);
+			return candidate;
+		}
+		free(candidate);
+		if (!expected_pow_hash) datum_protocol_abw_pending_clear(pending);
+	}
+	return NULL;
+}
+
+int datum_protocol_abw_reveal(int len, unsigned char *data) {
+	unsigned char key_hash[32];
+	if (len != 19 || data[0] != DATUM_ABW_DRAFT_REVISION ||
+	    data[18] != 0xFE || data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS ||
+	    !datum_blake2b_xor_key_hash(key_hash, data + 2)) {
+		DLOG_ERROR("Invalid BLAKE2b anti-withholding reveal");
+		return 0;
+	}
+	const uint8_t assignment_id = data[1] + 1;
+	bool retired_active;
+	pthread_mutex_lock(&datum_abw_mutex);
+	const T_DATUM_ABW_ASSIGNMENT *known_assignment =
+		&datum_abw_assignments[assignment_id - 1];
+	if (!known_assignment->id) {
+		bool has_pending = false;
+		for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+			if (datum_abw_pending[i].assignment_id == assignment_id) {
+				has_pending = true;
+				break;
+			}
+		}
+		pthread_mutex_unlock(&datum_abw_mutex);
+		if (has_pending) {
+			DLOG_ERROR("BLAKE2b anti-withholding reveal has proofs without a commitment");
+			return 0;
+		}
+		DLOG_DEBUG("Ignored disclosure for an ABW slot not held by this session");
+		return 1;
+	}
+	retired_active = datum_abw_active_assignment_id == assignment_id;
+	const bool commitment_matched =
+		datum_protocol_abw_mark_assignment_revealed_locked(
+			assignment_id, key_hash);
+	pthread_mutex_unlock(&datum_abw_mutex);
+	if (!commitment_matched) {
+		DLOG_ERROR("BLAKE2b anti-withholding reveal did not match its commitment");
+		return 0;
+	}
+	size_t submitted = 0;
+	bool ignored_block = false;
+	while (true) {
+		char block_hash[65] = {0};
+		bool pool_handled = false;
+		pthread_mutex_lock(&datum_abw_mutex);
+		char *block_request = datum_protocol_abw_take_revealed_candidate_locked(
+			assignment_id, data + 2, NULL, block_hash, &pool_handled);
+		pthread_mutex_unlock(&datum_abw_mutex);
+		if (!block_request) break;
+		if (datum_config.mining_abw_verify_all_shares_on_disclosure &&
+		    !pool_handled) {
+			ignored_block = true;
+			atomic_store(&datum_abw_health_latched, false);
+			for (int warning = 0; warning < 8; ++warning) {
+				DLOG_ERROR("CRITICAL ABW FAILURE: pool ignored valid block %s",
+					block_hash);
+			}
+		}
+		if (!datum_submitblock_trigger_owned(block_request, block_hash)) {
+			free(block_request);
+			DLOG_ERROR("Could not queue a revealed BLAKE2b block for local submission");
+			continue;
+		}
+		submitted++;
+		DLOG_WARN("DATUM server revealed a verified BLAKE2b block key for candidate %s",
+			block_hash);
+	}
+	if (!submitted) {
+		DLOG_INFO("DATUM server retired BLAKE2b assignment slot %u",
+			(unsigned)(assignment_id - 1));
+	}
+	if (retired_active) datum_blocktemplates_notifynew(NULL, 0);
+	return ignored_block ? -1 : 1;
 }
 
 pthread_mutex_t datum_protocol_coinbaser_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -615,6 +1235,7 @@ err:
 	if (first_configuration && !resumed) {
 		datum_queue_clear(&pow_queue);
 		datum_protocol_replay_clear();
+		datum_protocol_abw_reset();
 	}
 	datum_connection_configured = true;
 	
@@ -1118,6 +1739,8 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 		DLOG_DEBUG("Invalid share response received!");
 		return 0;
 	}
+	const bool exact_abw_reference = len == 44 && data[9] == 0x06 &&
+		data[10] < DATUM_ABW_ASSIGNMENT_SLOTS && data[43] == 0xFE;
 	if (data[0] == DATUM_POW_SHARE_RESPONSE_REJECTED) {
 		DLOG_DEBUG("DATUM server rejected our share!  Reason code: %d / TargetPOT: %2.2x / Job ID: %d / Nonce: %8.8x",
 		           (int)upk_u16le(data, 1),
@@ -1129,8 +1752,15 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 		} else {
 			datum_rejected_share_diff += datum_config.override_vardiff_min;
 		}
-		datum_protocol_replay_mark_responded_legacy(
-			upk_u32le(data, 3), data[7], data[8]);
+		if (exact_abw_reference) {
+			datum_protocol_replay_mark_responded_exact(data[10] + 1, data + 11);
+			if (!datum_config.mining_abw_verify_all_shares_on_disclosure) {
+				datum_protocol_abw_forget_exact(data[10] + 1, data + 11);
+			}
+		} else {
+			datum_protocol_replay_mark_responded_legacy(
+				upk_u32le(data, 3), data[7], data[8]);
+		}
 		
 		return 1;
 	}
@@ -1147,8 +1777,15 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 	datum_accepted_share_count++;
 	datum_protocol_add_share_diff(&datum_accepted_share_diff, data[7]);
 	datum_last_accepted_share_tsms = datum_protocol_mainloop_tsms;
-	datum_protocol_replay_mark_responded_legacy(
-		upk_u32le(data, 3), data[7], data[8]);
+	if (exact_abw_reference) {
+		datum_protocol_replay_mark_responded_exact(data[10] + 1, data + 11);
+		if (data[0] == DATUM_POW_SHARE_RESPONSE_ACCEPTED &&
+		    !datum_config.mining_abw_verify_all_shares_on_disclosure)
+			datum_protocol_abw_forget_exact(data[10] + 1, data + 11);
+	} else {
+		datum_protocol_replay_mark_responded_legacy(
+			upk_u32le(data, 3), data[7], data[8]);
+	}
 	
 	return 1;
 }
@@ -1341,6 +1978,17 @@ int datum_protocol_mining_cmd5(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data) 
 			}
 			return datum_protocol_migration_request(h->cmd_len-1, &data[1]);
 		}
+		
+		case 0xA5:
+			return datum_protocol_abw_candidate_receipt(h->cmd_len-1, &data[1]);
+		case 0xA6:
+			return datum_protocol_abw_activation(h->cmd_len-1, &data[1]);
+		case 0xA7:
+			return datum_protocol_abw_candidate_release(h->cmd_len-1, &data[1]);
+		case 0xA8:
+			return datum_protocol_abw_assignment_notice(h->cmd_len-1, &data[1]);
+		case 0xA9:
+			return datum_protocol_abw_reveal(h->cmd_len-1, &data[1]);
 		
 		case 0x99: {
 			if (!h->is_signed) {
@@ -1706,6 +2354,8 @@ int datum_protocol_pow_submit(
 	const unsigned char *block_header,
 	const uint64_t target_diff,
 	const unsigned char *full_cb_tx,
+	const size_t full_cb_tx_size,
+	const unsigned char *raw_pow_hash,
 	const T_DATUM_STRATUM_COINBASE *cb,
 	unsigned char *extranonce,
 	unsigned char coinbase_index)
@@ -1713,6 +2363,11 @@ int datum_protocol_pow_submit(
 	// called by other threads to submit new POW
 	T_DATUM_PROTOCOL_POW pow;
 
+	if (!job || !job->block_template || !block_header || !full_cb_tx ||
+	    !raw_pow_hash || job->target_pot_index < 0 ||
+	    (size_t)job->target_pot_index >= full_cb_tx_size ||
+	    !job->block_template->abw_enabled ||
+	    !job->block_template->abw_assignment_id) return -1;
 	memset(&pow, 0, sizeof(pow));
 	pow.datum_job_id = job->datum_job_idx;
 	memcpy(pow.extranonce, extranonce, 12);
@@ -1727,14 +2382,29 @@ int datum_protocol_pow_submit(
 	pow.sjob = (T_DATUM_STRATUM_JOB *)job;
 	memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
 	pow.blake2b_use_time_offset = (job->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
+	pow.abw_assignment_id = job->block_template->abw_assignment_id;
+	memcpy(pow.raw_pow_hash, raw_pow_hash, sizeof(pow.raw_pow_hash));
 	pow.ntime = upk_u64le(block_header, 40);
 	pow.nonce = upk_u64le(block_header, 32);
 	pow.time_on_wire = job->blake2b_time_on_wire;
 	pow.version = job->version_uint;
+	if (datum_protocol_abw_assignment_revealed(pow.abw_assignment_id)) {
+		DLOG_ERROR("Could not submit POW for a disclosed anti-withholding assignment");
+		return -1;
+	}
+	if (!datum_protocol_abw_cache_candidate(
+		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
+		DLOG_ERROR("BLAKE2b anti-withholding candidate cache is full");
+		return -1;
+	}
 	
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
 	
-	return datum_queue_add_item(&pow_queue, &pow);
+	const int queued = datum_queue_add_item(&pow_queue, &pow);
+	if (queued != 0) {
+		datum_protocol_abw_forget_exact(pow.abw_assignment_id, pow.raw_pow_hash);
+	}
+	return queued;
 }
 
 static int datum_protocol_pow_build_message_mode(
@@ -1797,13 +2467,16 @@ static int datum_protocol_pow_build_message_mode(
 	}
 	i += 4;
 
-	if ((size_t)i + 23 >= msg_size) return 0;
+	if (!pow->abw_assignment_id ||
+	    (size_t)i + 25 >= msg_size) return 0;
 	msg[i++] = 0x03;
 	msg[i++] = DATUM_POW_BLAKE2B;
 	pk_u64le(msg, i, pow->ntime); i += 8;
 	pk_u64le(msg, i, pow->nonce); i += 8;
 	msg[i++] = 0x04;
 	pk_u32le(msg, i, pow->time_on_wire); i += 4;
+	msg[i++] = 0x05;
+	msg[i++] = pow->abw_assignment_id - 1;
 
 	pthread_rwlock_rdlock(&datum_jobs_rwlock);
 	pj = &datum_jobs[pow->datum_job_id];
@@ -1852,7 +2525,7 @@ static int datum_protocol_pow_build_message_mode(
 
 	if (send_coinbase) {
 		msg[i++] = 0x02;
-		msg[i++] = pow->coinbase_id;
+		msg[i++] = pow->subsidy_only ? DATUM_COINBASE_ID_EMPTY : pow->coinbase_id;
 		pk_u16le(msg, i, cb->coinb1_len); i += 2;
 		pk_u16le(msg, i, cb->coinb2_len); i += 2;
 		memcpy(&msg[i], cb->coinb1_bin, cb->coinb1_len);
@@ -1873,12 +2546,11 @@ static int datum_protocol_pow_build_message_mode(
 		}
 		pj->server_sjob = sjob;
 		if (send_context) pj->server_has_merkle_branches = true;
-		if (send_coinbase) {
-			if (pow->subsidy_only) {
-				pj->server_has_coinbase_empty = true;
-			} else {
-				pj->server_has_coinbase[pow->coinbase_id] = true;
-			}
+		if (send_coinbase && pow->subsidy_only) {
+			pj->server_has_coinbase_empty = true;
+		}
+		if (send_coinbase && !pow->subsidy_only) {
+			pj->server_has_coinbase[pow->coinbase_id] = true;
 		}
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 	}

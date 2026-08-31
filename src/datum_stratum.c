@@ -1013,8 +1013,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	int i;
 	bool quickdiff = false;
 	bool empty_work = false;
-	bool was_block = false;
-	char new_notify_blockhash[65];
 	
 	// see if this is a real job
 	job_id = json_array_get(params_obj, 1);
@@ -1205,7 +1203,11 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	nonce64 = upk_u64le(nonce8, 0);
 	
-	if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn, (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len, empty_work, blake2b_commitment)) {
+	const size_t full_cb_txn_size =
+		(size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len;
+	const unsigned char target_pot = full_cb_txn[job->target_pot_index];
+	if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn,
+		full_cb_txn_size, target_pot, empty_work, blake2b_commitment)) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
@@ -1248,36 +1250,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		}
 	}
 	
-	// most important thing to do right here is to check if the share is a block
-	// there's some downstream failures that can impact the share being valid, but at this point it's
-	// possible for this block to be valid.  even if it's stale or something we're going to try it.
-	if (compare_hashes(share_hash, job->block_target) <= 0) {
-		// BLOCK
-		// since we check this early, it's possible a duplicate share submission could trigger this twice... but that's alright.
-		// it won't hurt to re-submit a block.
-		was_block = true;
-		new_notify_blockhash[64] = 0;
-		for(i=0;i<32;i++) {
-			uchar_to_hex((char *)&new_notify_blockhash[(31-i)<<1], share_hash[i]);
-		}
-		DLOG_WARN("************************************************************************************************");
-		DLOG_WARN("******** BLOCK FOUND - %s ********",new_notify_blockhash);
-		DLOG_WARN("************************************************************************************************");
-		
-		i = assembleBlockAndSubmit(block_header, full_cb_txn, cb->coinb1_len+12+cb->coinb2_len, job, m->sdata, new_notify_blockhash, empty_work, extranonce_bin);
-		if (i) {
-			// successfully submitted
-			datum_blocktemplates_notifynew(new_notify_blockhash, job->height + 1);
-		}
-		
-		if (job->is_datum_job) {
-			// submit via DATUM
-			datum_protocol_pow_submit(c, job, username_s, was_block, empty_work, quickdiff, block_header, job_diff, full_cb_txn, cb, extranonce_bin, coinbase_index);
-		}
-	}
-	
-	// we check this after checking if the share is a valid block because... well, we want to try and build on our own block even on the off chance it's late.
-	// we'll still reject the share, though, even if it's a block. *trollface*
+	// The XOR key is withheld, so only Apex can classify a network candidate
+	// before disclosure. Gateway retains enough data to audit and reconstruct it.
 	if (job->is_stale_prevblock) {
 		// share is from a stale job
 		send_rejected_stale_block(c, id);
@@ -1338,11 +1312,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// work accepted
-	if (!was_block) {
-		if (job->is_datum_job) {
-			// submit via DATUM
-			datum_protocol_pow_submit(c, job, username_s, was_block, empty_work, quickdiff, block_header, job_diff, full_cb_txn, cb, extranonce_bin, coinbase_index);
-		}
+	if (job->is_datum_job && datum_protocol_pow_submit(c, job, username_s,
+		false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
+		full_cb_txn_size, share_hash, cb, extranonce_bin,
+		coinbase_index) != 0) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
 	}
 	
 	char s[256];
@@ -1979,7 +1955,7 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 	}
 }
 
-bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, bool subsidy_only, unsigned char *commitment) {
+bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, unsigned char *commitment) {
 	unsigned char cb_hash[32];
 	unsigned char merkle[32];
 	const T_DATUM_TEMPLATE_DATA *td;
@@ -1993,11 +1969,13 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	} else {
 		stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
 	}
-	return datum_blake2b_header_commitment(
+	if (!td->abw_enabled || !td->abw_assignment_id) return false;
+	return datum_blake2b_header_commitment_from_key_hash(
 		commitment, td->version, td->previousblockhash_bin,
 		(uint32_t)td->height, merkle, s->blake2b_time_on_wire, td->bits_uint,
-		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags, 0,
-		(const unsigned char[16]){0}, (const unsigned char[32]){0});
+		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags,
+		datum_blake2b_abw_clear_bits(target_pot), td->xor_key_hash,
+		(const unsigned char[32]){0});
 }
 
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *sia_coinb1) {
@@ -2014,7 +1992,8 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_
 	if (s->target_pot_index >= 0 && s->target_pot_index < cb->coinb1_len) {
 		cb_txn[s->target_pot_index] = pot;
 	}
-	if (!datum_stratum_job_blake2b_commitment_from_txn(s, cb_txn, cb_len, subsidy_only, commitment)) return false;
+	if (!datum_stratum_job_blake2b_commitment_from_txn(
+		s, cb_txn, cb_len, pot, subsidy_only, commitment)) return false;
 	if (sia_coinb1) datum_blake2b_sia_coinb1(sia_coinb1, commitment);
 	return true;
 }
@@ -2226,6 +2205,77 @@ size_t datum_stratum_coinbase_for_block_hex(char *out, size_t out_size, const ui
 		o += 2;
 	}
 	return o;
+}
+
+size_t datum_stratum_build_block_request_parts(char *out, size_t out_size,
+	const uint8_t *block_header,
+	const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness,
+	uint32_t transaction_count, const char *transactions_hex,
+	size_t transactions_hex_size, bool subsidy_only, size_t *header_hex_offset) {
+	char *ptr;
+	int prefix_size;
+	if (!out || !block_header || !coinbase_txn || out_size < 128 ||
+	    (!subsidy_only && transactions_hex_size && !transactions_hex) ||
+	    transaction_count == UINT32_MAX) return 0;
+	prefix_size = snprintf(out, out_size,
+		"{\"jsonrpc\":\"1.0\",\"id\":\"%llu\",\"method\":\"submitblock\",\"params\":[\"",
+		(unsigned long long)time(NULL));
+	if (prefix_size < 0 || (size_t)prefix_size >= out_size) return 0;
+	ptr = out + prefix_size;
+	if (header_hex_offset) *header_hex_offset = (size_t)(ptr - out);
+	if ((size_t)(ptr - out) + DATUM_BLAKE2B_BLOCK_HEADER_SIZE * 2 >= out_size)
+		return 0;
+	for(size_t i=0;i<DATUM_BLAKE2B_BLOCK_HEADER_SIZE;i++) {
+		uchar_to_hex(ptr, block_header[i]);
+		ptr += 2;
+	}
+	char varint[18];
+	const size_t varint_size = append_bitcoin_varint_hex(
+		subsidy_only ? 1 : (uint64_t)transaction_count + 1, varint);
+	if ((size_t)(ptr - out) + varint_size >= out_size) return 0;
+	memcpy(ptr, varint, varint_size);
+	ptr += varint_size;
+	const size_t coinbase_hex_size = datum_stratum_coinbase_for_block_hex(
+		ptr, out_size - (size_t)(ptr - out), coinbase_txn,
+		coinbase_txn_size, add_witness && !subsidy_only);
+	if (!coinbase_hex_size) return 0;
+	ptr += coinbase_hex_size;
+	if (!subsidy_only && transactions_hex_size) {
+		if ((size_t)(ptr - out) + transactions_hex_size >= out_size) return 0;
+		memcpy(ptr, transactions_hex, transactions_hex_size);
+		ptr += transactions_hex_size;
+	}
+	if ((size_t)(ptr - out) + 4 > out_size) return 0;
+	memcpy(ptr, "\"]}", 3);
+	ptr += 3;
+	*ptr = 0;
+	return (size_t)(ptr - out);
+}
+
+bool datum_stratum_abw_finalize_block_request(char *request, size_t request_size,
+	size_t header_hex_offset, const uint8_t raw_pow_hash[32],
+	uint8_t xor_clear_bits, const uint8_t xor_key[16],
+	const uint8_t expected_pow_hash[32], char block_hash_hex[65]) {
+	uint8_t actual_pow_hash[32];
+	const size_t clear_bits_hex = header_hex_offset +
+		DATUM_BLAKE2B_HEADER_XOR_CLEAR_BITS_OFFSET * 2;
+	const size_t xor_key_hex = header_hex_offset +
+		DATUM_BLAKE2B_HEADER_XOR_KEY_OFFSET * 2;
+	if (!request || !raw_pow_hash || !xor_key || !expected_pow_hash ||
+	    !block_hash_hex || clear_bits_hex + 2 > request_size ||
+	    xor_key_hex + 32 > request_size ||
+	    !datum_blake2b_apply_xor_mask_le(actual_pow_hash, raw_pow_hash,
+		xor_key, xor_clear_bits) ||
+	    sodium_memcmp(actual_pow_hash, expected_pow_hash, 32) != 0 ||
+	    hex2bin_uchar(request + clear_bits_hex) != xor_clear_bits) return false;
+	for(size_t i=0;i<16;i++) {
+		uchar_to_hex(request + xor_key_hex + i * 2, xor_key[i]);
+	}
+	for(size_t i=0;i<32;i++) {
+		uchar_to_hex(block_hash_hex + i * 2, expected_pow_hash[31-i]);
+	}
+	block_hash_hex[64] = 0;
+	return true;
 }
 
 int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce) {

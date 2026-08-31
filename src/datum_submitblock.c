@@ -49,6 +49,7 @@ pthread_mutex_t submitblock_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t submitblock_cond = PTHREAD_COND_INITIALIZER;
 int submit_block_triggered = 0;
 const char *submitblock_ptr = NULL;
+bool submitblock_ptr_owned = false;
 char submitblock_hash[256] = { 0 };
 
 void preciousblock(CURL *curl, char *blockhash) {
@@ -122,7 +123,9 @@ void *datum_submitblock_thread(void *ptr) {
 					datum_submitblock_doit(tcurl,(char *)datum_config.extra_block_submissions_urls[i],submitblock_ptr,submitblock_hash);
 				}
 			}
+			if (submitblock_ptr_owned) free((void *)submitblock_ptr);
 			submitblock_ptr = NULL;
+			submitblock_ptr_owned = false;
 		}
 		
 		// Reset the event flag
@@ -144,10 +147,11 @@ void datum_submitblock_waitfree(void) {
 	pthread_mutex_unlock(&submitblock_mutex);
 }
 
-void datum_submitblock_trigger(const char *ptr, const char *hash) {
+static bool datum_submitblock_trigger_internal(
+	const char *ptr, const char *hash, bool owned) {
 	if (!ptr || !hash || strlen(hash) >= sizeof(submitblock_hash)) {
 		DLOG_ERROR("Invalid block submission request");
-		return;
+		return false;
 	}
 	
 	pthread_mutex_lock(&submitblock_mutex);
@@ -155,10 +159,20 @@ void datum_submitblock_trigger(const char *ptr, const char *hash) {
 		pthread_cond_wait(&submitblock_cond, &submitblock_mutex);
 	}
 	submitblock_ptr = ptr;
+	submitblock_ptr_owned = owned;
 	strcpy(submitblock_hash, hash);
 	submit_block_triggered = 1;
 	pthread_cond_signal(&submitblock_cond);
 	pthread_mutex_unlock(&submitblock_mutex);
+	return true;
+}
+
+void datum_submitblock_trigger(const char *ptr, const char *hash) {
+	datum_submitblock_trigger_internal(ptr, hash, false);
+}
+
+bool datum_submitblock_trigger_owned(char *ptr, const char *hash) {
+	return datum_submitblock_trigger_internal(ptr, hash, true);
 }
 
 

@@ -129,6 +129,9 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = datum_config.mining_save_submitblocks_dir,			.default_string[0] = "", .max_string_len = sizeof(datum_config.mining_save_submitblocks_dir) },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "mining", 		.name = "allow_hasher_time_rolling",	.description = "Allow hasher time rolling for BLAKE2b jobs",
 		.required = false, .ptr = &datum_config.mining_allow_hasher_time_rolling, 		.default_bool = false },
+	{ .var_type = DATUM_CONF_BOOL, 		.category = "mining", 		.name = "abw_verify_all_shares_on_disclosure",	.description = "Retain ABW proofs until key disclosure and alarm if the pool ignored a block",
+		.example_default = true,
+		.required = false, .ptr = &datum_config.mining_abw_verify_all_shares_on_disclosure, 	.default_bool = true },
 	
 	// API/dashboard
 	{ .var_type = DATUM_CONF_STRING, 	.category = "api",	 		.name = "admin_password",			.description = "API password for actions/changes (username 'admin'; disabled if blank)",

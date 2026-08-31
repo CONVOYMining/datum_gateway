@@ -87,6 +87,10 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	tdata.version = 0x20000000;
 	tdata.height = 12345;
 	tdata.bits_uint = 0x1d00ffff;
+	tdata.abw_enabled = true;
+	tdata.abw_assignment_id = 1;
+	datum_test(datum_blake2b_xor_key_hash(
+		tdata.xor_key_hash, (const unsigned char[16]){0}));
 	job.block_template = &tdata;
 	job.blake2b_time_on_wire = 1000;
 	job.coinbase[0].coinb1_len = 20;
@@ -116,7 +120,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	memcpy(cb_txn + job.coinbase[0].coinb1_len + 12, job.coinbase[0].coinb2_bin, job.coinbase[0].coinb2_len);
 	cb_txn[job.target_pot_index] = 14;
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
-		&job, cb_txn, cb_len, false, c_from_txn));
+		&job, cb_txn, cb_len, 14, false, c_from_txn));
 	datum_test(!memcmp(c_from_txn, c_pot, 32));
 	
 	cb_len = (size_t)job.subsidy_only_coinbase.coinb1_len + 12 +
@@ -129,7 +133,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 		job.subsidy_only_coinbase.coinb2_len);
 	cb_txn[job.target_pot_index] = 14;
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
-		&job, cb_txn, cb_len, true, c_from_txn));
+		&job, cb_txn, cb_len, 14, true, c_from_txn));
 	datum_test(!memcmp(c_from_txn, c_subsidy, 32));
 }
 
@@ -151,6 +155,10 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	job.target_pot_index = 0;
 	job.coinbase[0].coinb1_len = 1;
 	job.coinbase[0].coinb1_bin[0] = 0xff;
+	tdata.abw_enabled = true;
+	tdata.abw_assignment_id = 1;
+	datum_test(datum_blake2b_xor_key_hash(tdata.xor_key_hash,
+		(const unsigned char[16]){0}));
 	strcpy(job.job_id, "0000000000c0de00");
 	miner.stratum_job_diffs[0] = 1;
 	global_cur_stratum_jobs[0] = &job;
@@ -180,6 +188,48 @@ static void datum_blake2b_coinbase_selection_tests(void) {
 	miner.coinbase_selection = MAX_COINBASE_TYPES;
 	datum_test(datum_stratum_coinbase_index(sdata, &miner, false) == 0);
 	free(sdata);
+}
+
+static void datum_stratum_abw_block_request_tests(void) {
+	unsigned char xor_key[16];
+	unsigned char raw_hash[32], masked_hash[32];
+	for (size_t i = 0; i < sizeof(xor_key); ++i) {
+		xor_key[i] = (unsigned char)(i + 1);
+	}
+	for (size_t i = 0; i < sizeof(raw_hash); ++i) {
+		raw_hash[i] = (unsigned char)(0x80 + i);
+	}
+	datum_test(datum_blake2b_apply_xor_mask_le(
+		masked_hash, raw_hash, xor_key, 42));
+	
+	unsigned char header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE] = {0};
+	const unsigned char coinbase[] = {1, 0, 0, 0, 0, 0, 0, 0};
+	const char transactions_hex[] = "0102";
+	char request[2048], original[2048], block_hash[65];
+	size_t header_offset = 0;
+	header[DATUM_BLAKE2B_HEADER_XOR_CLEAR_BITS_OFFSET] = 42;
+	const size_t request_size = datum_stratum_build_block_request_parts(
+		request, sizeof(request), header, coinbase, sizeof(coinbase), false,
+		1, transactions_hex, sizeof(transactions_hex) - 1, false,
+		&header_offset);
+	datum_test(request_size > 0);
+	datum_test(strstr(request, "0102\"]}") != NULL);
+	memcpy(original, request, request_size + 1);
+	unsigned char wrong_hash[32];
+	memcpy(wrong_hash, masked_hash, sizeof(wrong_hash));
+	wrong_hash[0] ^= 1;
+	datum_test(!datum_stratum_abw_finalize_block_request(request,
+		request_size, header_offset, raw_hash, 42, xor_key,
+		wrong_hash, block_hash));
+	datum_test(!memcmp(request, original, request_size + 1));
+	datum_test(datum_stratum_abw_finalize_block_request(request,
+		request_size, header_offset, raw_hash, 42, xor_key,
+		masked_hash, block_hash));
+	datum_test(!memcmp(request + header_offset +
+		DATUM_BLAKE2B_HEADER_XOR_KEY_OFFSET * 2, "01020304", 8));
+	for (size_t i = 0; i < sizeof(masked_hash); ++i) {
+		datum_test(hex2bin_uchar(block_hash + i * 2) == masked_hash[31 - i]);
+	}
 }
 
 static void datum_block_coinbase_witness_tests(void) {
@@ -426,7 +476,8 @@ void datum_stratum_tests(void) {
 	datum_stratum_string_request_id_tests();
 	datum_blake2b_coinbase_selection_tests();
 	datum_blake2b_h_not_zero_tests();
-    datum_blake2b_client_pot_commitment_tests();
-    datum_blake2b_refresh_time_offset_tests();
-    datum_block_coinbase_witness_tests();
+	datum_blake2b_client_pot_commitment_tests();
+	datum_stratum_abw_block_request_tests();
+	datum_blake2b_refresh_time_offset_tests();
+	datum_block_coinbase_witness_tests();
 }

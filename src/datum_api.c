@@ -125,7 +125,11 @@ void datum_api_var_DATUM_CONNECTION_STATUS(char *buffer, size_t buffer_size, con
 	const char *colour = "lime";
 	const char *s, *s2 = "";
 	const char * const bt_err = datum_blocktemplates_error;
-	if (bt_err) {
+	if (!datum_protocol_abw_health_ok()) {
+		colour = "red";
+		s = "CRITICAL: ";
+		s2 = "DATUM pool ignored a valid block";
+	} else if (bt_err) {
 		colour = "red";
 		s = "ERROR: ";
 		s2 = bt_err;

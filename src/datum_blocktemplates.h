@@ -151,6 +151,7 @@ typedef struct T_DATUM_TEMPLATE_TXN {
 
 typedef struct {
 	uint16_t	local_index; // tie to stratum work
+	uint64_t	generation; // unique identity for this use of the ring slot
 	
 	uint64_t	coinbasevalue; //
 	uint64_t	mintime; //
@@ -160,6 +161,10 @@ typedef struct {
 	uint32_t	height; //
 	uint32_t	version; //
 	uint32_t	sigoplimit; //
+	bool		abw_enabled;
+	// Internal token is the compact wire slot plus one.
+	uint8_t		abw_assignment_id;
+	uint8_t		xor_key_hash[32];
 	
 	char		bits[9]; //
 	char		dummy[7]; // unused, possibly for alignment

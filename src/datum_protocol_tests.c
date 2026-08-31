@@ -279,6 +279,109 @@ static void datum_protocol_migration_tests(void) {
 	datum_config = saved_config;
 }
 
+static void datum_protocol_abw_cache_tests(void) {
+	unsigned char xor_key[16];
+	unsigned char key_hash[32];
+	unsigned char raw_hash[32];
+	unsigned char coinbase[16] = {1, 0, 0, 0, 1};
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_PROTOCOL_POW pow = {0};
+	for (size_t i = 0; i < sizeof(xor_key); ++i) {
+		xor_key[i] = (unsigned char)(i + 1);
+	}
+	memset(raw_hash, 0xff, sizeof(raw_hash));
+	datum_test(datum_blake2b_xor_key_hash(key_hash, xor_key));
+	
+	unsigned char reveal[19] = {DATUM_ABW_DRAFT_REVISION, 3};
+	memcpy(reveal + 2, xor_key, sizeof(xor_key));
+	reveal[18] = 0xFE;
+	unsigned char notice[36] = {
+		DATUM_ABW_DRAFT_REVISION, 0, 3,
+	};
+	memcpy(notice + 3, key_hash, sizeof(key_hash));
+	notice[35] = 0xFE;
+	unsigned char activation[3] = {DATUM_ABW_DRAFT_REVISION, 3, 0xFE};
+	
+	datum_protocol_abw_reset();
+	datum_protocol_replay_clear();
+	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal));
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	unsigned char conflicting_notice[sizeof(notice)];
+	memcpy(conflicting_notice, notice, sizeof(notice));
+	conflicting_notice[3] ^= 1;
+	datum_test(!datum_protocol_abw_assignment_notice(sizeof(conflicting_notice), conflicting_notice));
+	datum_test(!datum_protocol_abw_apply_active(&block_template));
+	datum_test(datum_protocol_abw_activation(sizeof(activation), activation));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 4);
+	datum_test(!memcmp(block_template.xor_key_hash, key_hash, 32));
+	
+	block_template.version = UINT32_C(0x20000000);
+	block_template.height = 42;
+	block_template.bits_uint = UINT32_C(0x1d00ffff);
+	job.block_template = &block_template;
+	job.version_uint = block_template.version;
+	job.height = block_template.height;
+	job.nbits_uint = block_template.bits_uint;
+	job.target_pot_index = 4;
+	job.blake2b_time_on_wire = 1000;
+	pow.sjob = &job;
+	pow.datum_job_id = 2;
+	pow.abw_assignment_id = 4;
+	pow.target_byte = 10;
+	pow.nonce = 7;
+	pow.ntime = 1000;
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash));
+	
+	datum_config.mining_abw_verify_all_shares_on_disclosure = true;
+	unsigned char receipt[35] = {DATUM_ABW_DRAFT_REVISION, 3};
+	memcpy(receipt + 2, raw_hash, sizeof(raw_hash));
+	receipt[34] = 0xFE;
+	datum_test(datum_protocol_abw_candidate_receipt(sizeof(receipt), receipt));
+	datum_test(datum_protocol_abw_candidate_release(sizeof(receipt), receipt));
+	
+	unsigned char second_hash[32];
+	memset(second_hash, 0xfe, sizeof(second_hash));
+	pow.nonce++;
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), second_hash));
+	datum_config.mining_abw_verify_all_shares_on_disclosure = false;
+	memcpy(pow.raw_pow_hash, second_hash, sizeof(pow.raw_pow_hash));
+	static const unsigned char replay_message[] = {0x27, 0xFE};
+	datum_test(datum_protocol_replay_add(&pow, replay_message, sizeof(replay_message)) != NULL);
+	const size_t replay_count_before = datum_replay_count;
+	unsigned char response[44] = {DATUM_POW_SHARE_RESPONSE_ACCEPTED};
+	pk_u32le(response, 3, (uint32_t)pow.nonce);
+	response[7] = pow.target_byte;
+	response[8] = pow.datum_job_id;
+	response[9] = 0x06;
+	response[10] = 3;
+	memcpy(response + 11, second_hash, sizeof(second_hash));
+	response[43] = 0xFE;
+	datum_test(datum_protocol_share_response(sizeof(response), response));
+	datum_test(datum_replay_count + 1 == replay_count_before);
+	datum_config.mining_abw_verify_all_shares_on_disclosure = true;
+	
+	unsigned char subsidy_hash[32];
+	memset(subsidy_hash, 0xfc, sizeof(subsidy_hash));
+	pow.subsidy_only = true;
+	pow.nonce++;
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), subsidy_hash));
+	pow.subsidy_only = false;
+	
+	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal));
+	datum_test(datum_protocol_abw_assignment_revealed(4));
+	datum_test(!datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash));
+	reveal[18] = 0;
+	datum_test(!datum_protocol_abw_reveal(sizeof(reveal), reveal));
+	reveal[18] = 0xFE;
+	notice[3] ^= 1;
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	datum_protocol_abw_reset();
+	datum_protocol_replay_clear();
+}
+
 static void datum_pow_response_large_difficulty_test(void) {
 	unsigned char accepted[9] = {DATUM_POW_SHARE_RESPONSE_ACCEPTED};
 	unsigned char rejected[9] = {DATUM_POW_SHARE_RESPONSE_REJECTED};
@@ -368,9 +471,10 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	pow.version = UINT32_C(0x20000000);
 	pow.target_byte_index = jobs[0].target_pot_index;
 	pow.target_byte = 1;
+	pow.abw_assignment_id = 1;
 	
 	// First use registers job 0 and its coinbase in remote slot 0.
-	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 140);
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 142);
 	datum_test((msg[3] & 0x08) != 0);
 	datum_test(upk_u32le(msg, 13) == pow.version);
 	datum_test((msg[35] & DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET) != 0);
@@ -378,8 +482,9 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	datum_test(upk_u64le(msg, 41) == pow.ntime);
 	datum_test(upk_u64le(msg, 49) == pow.nonce);
 	datum_test(msg[57] == 0x04 && upk_u32le(msg, 58) == pow.time_on_wire);
-	datum_test(msg[62] == 0x01 && msg[63] == 0xa0);
-	datum_test(msg[131] == 0x02 && msg[137] == 0xc0 && msg[138] == 0xd0);
+	datum_test(msg[62] == 0x05 && msg[63] == 0);
+	datum_test(msg[64] == 0x01 && msg[65] == 0xa0);
+	datum_test(msg[133] == 0x02 && msg[139] == 0xc0 && msg[140] == 0xd0);
 	datum_test(datum_jobs[0].server_sjob == &jobs[0]);
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) > 0);
 	datum_test((msg[35] & DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET) != 0);
@@ -392,10 +497,10 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	pow.subsidy_only = true;
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 0);
 	pow.coinbase_id = DATUM_COINBASE_ID_EMPTY;
-	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 71);
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 73);
 	datum_test((msg[3] & 0x02) != 0);
-	datum_test(msg[62] == 0x02 && msg[63] == DATUM_COINBASE_ID_EMPTY);
-	datum_test(msg[68] == 0xe0 && msg[69] == 0xf0);
+	datum_test(msg[64] == 0x02 && msg[65] == DATUM_COINBASE_ID_EMPTY);
+	datum_test(msg[70] == 0xe0 && msg[71] == 0xf0);
 	datum_test(datum_jobs[0].server_has_coinbase_empty);
 	pow.subsidy_only = false;
 	pow.coinbase_id = 2;
@@ -407,8 +512,8 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	datum_config.mining_pool_address[sizeof(datum_config.mining_pool_address) - 1] = 0;
 	memset(pow.username, 'b', sizeof(pow.username) - 1);
 	pow.username[sizeof(pow.username) - 1] = 0;
-	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 443);
-	datum_test(msg[414] == 0 && msg[442] == 0xFE);
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 445);
+	datum_test(msg[414] == 0 && msg[444] == 0xFE);
 	datum_config.datum_pool_pass_workers = false;
 	strcpy(datum_config.mining_pool_address, "pool");
 	pow.username[0] = 0;
@@ -425,22 +530,22 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	pow.sjob = &jobs[MAX_DATUM_PROTOCOL_JOBS];
 	memcpy(pow.stratum_job_id, pow.sjob->job_id, sizeof(pow.stratum_job_id));
 	pow.target_byte_index = pow.sjob->target_pot_index;
-	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 140);
-	datum_test(msg[62] == 0x01 && msg[63] == 0xa8);
-	datum_test(msg[131] == 0x02 && msg[137] == 0xc8 && msg[138] == 0xd8);
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 142);
+	datum_test(msg[64] == 0x01 && msg[65] == 0xa8);
+	datum_test(msg[133] == 0x02 && msg[139] == 0xc8 && msg[140] == 0xd8);
 	datum_test(datum_jobs[0].server_sjob == &jobs[MAX_DATUM_PROTOCOL_JOBS]);
 	
 	// A delayed share for the old job must switch the remote cache back to its
 	// exact context; a following new-job share must switch it forward again.
 	pow.sjob = &jobs[0];
 	memcpy(pow.stratum_job_id, pow.sjob->job_id, sizeof(pow.stratum_job_id));
-	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 140);
-	datum_test(msg[63] == 0xa0 && msg[137] == 0xc0 && msg[138] == 0xd0);
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 142);
+	datum_test(msg[65] == 0xa0 && msg[139] == 0xc0 && msg[140] == 0xd0);
 	datum_test(datum_jobs[0].server_sjob == &jobs[0]);
 	pow.sjob = &jobs[MAX_DATUM_PROTOCOL_JOBS];
 	memcpy(pow.stratum_job_id, pow.sjob->job_id, sizeof(pow.stratum_job_id));
-	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 140);
-	datum_test(msg[63] == 0xa8 && msg[137] == 0xc8 && msg[138] == 0xd8);
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 142);
+	datum_test(msg[65] == 0xa8 && msg[139] == 0xc8 && msg[140] == 0xd8);
 	datum_test(datum_jobs[0].server_sjob == &jobs[MAX_DATUM_PROTOCOL_JOBS]);
 	
 	memset(datum_jobs, 0, sizeof(datum_jobs));
@@ -456,6 +561,7 @@ void datum_protocol_tests(void) {
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
 	datum_protocol_resume_tests();
+	datum_protocol_abw_cache_tests();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 }
