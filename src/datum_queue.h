@@ -60,6 +60,7 @@ typedef struct {
 int datum_queue_prep(DATUM_QUEUE *q, const int max_items, const int item_size, int (*item_handler)(void *));
 int datum_queue_process(DATUM_QUEUE *q);
 int datum_queue_add_item(DATUM_QUEUE *q, void *item);
+int datum_queue_clear(DATUM_QUEUE *q);
 int datum_queue_free(DATUM_QUEUE *q);
 
 #endif

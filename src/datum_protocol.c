@@ -69,6 +69,7 @@
 
 #include "datum_utils.h"
 #include "datum_protocol.h"
+#include "datum_protocol_internal.h"
 #include "datum_conf.h"
 #include "datum_stratum.h"
 #include "datum_blocktemplates.h"
@@ -124,6 +125,32 @@ uint64_t datum_last_accepted_share_local_tsms = 0;
 uint64_t datum_protocol_mainloop_tsms = 0;
 
 uint64_t latest_server_msg_tsms = 0;
+
+#define DATUM_RESUME_TOKEN_SIZE 40
+#define DATUM_REPLAY_MAX_PENDING 65536
+
+typedef struct T_DATUM_REPLAY_PENDING {
+	uint64_t nonce;
+	uint64_t session_generation;
+	uint8_t target_pot;
+	uint8_t job_id;
+	size_t message_size;
+	unsigned char *message;
+	struct T_DATUM_REPLAY_PENDING *next;
+} T_DATUM_REPLAY_PENDING;
+
+static pthread_mutex_t datum_replay_mutex = PTHREAD_MUTEX_INITIALIZER;
+static T_DATUM_REPLAY_PENDING *datum_replay_head = NULL;
+static T_DATUM_REPLAY_PENDING *datum_replay_tail = NULL;
+size_t datum_replay_count = 0;
+static uint64_t datum_session_generation = 1;
+static unsigned char datum_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0};
+static unsigned char datum_requested_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0};
+static bool datum_has_resume_token = false;
+static bool datum_requested_resume = false;
+static bool datum_connection_configured = false;
+
+extern DATUM_QUEUE pow_queue;
 
 // may be used by this thread when crafting replies to server commands
 unsigned char temp_data[DATUM_PROTOCOL_MAX_CMD_DATA_SIZE + 16384];
@@ -266,6 +293,134 @@ int datum_protocol_mining_cmd(void *data, int len) {
 	pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 	
 	return 0;
+}
+
+void datum_protocol_replay_clear(void) {
+	pthread_mutex_lock(&datum_replay_mutex);
+	while (datum_replay_head) {
+		T_DATUM_REPLAY_PENDING *pending = datum_replay_head;
+		datum_replay_head = pending->next;
+		free(pending->message);
+		free(pending);
+	}
+	datum_replay_tail = NULL;
+	datum_replay_count = 0;
+	pthread_mutex_unlock(&datum_replay_mutex);
+}
+
+T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
+	const T_DATUM_PROTOCOL_POW *pow, const unsigned char *message,
+	size_t message_size) {
+	if (!pow || !message || !message_size || message_size > 32768)
+		return NULL;
+	
+	T_DATUM_REPLAY_PENDING *pending = calloc(1, sizeof(*pending));
+	if (!pending) return NULL;
+	pending->message = malloc(message_size);
+	if (!pending->message) {
+		free(pending);
+		return NULL;
+	}
+	memcpy(pending->message, message, message_size);
+	pending->message_size = message_size;
+	pending->nonce = pow->nonce;
+	pending->target_pot = pow->target_byte;
+	pending->job_id = pow->datum_job_id;
+	
+	pthread_mutex_lock(&datum_replay_mutex);
+	if (datum_replay_count >= DATUM_REPLAY_MAX_PENDING) {
+		pthread_mutex_unlock(&datum_replay_mutex);
+		free(pending->message);
+		free(pending);
+		return NULL;
+	}
+	if (datum_replay_tail) {
+		datum_replay_tail->next = pending;
+	} else {
+		datum_replay_head = pending;
+	}
+	datum_replay_tail = pending;
+	datum_replay_count++;
+	pthread_mutex_unlock(&datum_replay_mutex);
+	return pending;
+}
+
+static void datum_protocol_replay_mark_sent(T_DATUM_REPLAY_PENDING *pending) {
+	if (!pending) return;
+	pthread_mutex_lock(&datum_replay_mutex);
+	pending->session_generation = datum_session_generation;
+	pthread_mutex_unlock(&datum_replay_mutex);
+}
+
+void datum_protocol_replay_mark_responded_legacy(
+	uint32_t nonce, uint8_t target_pot, uint8_t job_id) {
+	T_DATUM_REPLAY_PENDING *pending;
+	T_DATUM_REPLAY_PENDING *previous = NULL;
+	T_DATUM_REPLAY_PENDING *matched = NULL;
+	T_DATUM_REPLAY_PENDING *matched_previous = NULL;
+	
+	pthread_mutex_lock(&datum_replay_mutex);
+	for (pending = datum_replay_head; pending; pending = pending->next) {
+		if ((uint32_t)pending->nonce != nonce ||
+		    pending->target_pot != target_pot || pending->job_id != job_id) {
+			previous = pending;
+			continue;
+		}
+		if (matched) {
+			matched = NULL;
+			break;
+		}
+		matched = pending;
+		matched_previous = previous;
+		previous = pending;
+	}
+	if (matched) {
+		if (matched_previous) {
+			matched_previous->next = matched->next;
+		} else {
+			datum_replay_head = matched->next;
+		}
+		if (datum_replay_tail == matched)
+			datum_replay_tail = matched_previous;
+		datum_replay_count--;
+		free(matched->message);
+		free(matched);
+	}
+	pthread_mutex_unlock(&datum_replay_mutex);
+}
+
+static void datum_protocol_replay_unanswered(void) {
+	T_DATUM_REPLAY_PENDING *pending = NULL;
+	
+	while (true) {
+		unsigned char *message = NULL;
+		size_t message_size = 0;
+		
+		pthread_mutex_lock(&datum_replay_mutex);
+		pending = pending ? pending->next : datum_replay_head;
+		while (pending && pending->session_generation == datum_session_generation) {
+			pending = pending->next;
+		}
+		if (pending) {
+			message = malloc(pending->message_size + 80);
+			if (message) {
+				message_size = pending->message_size;
+				memcpy(message, pending->message, message_size);
+			}
+		}
+		pthread_mutex_unlock(&datum_replay_mutex);
+		if (!message) break;
+		
+		const size_t padding = 1 + (rand() % 80);
+		memset(message + message_size, rand(), padding);
+		if (datum_protocol_mining_cmd(message,
+			(int)(message_size + padding)) != 0) {
+			free(message);
+			break;
+		}
+		free(message);
+		datum_protocol_replay_mark_sent(pending);
+	}
 }
 
 pthread_mutex_t datum_protocol_coinbaser_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -421,7 +576,7 @@ int datum_protocol_client_configure(int len, unsigned char *data) {
 	DLOG_DEBUG("client configuration cmd received from DATUM server");
 	char msg[1024];
 	
-	if (i >= len || data[i] != 2) {
+	if (i >= len || data[i] != 3) {
 err:
 		DLOG_ERROR("Bad configuration version from server. Is this client up to date?");
 		return 0;
@@ -436,9 +591,26 @@ err:
 	memcpy(datum_config.override_mining_pool_scriptsig, &data[i], a); i+=a;
 	datum_config.override_mining_pool_scriptsig_len = a;
 	
-	// prime ID
-	if (i + 8 > len) goto err;
-	datum_config.prime_id = upk_u64le(data, i); i+=8;
+	// Prime ID and the opaque token used to request this identity on reconnect.
+	if (i + 8 + DATUM_RESUME_TOKEN_SIZE > len) goto err;
+	const uint64_t configured_prime_id = upk_u64le(data, i); i+=8;
+	unsigned char configured_resume_token[DATUM_RESUME_TOKEN_SIZE];
+	memcpy(configured_resume_token, &data[i], DATUM_RESUME_TOKEN_SIZE);
+	i += DATUM_RESUME_TOKEN_SIZE;
+	const bool first_configuration = !datum_connection_configured;
+	const bool resumed = first_configuration && datum_requested_resume &&
+		configured_prime_id == upk_u64le(datum_requested_resume_token, 0) &&
+		sodium_memcmp(configured_resume_token, datum_requested_resume_token,
+			DATUM_RESUME_TOKEN_SIZE) == 0;
+	datum_config.prime_id = configured_prime_id;
+	memcpy(datum_resume_token, configured_resume_token,
+		DATUM_RESUME_TOKEN_SIZE);
+	datum_has_resume_token = configured_prime_id != 0;
+	if (first_configuration && !resumed) {
+		datum_queue_clear(&pow_queue);
+		datum_protocol_replay_clear();
+	}
+	datum_connection_configured = true;
 	
 	// pool coinbase tag
 	if (i >= len) goto err;
@@ -470,7 +642,16 @@ err:
 	DLOG_DEBUG("DATUM Pool Prime ID:         %16.16"PRIx64, datum_config.prime_id);
 	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIu64,datum_config.override_vardiff_min);
 	
+	const bool became_ready = datum_state != 3;
 	datum_state = 3; // fully ready to make work
+	if (first_configuration && resumed) {
+		DLOG_INFO("DATUM connection resumed with Prime ID %16.16"PRIx64,
+			datum_config.prime_id);
+		datum_protocol_replay_unanswered();
+	} else if (first_configuration && datum_requested_resume) {
+		DLOG_WARN("DATUM resume was declined; discarded queued shares from the old session");
+	}
+	if (became_ready) datum_blocktemplates_notify_othercause();
 	
 	return 1;
 }
@@ -942,6 +1123,8 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 		} else {
 			datum_rejected_share_diff += datum_config.override_vardiff_min;
 		}
+		datum_protocol_replay_mark_responded_legacy(
+			upk_u32le(data, 3), data[7], data[8]);
 		
 		return 1;
 	}
@@ -958,6 +1141,8 @@ int datum_protocol_share_response(int len, unsigned char *data) {
 	datum_accepted_share_count++;
 	datum_protocol_add_share_diff(&datum_accepted_share_diff, data[7]);
 	datum_last_accepted_share_tsms = datum_protocol_mainloop_tsms;
+	datum_protocol_replay_mark_responded_legacy(
+		upk_u32le(data, 3), data[7], data[8]);
 	
 	return 1;
 }
@@ -1246,8 +1431,18 @@ int datum_protocol_send_hello(int sockfd) {
 	
 	nk = upk_u32le(hello_msg, i - 4);
 	
-	// TODO: maybe tack on other useful data here at some point
-	// ...
+	memcpy(&hello_msg[i], "DRS\x01", 4); i += 4;
+	datum_requested_resume = datum_has_resume_token;
+	hello_msg[i++] = datum_requested_resume ? 1 : 0;
+	if (datum_requested_resume) {
+		memcpy(&hello_msg[i], datum_resume_token, DATUM_RESUME_TOKEN_SIZE);
+		memcpy(datum_requested_resume_token, datum_resume_token,
+			DATUM_RESUME_TOKEN_SIZE);
+		i += DATUM_RESUME_TOKEN_SIZE;
+	} else {
+		memset(datum_requested_resume_token, 0,
+			DATUM_RESUME_TOKEN_SIZE);
+	}
 	
 	// pad with some randomness
 	j = 1 + (rand() % 200);
@@ -1536,13 +1731,16 @@ int datum_protocol_pow_submit(
 	return datum_queue_add_item(&pow_queue, &pow);
 }
 
-int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size) {
+static int datum_protocol_pow_build_message_mode(
+	T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size,
+	bool force_full, bool record_server_state) {
 	T_DATUM_STRATUM_JOB *sjob;
 	T_DATUM_PROTOCOL_JOB *pj;
 	const T_DATUM_STRATUM_COINBASE *cb;
 	int i = 0, j;
-	bool w = false;
 	bool new_to_server;
+	bool send_context;
+	bool send_coinbase;
 	size_t merkle_bytes;
 
 	if (!pow || !msg) return 0;
@@ -1602,24 +1800,34 @@ int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *m
 	pk_u32le(msg, i, pow->time_on_wire); i += 4;
 
 	pthread_rwlock_rdlock(&datum_jobs_rwlock);
-
 	pj = &datum_jobs[pow->datum_job_id];
 	sjob = pow->sjob ? pow->sjob : pj->sjob;
 	if (!sjob || !sjob->block_template) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
 		return 0;
 	}
-
 	new_to_server = (pj->server_sjob != sjob);
+	send_context = force_full || new_to_server ||
+		!pj->server_has_merkle_branches;
+	send_coinbase = force_full || new_to_server ||
+		(pow->subsidy_only ? !pj->server_has_coinbase_empty :
+		 !pj->server_has_coinbase[pow->coinbase_id]);
+	cb = pow->subsidy_only ? &sjob->subsidy_only_coinbase :
+		&sjob->coinbase[pow->coinbase_id];
+	merkle_bytes = (size_t)sjob->merklebranch_count * 32;
+	if ((send_context && sjob->merklebranch_count > 24) ||
+	    cb->coinb1_len < 0 || cb->coinb1_len > (int)sizeof(cb->coinb1_bin) ||
+	    cb->coinb2_len < 0 || cb->coinb2_len > (int)sizeof(cb->coinb2_bin) ||
+	    (size_t)i + 1 + (send_context ? 69 + merkle_bytes : 0) +
+		(send_coinbase ? 6 + (size_t)cb->coinb1_len +
+			(size_t)cb->coinb2_len : 0) > msg_size) {
+		pthread_rwlock_unlock(&datum_jobs_rwlock);
+		return 0;
+	}
 
-	if (new_to_server || !pj->server_has_merkle_branches) {
+	if (send_context) {
 		// we need to send the merkle branches with this job
 		// also send the prevblockhash
-		merkle_bytes = (size_t)sjob->merklebranch_count * 32;
-		if ((size_t)i + 62 + merkle_bytes >= msg_size) {
-			pthread_rwlock_unlock(&datum_jobs_rwlock);
-			return 0;
-		}
 		msg[i++] = 0x01;
 		memcpy(&msg[i], sjob->prevhash_bin, 32); i += 32;
 		pk_u16le(msg, i, pow->target_byte_index); i += 2;
@@ -1634,102 +1842,66 @@ int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *m
 		msg[i++] = sjob->merklebranch_count;
 		memcpy(&msg[i], &sjob->merklebranches_bin[0][0], merkle_bytes);
 		i += (int)merkle_bytes;
-
-		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		pthread_rwlock_wrlock(&datum_jobs_rwlock);
-		w = true;
-		pj = &datum_jobs[pow->datum_job_id];
-		pj->server_has_merkle_branches = true;
 	}
 
-	if (pow->subsidy_only) {
-		if (new_to_server || !pj->server_has_coinbase_empty) {
-			// subsidy only coinbase! yes, I know we specified above in the flags as well
-			if ((size_t)i + 6 + sjob->subsidy_only_coinbase.coinb1_len + sjob->subsidy_only_coinbase.coinb2_len >= msg_size) {
-				pthread_rwlock_unlock(&datum_jobs_rwlock);
-				return 0;
-			}
-			msg[i++] = 0x02;
-			msg[i++] = DATUM_COINBASE_ID_EMPTY;
-			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb1_len); i += 2;
-			pk_u16le(msg, i, sjob->subsidy_only_coinbase.coinb2_len); i += 2;
-			memcpy(&msg[i], sjob->subsidy_only_coinbase.coinb1_bin, sjob->subsidy_only_coinbase.coinb1_len);
-			i += sjob->subsidy_only_coinbase.coinb1_len;
-			memcpy(&msg[i], sjob->subsidy_only_coinbase.coinb2_bin, sjob->subsidy_only_coinbase.coinb2_len);
-			i += sjob->subsidy_only_coinbase.coinb2_len;
-
-			if (!w) {
-				pthread_rwlock_unlock(&datum_jobs_rwlock);
-				pthread_rwlock_wrlock(&datum_jobs_rwlock);
-				w = true;
-				pj = &datum_jobs[pow->datum_job_id];
-			}
-			pj->server_has_coinbase_empty = true;
-		}
-	} else {
-		if (new_to_server || !pj->server_has_coinbase[pow->coinbase_id]) {
-			cb = &sjob->coinbase[pow->coinbase_id];
-			if ((size_t)i + 6 + cb->coinb1_len + cb->coinb2_len >= msg_size) {
-				pthread_rwlock_unlock(&datum_jobs_rwlock);
-				return 0;
-			}
-			msg[i++] = 0x02;
-			msg[i++] = pow->coinbase_id;
-			pk_u16le(msg, i, cb->coinb1_len); i += 2;
-			pk_u16le(msg, i, cb->coinb2_len); i += 2;
-			memcpy(&msg[i], cb->coinb1_bin, cb->coinb1_len);
-			i += cb->coinb1_len;
-			memcpy(&msg[i], cb->coinb2_bin, cb->coinb2_len);
-			i += cb->coinb2_len;
-
-			if (!w) {
-				pthread_rwlock_unlock(&datum_jobs_rwlock);
-				pthread_rwlock_wrlock(&datum_jobs_rwlock);
-				w = true;
-				pj = &datum_jobs[pow->datum_job_id];
-			}
-			pj->server_has_coinbase[pow->coinbase_id] = true;
-		}
-	}
-
-	if ((size_t)i + 1 > msg_size) {
-		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		return 0;
+	if (send_coinbase) {
+		msg[i++] = 0x02;
+		msg[i++] = pow->coinbase_id;
+		pk_u16le(msg, i, cb->coinb1_len); i += 2;
+		pk_u16le(msg, i, cb->coinb2_len); i += 2;
+		memcpy(&msg[i], cb->coinb1_bin, cb->coinb1_len);
+		i += cb->coinb1_len;
+		memcpy(&msg[i], cb->coinb2_bin, cb->coinb2_len);
+		i += cb->coinb2_len;
 	}
 	msg[i++] = 0xFE; // cap message
+	pthread_rwlock_unlock(&datum_jobs_rwlock);
 
-	if (w || new_to_server) {
-		if (!w) {
-			pthread_rwlock_unlock(&datum_jobs_rwlock);
-			pthread_rwlock_wrlock(&datum_jobs_rwlock);
-			pj = &datum_jobs[pow->datum_job_id];
-		}
+	if (record_server_state) {
+		pthread_rwlock_wrlock(&datum_jobs_rwlock);
+		pj = &datum_jobs[pow->datum_job_id];
 		if (pj->server_sjob != sjob) {
-			pj->server_has_merkle_branches = true;
+			pj->server_has_merkle_branches = false;
 			memset(pj->server_has_coinbase, 0, sizeof(pj->server_has_coinbase));
 			pj->server_has_coinbase_empty = false;
-			if (!pow->subsidy_only && pow->coinbase_id < 8) {
-				pj->server_has_coinbase[pow->coinbase_id] = true;
-			}
-			if (pow->subsidy_only) pj->server_has_coinbase_empty = true;
 		}
 		pj->server_sjob = sjob;
+		if (send_context) pj->server_has_merkle_branches = true;
+		if (send_coinbase) {
+			if (pow->subsidy_only) {
+				pj->server_has_coinbase_empty = true;
+			} else {
+				pj->server_has_coinbase[pow->coinbase_id] = true;
+			}
+		}
+		pthread_rwlock_unlock(&datum_jobs_rwlock);
 	}
-
-	pthread_rwlock_unlock(&datum_jobs_rwlock);
 	return i;
+}
+
+int datum_protocol_pow_build_message(
+	T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size) {
+	return datum_protocol_pow_build_message_mode(
+		pow, msg, msg_size, false, true);
 }
 
 // {"params": ["mzjP9Hn7aqaCLM5pSgMSQzgs3gnxSFv91B", "662599770700", "f40c000000000000", "66259976", "48220d13", "00d30000"], "id": 182, "method": "mining.submit"}
 int datum_protocol_pow(void *arg) {
 	T_DATUM_PROTOCOL_POW *pow = arg;
 	unsigned char msg[32768 + crypto_box_MACBYTES];
+	unsigned char replay_message[32768];
+	T_DATUM_REPLAY_PENDING *pending;
 	int i, j;
 
 	i = datum_protocol_pow_build_message(pow, msg, sizeof(msg));
 	if (i <= 0) {
 		DLOG_ERROR("Could not process POW to DATUM server! Bad coinbase ID or job.");
 		return 0;
+	}
+	const int replay_message_size = datum_protocol_pow_build_message_mode(pow, replay_message, sizeof(replay_message), true, false);
+	pending = replay_message_size > 0 ? datum_protocol_replay_add(pow, replay_message, (size_t)replay_message_size) : NULL;
+	if (!pending) {
+		DLOG_ERROR("Could not retain POW for replay after a resumed connection");
 	}
 
 	// pad with some randomness (builder itself does not pad; tests assert exact lengths)
@@ -1740,7 +1912,8 @@ int datum_protocol_pow(void *arg) {
 		i += j;
 	}
 
-	datum_protocol_mining_cmd(msg, i);
+	if (datum_protocol_mining_cmd(msg, i) == 0)
+		datum_protocol_replay_mark_sent(pending);
 	if ((datum_protocol_mainloop_tsms - datum_last_accepted_share_local_tsms) > 25000) {
 		// we don't want to trigger a connection timeout just because we are mining very slowly...
 		// so we'll fake this in that case.
@@ -1781,9 +1954,15 @@ void *datum_protocol_client(void *args) {
 	bool break_again = false;
 	int sent = 0;
 	T_DATUM_PROTOCOL_HEADER s_header;
+	pthread_mutex_lock(&datum_replay_mutex);
+	datum_session_generation++;
+	if (!datum_session_generation) datum_session_generation++;
+	pthread_mutex_unlock(&datum_replay_mutex);
+	datum_connection_configured = false;
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
 	for(i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {
+		datum_jobs[i].server_sjob = NULL;
 		datum_jobs[i].server_has_merkle_branches = false;
 		datum_jobs[i].server_has_coinbase_empty = false;
 		datum_jobs[i].server_has_short_txnlist = false;
@@ -1804,7 +1983,7 @@ void *datum_protocol_client(void *args) {
 	memset(&s_header, 0, sizeof(T_DATUM_PROTOCOL_HEADER));
 	
 	// Note: The pool can not set a LOWER vardiff minimum than the client has set, so this is safe to use for that calculation.
-	if (datum_queue_prep(&pow_queue, (datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16), sizeof(T_DATUM_PROTOCOL_POW), datum_protocol_pow) != 0) {
+	if (!pow_queue.initialized && datum_queue_prep(&pow_queue, (datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16), sizeof(T_DATUM_PROTOCOL_POW), datum_protocol_pow) != 0) {
 		DLOG_FATAL("Could not setup work submission queue!");
 		datum_protocol_client_active = 0;
 		return 0;
@@ -1948,8 +2127,12 @@ void *datum_protocol_client(void *args) {
 			}
 		}
 		
-		// Queue up sends for PoW submissions
-		datum_protocol_pow_queue_submits();
+		// Never encrypt queued shares with pre-handshake keys. A successful
+		// configuration either resumes them or explicitly discards them.
+		if (datum_state == 3) {
+			datum_protocol_replay_unanswered();
+			datum_protocol_pow_queue_submits();
+		}
 		
 		pthread_mutex_lock(&datum_protocol_send_buffer_lock);
 		if (server_out_buf) {
@@ -2181,7 +2364,6 @@ void *datum_protocol_client(void *args) {
 	close(sockfd);
 	close(epollfd);
 	datum_protocol_client_active = 0;
-	datum_queue_free(&pow_queue);
 	
 	// Wait up to 5 seconds for another thread to reconnect
 	for (i = 2000; i; --i) {

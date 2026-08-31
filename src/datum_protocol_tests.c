@@ -38,26 +38,22 @@
 
 #include "datum_conf.h"
 #include "datum_pow.h"
-#include "datum_protocol.h"
+#include "datum_protocol_internal.h"
 #include "datum_utils.h"
 
-int datum_protocol_share_response(int len, unsigned char *data);
-int datum_protocol_client_configure(int len, unsigned char *data);
-int datum_protocol_mining_cmd5(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data);
-extern unsigned char datum_protocol_next_job_idx;
-extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
-extern unsigned char datum_state;
-
-static void datum_protocol_config_v2_tests(void) {
+static void datum_protocol_config_v3_tests(void) {
 	global_config_t saved_config = datum_config;
 	const unsigned char saved_state = datum_state;
-	unsigned char payload[64] = {0};
+	unsigned char payload[128] = {0};
 	size_t i = 0;
 	
-	payload[i++] = 2;
+	payload[i++] = 3;
 	payload[i++] = 1;
 	payload[i++] = 0x51;
 	pk_u64le(payload, i, UINT64_C(0x887766555d965e4e)); i += 8;
+	pk_u64le(payload, i, UINT64_C(0x887766555d965e4e));
+	memset(payload + i + 8, 0x5a, 32);
+	i += 40;
 	payload[i++] = 3;
 	memcpy(payload + i, "tag", 3); i += 3;
 	pk_u64le(payload, i, 1024); i += 8;
@@ -70,10 +66,33 @@ static void datum_protocol_config_v2_tests(void) {
 	datum_test(datum_config.override_mining_pool_scriptsig[0] == 0x51);
 	datum_test(!strcmp(datum_config.override_mining_coinbase_tag_primary, "tag"));
 	datum_test(datum_config.override_vardiff_min == 1024);
-	payload[0] = 1;
+	payload[0] = 2;
 	datum_test(!datum_protocol_client_configure((int)i, payload));
 	datum_config = saved_config;
 	datum_state = saved_state;
+}
+
+static void datum_protocol_resume_tests(void) {
+	T_DATUM_PROTOCOL_POW pow = {0};
+	const unsigned char message[] = {0x27, 0xFE};
+	
+	datum_protocol_replay_clear();
+	pow.nonce = UINT64_C(0x100000009);
+	pow.target_byte = 10;
+	pow.datum_job_id = 3;
+	datum_test(datum_protocol_replay_add(&pow, message, sizeof(message)) != NULL);
+	datum_test(datum_replay_count == 1);
+	datum_protocol_replay_mark_responded_legacy(8, 10, 3);
+	datum_test(datum_replay_count == 1);
+	datum_protocol_replay_mark_responded_legacy(9, 10, 3);
+	datum_test(datum_replay_count == 0);
+	
+	datum_test(datum_protocol_replay_add(&pow, message, sizeof(message)) != NULL);
+	pow.nonce = UINT64_C(0x200000009);
+	datum_test(datum_protocol_replay_add(&pow, message, sizeof(message)) != NULL);
+	datum_protocol_replay_mark_responded_legacy(9, 10, 3);
+	datum_test(datum_replay_count == 2);
+	datum_protocol_replay_clear();
 }
 
 static void datum_protocol_migration_tests(void) {
@@ -417,8 +436,9 @@ static void datum_pow_recycled_protocol_job_test(void) {
 }
 
 void datum_protocol_tests(void) {
-	datum_protocol_config_v2_tests();
+	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
+	datum_protocol_resume_tests();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 }
