@@ -31,7 +31,7 @@ With the current version of the protocol, the pool does block validation after c
 
 The protocol is not specific to a pooled reward system, as the Gateway coordinates the appropriate generation transaction with the pool.  However, in the spirit of maximum decentralization, the pool should implement rewarding miners directly from generated payouts, such as with CONVOY's TIDES reward system.
 
-![DATUM v0 2-beta recommended setup - network diagram](doc/DATUM_recommended_setup-network_diagram.svg)
+![DATUM recommended setup - network diagram](doc/DATUM_recommended_setup-network_diagram.svg)
 
 ## Requirements
 
@@ -59,8 +59,7 @@ Your Bitcoin node must be configured to construct blocks as you desire.  Bitcoin
 
 At this time, you must also reserve some block space for the pool's generation transaction.  The following options are currently recommended:
 
-    blockmaxsize=3985000
-    blockmaxweight=3985000
+    blockmaxweight=785000
 
 Note: This reservation requirement will be removed for Bitcoin Knots users in a future version of the DATUM Gateway thanks to support for on-the-fly specification of these metrics by the client in Knots.
 
@@ -77,7 +76,6 @@ Finally, the Gateway must have RPC access to your node, and you must add an RPC 
 Some additional recommendations:
 
     maxmempool=1000
-    blockreconstructionextratxn=1000000
 
 As a true miner, you'll most likely want as many valid transactions as possible in your mempool which meet your node's policies.
 
