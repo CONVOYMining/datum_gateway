@@ -48,6 +48,7 @@
 #include <unistd.h>
 
 #include "datum_conf.h"
+#include "datum_pow.h"
 #include "datum_utils.h"
 #include "datum_stratum.h"
 #include "datum_jsonrpc.h"
@@ -167,7 +168,7 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 		uchar_to_hex(&cb[i], (datum_config.coinbase_unique_id&0xFF)); i+=2; cb_input_sz++;
 		uchar_to_hex(&cb[i], ((datum_config.coinbase_unique_id>>8)&0xFF)); i+=2; cb_input_sz++;
 	} else {
-		uchar_to_hex(&cb[i], 0x07); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], 0x0B); i+=2; cb_input_sz++;
 		if (target_pot_index != NULL) *target_pot_index = cb_input_sz;
 		uchar_to_hex(&cb[i], 0xFF); i+=2; cb_input_sz++; // placeholder for PoT target
 		uchar_to_hex(&cb[i], (datum_config.coinbase_unique_id&0xFF)); i+=2; cb_input_sz++;
@@ -176,6 +177,10 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 		uchar_to_hex(&cb[i], ((datum_config.prime_id>>8)&0xFF)); i+=2; cb_input_sz++;
 		uchar_to_hex(&cb[i], ((datum_config.prime_id>>16)&0xFF)); i+=2; cb_input_sz++;
 		uchar_to_hex(&cb[i], ((datum_config.prime_id>>24)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>32)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>40)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>48)&0xFF)); i+=2; cb_input_sz++;
+		uchar_to_hex(&cb[i], ((datum_config.prime_id>>56)&0xFF)); i+=2; cb_input_sz++;
 	}
 	
 	return cb_input_sz;
@@ -317,8 +322,8 @@ int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_
 	i = fixed_bytes + max_sz;
 	msz1 = max_sz+fixed_bytes;
 	
-	if ((i+s->block_template->txn_total_size+85+36) > s->block_template->sizelimit) {
-		j = s->block_template->sizelimit - (s->block_template->txn_total_size+85+36) - fixed_bytes;
+	if ((i+s->block_template->txn_total_size+DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5+36) > s->block_template->sizelimit) {
+		j = s->block_template->sizelimit - (s->block_template->txn_total_size+DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5+36) - fixed_bytes;
 		if (j < 0) return 0;
 		msz1 = j;
 	}
@@ -757,6 +762,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 			s->subsidy_only_coinbase.coinb2_len++;
 		}
 	}
+
+	datum_stratum_job_refresh_blake2b(s);
 }
 
 int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, int cblen, bool must_free) {

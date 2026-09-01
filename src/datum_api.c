@@ -89,17 +89,47 @@ static void html_leading_zeros(char * const buffer, const size_t buffer_size, co
 	}
 }
 
+static void datum_api_format_share_counts(char *buffer, size_t buffer_size, uint64_t count, uint64_t diff) {
+	snprintf(buffer, buffer_size, "%llu  (%llu diff)", (unsigned long long)count, (unsigned long long)diff);
+}
+
+void datum_api_var_STRATUM_SHARES_ACCEPTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+	(void)vardata;
+	datum_api_format_share_counts(buffer, buffer_size,
+		__atomic_load_n(&stratum_client_accepted_share_count, __ATOMIC_RELAXED),
+		__atomic_load_n(&stratum_client_accepted_share_diff, __ATOMIC_RELAXED));
+}
+void datum_api_var_STRATUM_SHARES_REJECTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+	(void)vardata;
+	datum_api_format_share_counts(buffer, buffer_size,
+		__atomic_load_n(&stratum_client_rejected_share_count, __ATOMIC_RELAXED),
+		__atomic_load_n(&stratum_client_rejected_share_diff, __ATOMIC_RELAXED));
+}
 void datum_api_var_DATUM_SHARES_ACCEPTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%llu  (%llu diff)", (unsigned long long)datum_accepted_share_count, (unsigned long long)datum_accepted_share_diff);
+	(void)vardata;
+	if (!datum_config.datum_pool_host[0]) {
+		snprintf(buffer, buffer_size, "N/A");
+		return;
+	}
+	datum_api_format_share_counts(buffer, buffer_size, datum_accepted_share_count, datum_accepted_share_diff);
 }
 void datum_api_var_DATUM_SHARES_REJECTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%llu  (%llu diff)", (unsigned long long)datum_rejected_share_count, (unsigned long long)datum_rejected_share_diff);
+	(void)vardata;
+	if (!datum_config.datum_pool_host[0]) {
+		snprintf(buffer, buffer_size, "N/A");
+		return;
+	}
+	datum_api_format_share_counts(buffer, buffer_size, datum_rejected_share_count, datum_rejected_share_diff);
 }
 void datum_api_var_DATUM_CONNECTION_STATUS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	const char *colour = "lime";
 	const char *s, *s2 = "";
 	const char * const bt_err = datum_blocktemplates_error;
-	if (bt_err) {
+	if (!datum_protocol_abw_health_ok()) {
+		colour = "red";
+		s = "CRITICAL: ";
+		s2 = "DATUM pool ignored a valid block";
+	} else if (bt_err) {
 		colour = "red";
 		s = "ERROR: ";
 		s2 = bt_err;
@@ -227,6 +257,8 @@ void datum_api_var_STRATUM_JOB_TXNCOUNT(char *buffer, size_t buffer_size, const 
 
 
 DATUM_API_VarEntry var_entries[] = {
+	{"STRATUM_SHARES_ACCEPTED", datum_api_var_STRATUM_SHARES_ACCEPTED},
+	{"STRATUM_SHARES_REJECTED", datum_api_var_STRATUM_SHARES_REJECTED},
 	{"DATUM_SHARES_ACCEPTED", datum_api_var_DATUM_SHARES_ACCEPTED},
 	{"DATUM_SHARES_REJECTED", datum_api_var_DATUM_SHARES_REJECTED},
 	{"DATUM_CONNECTION_STATUS", datum_api_var_DATUM_CONNECTION_STATUS},
@@ -1330,6 +1362,15 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		if (val_bool == datum_config.datum_always_pay_self) return true;
 		datum_config.datum_always_pay_self = val_bool;
 		datum_api_json_modify_new("datum", "always_pay_self", json_boolean(val_bool));
+	} else if (0 == strcmp(key, "mining_allow_hasher_time_rolling")) {
+		bool val_bool;
+		if (!datum_str_to_bool_strict(val, &val_bool)) {
+			json_array_append_new(errors, json_string_nocheck("\"Allow hasher time rolling for BLAKE2b jobs\" must be 0 or 1"));
+			return false;
+		}
+		if (val_bool == datum_config.mining_allow_hasher_time_rolling) return true;
+		datum_config.mining_allow_hasher_time_rolling = val_bool;
+		datum_api_json_modify_new("mining", "allow_hasher_time_rolling", json_boolean(val_bool));
 	} else if (0 == strcmp(key, "bitcoind_work_update_seconds")) {
 		const int val_int = datum_atoi_strict(val, strlen(val));
 		if (val_int == datum_config.bitcoind_work_update_seconds) return true;

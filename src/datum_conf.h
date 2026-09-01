@@ -128,6 +128,8 @@ typedef struct {
 	char mining_coinbase_tag_primary[64];
 	char mining_coinbase_tag_secondary[64];
 	char mining_save_submitblocks_dir[256];
+	bool mining_allow_hasher_time_rolling;
+	bool mining_abw_verify_all_shares_on_disclosure;
 	int coinbase_unique_id;
 	
 	char api_admin_password[72];
@@ -153,6 +155,11 @@ typedef struct {
 	
 	char datum_pool_host[1024];
 	int datum_pool_port;
+	char datum_pool_migration_host[1024];
+	int datum_pool_migration_port;
+	char datum_pool_migration_pubkey[129];
+	uint64_t datum_pool_migration_deadline_ms;
+	int datum_pool_migration_max_seconds;
 	bool datum_pool_pass_workers;
 	bool datum_pool_pass_full_users;
 	bool datum_always_pay_self;
@@ -161,7 +168,7 @@ typedef struct {
 	int datum_protocol_global_timeout;
 	uint64_t datum_protocol_global_timeout_ms;
 	
-	uint32_t prime_id;
+	uint64_t prime_id;
 	unsigned char override_mining_pool_scriptsig[256];
 	int override_mining_pool_scriptsig_len;
 	char override_mining_coinbase_tag_primary[256];

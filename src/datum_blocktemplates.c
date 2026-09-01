@@ -53,6 +53,8 @@
 #include "datum_blocktemplates.h"
 #include "datum_conf.h"
 #include "datum_stratum.h"
+#include "datum_pow.h"
+#include "datum_protocol.h"
 
 volatile sig_atomic_t new_notify = 0;
 atomic_int new_notify_threadsafe = 0;
@@ -86,6 +88,7 @@ void datum_blocktemplates_notify_othercause() {
 T_DATUM_TEMPLATE_DATA *template_data = NULL;
 
 int next_template_index = 0;
+static uint64_t next_template_generation = 1;
 
 const char *datum_blocktemplates_error = NULL;
 
@@ -131,6 +134,22 @@ void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
 	p->txns = p->local_data;
 }
 
+bool datum_gbt_rules_want_blake2b(json_t *gbt) {
+	json_t *jval, *rule;
+	const char *s;
+	size_t ri;
+	
+	if (!gbt) return false;
+	jval = json_object_get(gbt, "rules");
+	if (!json_is_array(jval)) return false;
+	json_array_foreach(jval, ri, rule) {
+		s = json_string_value(rule);
+		if (s && s[0] == '!') s++;
+		if (s && !strcmp(s, "blake2b")) return true;
+	}
+	return false;
+}
+
 T_DATUM_TEMPLATE_DATA *get_next_template_ptr(void) {
 	T_DATUM_TEMPLATE_DATA *p;
 	
@@ -139,6 +158,8 @@ T_DATUM_TEMPLATE_DATA *get_next_template_ptr(void) {
 	p = &template_data[next_template_index];
 	
 	datum_template_clear(p);
+	p->generation = next_template_generation++;
+	if (!next_template_generation) next_template_generation = 1;
 	
 	next_template_index++;
 	if (next_template_index >= MAX_TEMPLATES_IN_MEMORY) {
@@ -153,6 +174,7 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 	const char *s;
 	int i,j;
 	json_t *tx_array, *jval;
+	bool want_blake2b;
 	
 	tdata = get_next_template_ptr();
 	if (!tdata) {
@@ -205,6 +227,12 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 	tdata->version = json_integer_value(json_object_get(gbt, "version"));
 	if (!tdata->version) {
 		DLOG_ERROR("Missing data from GBT JSON (version)");
+		return NULL;
+	}
+
+	want_blake2b = datum_gbt_rules_want_blake2b(gbt);
+	if (!want_blake2b) {
+		DLOG_ERROR("GBT does not support the blake2b rule");
 		return NULL;
 	}
 	
@@ -446,7 +474,7 @@ void *datum_gateway_template_thread(void *args) {
 		i++;
 		
 		// fetch latest template
-		snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
+		snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
 		gbt = bitcoind_json_rpc_call(tcurl, &datum_config, gbt_req);
 		
 		if (!gbt) {
@@ -462,6 +490,10 @@ void *datum_gateway_template_thread(void *args) {
 			} else {
 				DLOG_DEBUG("DEBUG: calling datum_gbt_parser (new=%d)", was_notified?1:0);
 				t = datum_gbt_parser(res_val);
+				if (t && !datum_protocol_abw_apply_active(t)) {
+					DLOG_DEBUG("Waiting for the active BLAKE2b anti-withholding assignment");
+					t = NULL;
+				}
 				
 				if (t) {
 					datum_blocktemplates_error = NULL;

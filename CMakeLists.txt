@@ -19,19 +19,28 @@ include(GNUInstallDirs)
 
 add_executable(datum_gateway
 	src/datum_blocktemplates.c
+	src/datum_blocktemplates_tests.c
 	src/datum_coinbaser.c
+	src/datum_coinbaser_tests.c
 	src/datum_conf.c
 	src/datum_conf_tests.c
 	src/datum_gateway.c
 	src/datum_jsonrpc.c
 	src/datum_logger.c
+	src/datum_parent_fetch.c
+	src/datum_parent_fetch_tests.c
+	src/datum_pow.c
+	src/datum_pow_tests.c
 	src/datum_protocol.c
+	src/datum_protocol_tests.c
 	src/datum_queue.c
 	src/datum_sockets.c
 	src/datum_stratum.c
 	src/datum_stratum_dupes.c
+	src/datum_stratum_dupes_tests.c
 	src/datum_stratum_tests.c
 	src/datum_submitblock.c
+	src/datum_submitblock_tests.c
 	src/datum_utils.c
 	src/datum_utils_tests.c
 	src/thirdparty_base58.c
@@ -68,6 +77,7 @@ find_package(Threads REQUIRED)
 
 include(CheckFunctionExists)
 include(CheckLibraryExists)
+include(CheckSymbolExists)
 include(CMakePushCheckState)
 cmake_push_check_state(RESET)
 string(APPEND CMAKE_REQUIRED_FLAGS -Wno-error)
@@ -79,17 +89,42 @@ if(LIBM)
 endif()
 
 set(ARGP_LIBS "")
+set(ARGP_INCLUDE_DIRS "")
 check_function_exists(argp_parse HAVE_ARGP_PARSE)
 if(NOT HAVE_ARGP_PARSE)
-	check_library_exists(argp argp_parse "" ARGP)
-	if(NOT ARGP AND CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-		# Workaround bug where CMake doesn't check the standard install location on FreeBSD
-		unset(ARGP CACHE)
-		check_library_exists(argp argp_parse "/usr/local/lib" ARGP)
+	find_path(ARGP_INCLUDE_DIR argp.h
+		HINTS
+		/opt/homebrew/opt/argp-standalone
+		/usr/local/opt/argp-standalone
+		/usr/local
+		PATH_SUFFIXES include
+	)
+	find_library(ARGP_LIBRARY argp
+		HINTS
+		/opt/homebrew/opt/argp-standalone
+		/usr/local/opt/argp-standalone
+		/usr/local
+		PATH_SUFFIXES lib
+	)
+	if(ARGP_INCLUDE_DIR AND ARGP_LIBRARY)
+		list(APPEND ARGP_INCLUDE_DIRS "${ARGP_INCLUDE_DIR}")
+		list(APPEND ARGP_LIBS "${ARGP_LIBRARY}")
+	else()
+		check_library_exists(argp argp_parse "" ARGP)
+		if(NOT ARGP AND CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+			# Workaround bug where CMake doesn't check the standard install location on FreeBSD
+			unset(ARGP CACHE)
+			check_library_exists(argp argp_parse "/usr/local/lib" ARGP)
+		endif()
+		if(ARGP)
+			list(APPEND ARGP_LIBS "argp")
+		endif()
 	endif()
-	if(ARGP)
-		list(APPEND ARGP_LIBS "argp")
-	endif()
+endif()
+
+check_symbol_exists(pthread_mutex_timedlock "pthread.h" HAVE_PTHREAD_MUTEX_TIMEDLOCK)
+if(HAVE_PTHREAD_MUTEX_TIMEDLOCK)
+	target_compile_definitions(datum_gateway PRIVATE HAVE_PTHREAD_MUTEX_TIMEDLOCK)
 endif()
 
 check_function_exists(epoll_wait HAVE_EPOLL_WAIT)
@@ -121,6 +156,7 @@ add_custom_command(
 target_include_directories(datum_gateway
 	PRIVATE
 	$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
+	${ARGP_INCLUDE_DIRS}
 	${EPOLL_SHIM_INCLUDE_DIRS}
 	${CURL_INCLUDE_DIRS}
 	${JANSSON_INCLUDE_DIRS}
@@ -128,6 +164,7 @@ target_include_directories(datum_gateway
 )
 target_link_directories(datum_gateway
 	PUBLIC
+	${EPOLL_SHIM_LIBRARY_DIRS}
 	${CURL_LIBRARY_DIRS}
 	${JANSSON_LIBRARY_DIRS}
 	${SODIUM_LIBRARY_DIRS}

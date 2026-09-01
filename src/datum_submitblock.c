@@ -35,6 +35,8 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <time.h>
 #include <curl/curl.h>
 #include <pthread.h>
 #include <jansson.h>
@@ -47,6 +49,7 @@ pthread_mutex_t submitblock_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t submitblock_cond = PTHREAD_COND_INITIALIZER;
 int submit_block_triggered = 0;
 const char *submitblock_ptr = NULL;
+bool submitblock_ptr_owned = false;
 char submitblock_hash[256] = { 0 };
 
 void preciousblock(CURL *curl, char *blockhash) {
@@ -120,10 +123,14 @@ void *datum_submitblock_thread(void *ptr) {
 					datum_submitblock_doit(tcurl,(char *)datum_config.extra_block_submissions_urls[i],submitblock_ptr,submitblock_hash);
 				}
 			}
+			if (submitblock_ptr_owned) free((void *)submitblock_ptr);
+			submitblock_ptr = NULL;
+			submitblock_ptr_owned = false;
 		}
 		
 		// Reset the event flag
 		submit_block_triggered = 0;
+		pthread_cond_broadcast(&submitblock_cond);
 		
 		// Unlock the mutex after processing
 		pthread_mutex_unlock(&submitblock_mutex);
@@ -134,35 +141,40 @@ void *datum_submitblock_thread(void *ptr) {
 
 void datum_submitblock_waitfree(void) {
 	pthread_mutex_lock(&submitblock_mutex);
-	DLOG_DEBUG("DEBUG: Lock acquired.");
+	while (submit_block_triggered || submitblock_ptr != NULL) {
+		pthread_cond_wait(&submitblock_cond, &submitblock_mutex);
+	}
 	pthread_mutex_unlock(&submitblock_mutex);
 }
 
-void datum_submitblock_trigger(const char *ptr, const char *hash) {
-	// Lock the mutex before updating and triggering the event
-	
-	int i;
-	for(i=0;i<100;i++) {
-		if (pthread_mutex_trylock(&submitblock_mutex) == 0) {
-			// Update the shared data
-			submitblock_ptr = ptr;
-			strcpy(submitblock_hash, hash);
-			
-			// Set the event flag and signal the condition variable
-			submit_block_triggered = 1;
-			pthread_cond_signal(&submitblock_cond);
-			
-			// Unlock the mutex
-			pthread_mutex_unlock(&submitblock_mutex);
-			return;
-		}
-		
-		usleep(1000);
+static bool datum_submitblock_trigger_internal(
+	const char *ptr, const char *hash, bool owned) {
+	if (!ptr || !hash || strlen(hash) >= sizeof(submitblock_hash)) {
+		DLOG_ERROR("Invalid block submission request");
+		return false;
 	}
 	
-	DLOG_ERROR("Could not acquire a lock on the submitblock thread after 100ms! This might be bad!");
-	return;
+	pthread_mutex_lock(&submitblock_mutex);
+	while (submit_block_triggered || submitblock_ptr != NULL) {
+		pthread_cond_wait(&submitblock_cond, &submitblock_mutex);
+	}
+	submitblock_ptr = ptr;
+	submitblock_ptr_owned = owned;
+	strcpy(submitblock_hash, hash);
+	submit_block_triggered = 1;
+	pthread_cond_signal(&submitblock_cond);
+	pthread_mutex_unlock(&submitblock_mutex);
+	return true;
 }
+
+void datum_submitblock_trigger(const char *ptr, const char *hash) {
+	datum_submitblock_trigger_internal(ptr, hash, false);
+}
+
+bool datum_submitblock_trigger_owned(char *ptr, const char *hash) {
+	return datum_submitblock_trigger_internal(ptr, hash, true);
+}
+
 
 void datum_submitblock_init(void) {
 	// TODO: Handle rare issues.

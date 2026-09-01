@@ -36,8 +36,11 @@
 #ifndef _DATUM_SUBMITBLOCK_H_
 #define _DATUM_SUBMITBLOCK_H_
 
+#include <stdbool.h>
+
 void datum_submitblock_init(void);
 void datum_submitblock_trigger(const char *ptr, const char *hash);
+bool datum_submitblock_trigger_owned(char *ptr, const char *hash);
 void datum_submitblock_waitfree(void);
 
 #endif

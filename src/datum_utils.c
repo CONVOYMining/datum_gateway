@@ -71,26 +71,6 @@ bool datum_test_fail_(const char *expr, const char *file, unsigned int line, con
 	return false;
 }
 
-void get_target_from_diff(unsigned char *result, uint64_t diff) {
-	uint64_t dividend_parts[4] = {0, 0, 0, 0x00000000FFFF0000};
-	uint64_t remainder = 0;
-	uint64_t quotient;
-	
-	memset(result, 0, 32);
-	
-	for (int i = 3; i >= 0; i--) {
-		__uint128_t temp = remainder;
-		temp = (temp << 64) | dividend_parts[i];
-		
-		quotient = temp / diff;
-		remainder = temp % diff;
-		
-		for (int j = 0; j < 8; j++) {
-			result[(i<<3) + j] = (quotient >> (j<<3)) & 0xFF;
-		}
-	}
-}
-
 uint64_t get_process_uptime_seconds() {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -318,6 +298,16 @@ int append_bitcoin_varint_hex(uint64_t n, char *s) {
 }
 
 int append_UNum_hex(uint64_t n, char *s) {
+	if (n == 0) {
+		memcpy(s, "00", 3); // OP_0
+		return 2;
+	}
+	if (n <= 16) {
+		uchar_to_hex(s, (uint8_t)(0x50 + n)); // OP_1 through OP_16
+		s[2] = '\0';
+		return 2;
+	}
+	
 	int count = 0;
 	uint64_t temp = n;
 	bool last_msb = false;

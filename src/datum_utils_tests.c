@@ -117,7 +117,33 @@ void datum_utils_tests_secure_strequals(void) {
 	datum_test(datum_secure_strequals(NULL, 0, ""));
 }
 
+void datum_utils_tests_scriptnum(void) {
+	char encoded[32];
+
+	datum_test(append_UNum_hex(0, encoded) == 2);
+	datum_test(!strcmp(encoded, "00"));
+	datum_test(append_UNum_hex(1, encoded) == 2);
+	datum_test(!strcmp(encoded, "51"));
+	datum_test(append_UNum_hex(16, encoded) == 2);
+	datum_test(!strcmp(encoded, "60"));
+	datum_test(append_UNum_hex(17, encoded) == 4);
+	datum_test(!strcmp(encoded, "0111"));
+	datum_test(append_UNum_hex(127, encoded) == 4);
+	datum_test(!strcmp(encoded, "017f"));
+	datum_test(append_UNum_hex(128, encoded) == 6);
+	datum_test(!strcmp(encoded, "028000"));
+	datum_test(append_UNum_hex(32768, encoded) == 8);
+	datum_test(!strcmp(encoded, "03008000"));
+}
+
+static void datum_utils_tests_pdiff_to_bdiff(void) {
+	datum_test(datum_pdiff_to_bdiff(1) == 0.9999847412109375L);
+	datum_test(datum_pdiff_to_bdiff(16) == 15.999755859375L);
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
 	datum_utils_tests_secure_strequals();
+	datum_utils_tests_scriptnum();
+	datum_utils_tests_pdiff_to_bdiff();
 }

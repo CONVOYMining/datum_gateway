@@ -158,23 +158,24 @@ void datum_stratum_dupes_reorganize(T_DATUM_STRATUM_DUPES *dupes) {
 		// we'll use ntime as an indicator, since obvious ntime cant be zero
 		if (dupes->ptr[i].ntime == 0) break;
 		
-		if (!dupes->index[dupes->ptr[i].nonce_high]) {
+		const uint16_t nonce_index = dupes->ptr[i].nonce & 0xffff;
+		if (!dupes->index[nonce_index]) {
 			// easy. this is the first
-			dupes->index[dupes->ptr[i].nonce_high] = &dupes->ptr[i];
+			dupes->index[nonce_index] = &dupes->ptr[i];
 			dupes->ptr[i].next = NULL;
 			continue;
 		}
 		
-		q = dupes->index[dupes->ptr[i].nonce_high];
+		q = dupes->index[nonce_index];
 		p = NULL;
 		do {
-			if (q->nonce_low > dupes->ptr[i].nonce_low) {
+			if (q->nonce > dupes->ptr[i].nonce) {
 				if (p) {
 					// insert after p
 					p->next = &dupes->ptr[i];
 				} else {
 					// insert as first entry, before this one
-					dupes->index[dupes->ptr[i].nonce_high] = &dupes->ptr[i];
+					dupes->index[nonce_index] = &dupes->ptr[i];
 				}
 				dupes->ptr[i].next = q;
 				break;
@@ -245,22 +246,21 @@ void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe) {
 	datum_stratum_dupes_reorganize(dupes);
 }
 
-T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dupes, unsigned int nonce, unsigned short job_index, unsigned int ntime_val, unsigned int version_bits, unsigned char *extranonce_bin, T_DATUM_STRATUM_DUPE_ITEM *insert_after) {
+T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dupes, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int version_bits, unsigned char *extranonce_bin, T_DATUM_STRATUM_DUPE_ITEM *insert_after) {
 	T_DATUM_STRATUM_DUPE_ITEM *i;
-	
+
 	i = &dupes->ptr[dupes->current_items];
 	if (!i) {
 		DLOG_FATAL("Could not add entry to dupe table!");
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
-	i->nonce_high = nonce&0xFFFF;
-	i->nonce_low = (nonce>>16) & 0xFFFF;
+	i->nonce = nonce;
 	i->job_index = job_index;
 	i->ntime = ntime_val;
 	i->version_bits = version_bits;
-	i->extra_nonce_a = *((uint64_t *)&extranonce_bin[0]);
-	i->extra_nonce_b = *((uint32_t *)&extranonce_bin[8]);
+	i->extra_nonce_a = upk_u64le(extranonce_bin, 0);
+	i->extra_nonce_b = upk_u32le(extranonce_bin, 8);
 	if (!insert_after) {
 		// is a new entry
 		i->next = NULL;
@@ -277,13 +277,12 @@ T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dup
 	return i;
 }
 
-bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, unsigned int nonce, unsigned short job_index, unsigned int ntime_val, unsigned int version_bits, unsigned char *extranonce_bin) {
+bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int version_bits, unsigned char *extranonce_bin) {
 	// check if a share is a dupe
 	// if so, say so
 	// if not, add to the
 	T_DATUM_STRATUM_DUPES *dupes;
-	unsigned short nonce_high = nonce&0xFFFF;
-	unsigned short nonce_low;
+	const uint16_t nonce_index = nonce & 0xffff;
 	
 	T_DATUM_STRATUM_DUPE_ITEM *i, *p = NULL;
 	
@@ -295,20 +294,19 @@ bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, unsigned i
 	
 	dupes = t->dupes;
 	
-	if (dupes->index[nonce_high] == NULL) {
+	if (dupes->index[nonce_index] == NULL) {
 		// first nonce of its kind!
 		// not a duplicate
 		// add the new first entry!
-		dupes->index[nonce_high] = datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, NULL);
+		dupes->index[nonce_index] = datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, NULL);
 		return false;
 	}
 	
 	// ok, there's an entry.  go through the list
-	i = dupes->index[nonce_high];
-	nonce_low = (nonce>>16) & 0xFFFF;
+	i = dupes->index[nonce_index];
 	
 	do {
-		if (i->nonce_low > nonce_low) {
+		if (i->nonce > nonce) {
 			// we've reached a nonce higher than ours, so we can't be a dupe
 			// we need to keep the list in order, so we need to insert ourselves before this entry (so, the previous entry)
 			if (p) {
@@ -316,15 +314,15 @@ bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, unsigned i
 			} else {
 				// we need to replace the first item in a list, so... let's make a new entry
 				p = datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, NULL);
-				dupes->index[nonce_high] = p;
+				dupes->index[nonce_index] = p;
 				p->next = i;
 			}
-			//LOG_PRINTF("DEBUG: Not dupe, nonce_low higher --- %d > %d", i->nonce_low, nonce_low);
+			//LOG_PRINTF("DEBUG: Not dupe");
 			return false;
 		}
 		
 		// there can be more than one nonce that's equal, so can't just assume until we pass it or
-		if (i->nonce_low == nonce_low) {
+		if (i->nonce == nonce) {
 			// same nonce as us, so need to do the slow checks
 			if (job_index == i->job_index) {
 				// same job index...
@@ -332,9 +330,9 @@ bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, unsigned i
 					// same ntime....!
 					if (version_bits == i->version_bits) {
 						// same version bits?!?!?!?
-						if (i->extra_nonce_a == *((uint64_t *)&extranonce_bin[0])) {
+						if (i->extra_nonce_a == upk_u64le(extranonce_bin, 0)) {
 							// same extra nonce 1?!?!?!??!
-							if (i->extra_nonce_b == *((uint32_t *)&extranonce_bin[8])) {
+							if (i->extra_nonce_b == upk_u32le(extranonce_bin, 8)) {
 								// ok, this is a duplicate :(
 								return true;
 							}

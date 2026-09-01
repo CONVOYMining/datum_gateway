@@ -10,9 +10,7 @@ For miners wanting to pool rewards, it facilitates communication with a DATUM-su
 
 The work provided by the gateway to mining hardware is generated only from the local node generating templates for the miner. The real miner is always whoever is running the Bitcoin node. With DATUM, that's not the pool. As the protocol is intended solely for mining of decentralized block templates, the DATUM protocol has no mechanisms for the pool providing the information needed to construct work or a block template.
 
-Currently the DATUM Gateway supports communication with mining hardware using the Stratum v1 protocol with version rolling extensions (aka "ASICBoost").  Communication with the Bitcoin node is via RPC and must support GBT ("getblocktemplate").  Finally, communication with the pool is via the DATUM protocol.
-
-**Using Bitcoin Knots is highly recommended**. This gives miners fine controls over how they wish to construct their block templates.  Other node implementations that support GBT can also be used.  This includes Bitcoin Core, but it is severely lacking in template control options.  That is unfortunately a centralizing force which partly defeats the purpose of decentralizing block template creation in the first place.
+Currently the DATUM Gateway supports communication with mining hardware using the Stratum v1 protocol. BLAKE2b and BLAKE2b-Sia miners are supported.  Communication with the Bitcoin node is via RPC and must support GBT ("getblocktemplate").  Finally, communication with the pool is via the DATUM protocol.
 
 The DATUM Gateway only supports mining Bitcoin.  Modifying the code to support non-Bitcoin is not straightforward, as many optimizations and design considerations are tightly tied to Bitcoin-specific restraints for efficiency.
 
@@ -37,8 +35,8 @@ The protocol is not specific to a pooled reward system, as the Gateway coordinat
 
 ## Requirements
 
- - 64-bit AMD or Intel system. Other systems may work, but at this time it is at your own risk.
- - Linux-based operating system. Other OSs will be supported in the future.
+ - 64-bit AMD, Intel, or Apple silicon system. Other systems may work, but at this time it is at your own risk.
+ - Linux, macOS, or FreeBSD operating system.
  - Bitcoin full node ([Bitcoin Knots](https://bitcoinknots.org/) recommended) fully synced with the Bitcoin network.
  - Fast storage recommended for the Bitcoin node.
  - Stable internet connection for both the Bitcoin node and Gateway's communication with the pool.
@@ -125,6 +123,10 @@ For Clear Linux:
 For FreeBSD:
 
     sudo pkg install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim
+
+For macOS with Homebrew:
+
+    brew install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone epoll-shim
 
 Compile DATUM by running:
 
@@ -272,6 +274,7 @@ blocknotify=wget -q -O /dev/null http://datum-gateway-host-ip:7152/NOTIFY
 
 - By default, if the connection with the pool is lost and fails to reconnect, the Gateway will disconnect all stratum clients. This way miners can use their built-in failover and switch to non-DATUM mining, or an alternate/backup Gateway.
 - Accepted/rejected share counts on mining hardware may not perfectly match with the pool. The delta may vary depending on the Gateway's configuration. This is because shares are first accepted or rejected as valid for your local template based on your local node, and then again accepted or rejected based on the pool's requirements, latency to the pool (stale work), latency between your node and the network (stale work), etc.  Stratum v1 has no mechanism to report back to the miner that previously accepted work is now rejected, and it doesn't make sense to wait for the pool before responding, either.
+- **Share statistics**: The status page always shows local shares accepted/rejected by this Gateway. When a pool host is configured, it also shows shares accepted/rejected by the DATUM pool. Those two series are tracked separately and can differ (see above). When no pool host is configured, pool share counts are shown as N/A.
 
 **Most importantly**, please note that this is currently a public **BETA** release. While best efforts have been made to ensure this software is as stable and as useful as possible, you may still encounter issues.
 

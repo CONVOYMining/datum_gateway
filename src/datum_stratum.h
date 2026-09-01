@@ -50,6 +50,7 @@
 #define MAX_STRATUM_JOBS 256
 
 #define MAX_COINBASE_TYPES 6
+#define DATUM_COINBASE_ID_EMPTY 0xff
 #define COINBASE_TYPE_TINY 0 // "empty", just pays pool
 #define COINBASE_TYPE_SMALL 1 // Nicehash needs a tiny coinb1, among other things. Max 500 bytes.
 #define COINBASE_TYPE_ANTMAIN 2 // Hack for antminer stock firmware to 750 bytes
@@ -130,9 +131,11 @@ typedef struct {
 	char nbits[10];
 	unsigned char nbits_bin[4];
 	uint32_t nbits_uint;
-	char ntime[10];
-	
+	char ntime[18];
 	unsigned char block_target[32];
+	// BLAKE2b job fields
+	uint32_t blake2b_time_on_wire;
+	uint8_t blake2b_flags;
 	
 	T_DATUM_TEMPLATE_DATA *block_template;
 	
@@ -214,12 +217,9 @@ typedef struct {
 	uint32_t sid, sid_inv;
 	uint64_t unique_id;
 	uint64_t connect_tsms;
+	char request_id_json[129];
 	char useragent[128];
 	char last_auth_username[192];
-	
-	bool extension_version_rolling;
-	uint32_t extension_version_rolling_mask;
-	unsigned char extension_version_rolling_bits;
 	
 	bool extension_minimum_difficulty;
 	double extension_minimum_difficulty_value;
@@ -268,8 +268,23 @@ const char *datum_stratum_mod_username(const char *username_s, char *username_bu
 
 int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool new_block);
 void update_stratum_job(T_DATUM_TEMPLATE_DATA *block_template, bool new_block, int job_state);
+void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s);
+bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, unsigned char *commitment);
+bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1);
+unsigned int datum_stratum_coinbase_index(const T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const T_DATUM_MINER_DATA *miner, bool new_block);
 void stratum_job_merkle_root_calc(T_DATUM_STRATUM_JOB *s, unsigned char *coinbase_txn_hash, unsigned char *merkle_root_output);
-int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work);
+int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce);
+size_t datum_stratum_coinbase_for_block_hex(char *out, size_t out_size, const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness);
+bool datum_stratum_block_needs_witness(const T_DATUM_STRATUM_JOB *job, bool subsidy_only);
+size_t datum_stratum_build_block_request_parts(char *out, size_t out_size,
+	const uint8_t *block_header,
+	const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness,
+	uint32_t transaction_count, const char *transactions_hex,
+	size_t transactions_hex_size, bool subsidy_only, size_t *header_hex_offset);
+bool datum_stratum_abw_finalize_block_request(char *request, size_t request_size,
+	size_t header_hex_offset, const uint8_t raw_pow_hash[32],
+	uint8_t xor_clear_bits, const uint8_t xor_key[16],
+	const uint8_t expected_pow_hash[32], char block_hash_hex[65]);
 void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_only);
 int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c);
 bool stratum_latest_empty_check_ready_for_full(void);
@@ -290,5 +305,11 @@ extern T_DATUM_SOCKET_APP *global_stratum_app;
 
 extern pthread_rwlock_t need_coinbaser_rwlocks[MAX_STRATUM_JOBS];
 extern bool need_coinbaser_rwlocks_init_done;
+
+// Gateway-local share totals from connected stratum miners (not pool responses)
+extern uint64_t stratum_client_accepted_share_count;
+extern uint64_t stratum_client_accepted_share_diff;
+extern uint64_t stratum_client_rejected_share_count;
+extern uint64_t stratum_client_rejected_share_diff;
 
 #endif

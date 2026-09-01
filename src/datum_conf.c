@@ -127,6 +127,11 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.coinbase_unique_id, 		.default_int = 4242 },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "mining", 		.name = "save_submitblocks_dir",	.description = "Directory to save all submitted blocks to as submitblock JSON files",
 		.required = false, .ptr = datum_config.mining_save_submitblocks_dir,			.default_string[0] = "", .max_string_len = sizeof(datum_config.mining_save_submitblocks_dir) },
+	{ .var_type = DATUM_CONF_BOOL, 		.category = "mining", 		.name = "allow_hasher_time_rolling",	.description = "Allow hasher time rolling for BLAKE2b jobs",
+		.required = false, .ptr = &datum_config.mining_allow_hasher_time_rolling, 		.default_bool = false },
+	{ .var_type = DATUM_CONF_BOOL, 		.category = "mining", 		.name = "abw_verify_all_shares_on_disclosure",	.description = "Retain ABW proofs until key disclosure and alarm if the pool ignored a block",
+		.example_default = true,
+		.required = false, .ptr = &datum_config.mining_abw_verify_all_shares_on_disclosure, 	.default_bool = true },
 	
 	// API/dashboard
 	{ .var_type = DATUM_CONF_STRING, 	.category = "api",	 		.name = "admin_password",			.description = "API password for actions/changes (username 'admin'; disabled if blank)",
@@ -178,6 +183,9 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.datum_pool_port, .default_int = 28915 },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "datum", 		.name = "pool_pubkey",					.description = "Public key of the DATUM server for initiating encrypted connection. Get from secure location, or set to empty to auto-fetch.",
 		.required = false, .ptr = datum_config.datum_pool_pubkey,		.default_string[0] = "f21f2f0ef0aa1970468f22bad9bb7f4535146f8e4a8f646bebc93da3d89b1406f40d032f09a417d94dc068055df654937922d2c89522e3e8f6f0e649de473003", .max_string_len = sizeof(datum_config.datum_pool_pubkey) },
+	{ .var_type = DATUM_CONF_INT, 		.category = "datum", 		.name = "migration_max_seconds",		.description = "Maximum time to remain away from the configured DATUM server after a server-requested migration (0 disables migration)",
+		.example_default = true,
+		.required = false, .ptr = &datum_config.datum_pool_migration_max_seconds, .default_int = 86400 },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pool_pass_workers",			.description = "Pass stratum miner usernames as sub-worker names to the pool (pool_username.miner's username)",
 		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pool_pass_workers, 		.default_bool = true },
@@ -504,6 +512,10 @@ int datum_read_config(const char *conffile) {
 	if (datum_config.bitcoind_work_update_seconds > 120) {
 		datum_config.bitcoind_work_update_seconds = 120;
 	}
+	if (datum_config.datum_pool_migration_max_seconds < 0) {
+		DLOG_FATAL("Configuration option datum.migration_max_seconds cannot be negative");
+		return -1;
+	}
 	
 	if (datum_config.bitcoind_rpcuser[0]) {
 		if (!datum_config.bitcoind_rpcpassword[0]) {
@@ -531,9 +543,8 @@ int datum_read_config(const char *conffile) {
 	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
 	if (datum_config.api_admin_password_len) {
 		static const char hash_tag[] = "DATUM Anti-CSRF Token";
-		const size_t data_max_sz = sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + sizeof(datum_config.api_admin_password);
 		const size_t data_sz = sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + datum_config.api_admin_password_len;
-		char data[data_max_sz];
+		char data[sizeof(hash_tag) + sizeof(datum_config.api_listen_port) + sizeof(datum_config.api_admin_password)];
 		strcpy(data, hash_tag);
 		memcpy(&data[sizeof(hash_tag)], &datum_config.api_listen_port, sizeof(datum_config.api_listen_port));
 		strcpy(&data[sizeof(hash_tag)+sizeof(datum_config.api_listen_port)], datum_config.api_admin_password);

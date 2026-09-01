@@ -151,6 +151,7 @@ typedef struct T_DATUM_TEMPLATE_TXN {
 
 typedef struct {
 	uint16_t	local_index; // tie to stratum work
+	uint64_t	generation; // unique identity for this use of the ring slot
 	
 	uint64_t	coinbasevalue; //
 	uint64_t	mintime; //
@@ -160,6 +161,10 @@ typedef struct {
 	uint32_t	height; //
 	uint32_t	version; //
 	uint32_t	sigoplimit; //
+	bool		abw_enabled;
+	// Internal token is the compact wire slot plus one.
+	uint8_t		abw_assignment_id;
+	uint8_t		xor_key_hash[32];
 	
 	char		bits[9]; //
 	char		dummy[7]; // unused, possibly for alignment
@@ -172,7 +177,7 @@ typedef struct {
 	
 	char		block_target_hex[72]; //
 	uint8_t		block_target[32]; // calculated from bits
-	
+
 	uint32_t 	txn_count;
 	uint32_t	txn_total_weight;
 	uint32_t	txn_total_size;
@@ -189,6 +194,7 @@ typedef struct {
 extern const char *datum_blocktemplates_error;
 
 int datum_template_init(void);
+bool datum_gbt_rules_want_blake2b(json_t *gbt);
 T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt);
 void *datum_gateway_template_thread(void *args);
 void datum_blocktemplates_notifynew_sighandler();

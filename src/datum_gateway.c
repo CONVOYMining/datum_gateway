@@ -81,9 +81,16 @@ struct arguments {
 	char *config_file;
 };
 
+void datum_blocktemplates_tests(void);
+void datum_coinbaser_tests(void);
 void datum_stratum_tests(void);
 void datum_conf_tests(void);
+void datum_parent_fetch_tests(void);
+void datum_pow_tests(void);
+void datum_protocol_tests(void);
+void datum_stratum_dupes_tests(void);
 void datum_utils_tests(void);
+void datum_submitblock_tests(void);
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 	struct arguments *arguments = state->input;
@@ -105,7 +112,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 		case 0x101:  // test
 			datum_utils_tests();
 			datum_conf_tests();
+			datum_blocktemplates_tests();
+			datum_coinbaser_tests();
+			datum_parent_fetch_tests();
+			datum_pow_tests();
+			datum_protocol_tests();
+			datum_stratum_dupes_tests();
 			datum_stratum_tests();
+			datum_submitblock_tests();
 			exit(datum_test_failed);
 		default:
 			return ARGP_ERR_UNKNOWN;

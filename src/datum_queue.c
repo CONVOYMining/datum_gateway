@@ -174,6 +174,23 @@ int datum_queue_add_item(DATUM_QUEUE *q, void *item) {
 	return 0;
 }
 
+int datum_queue_clear(DATUM_QUEUE *q) {
+	if (!q->initialized) return -1;
+	
+	pthread_rwlock_wrlock(&q->active_buffer_rwlock);
+	pthread_rwlock_wrlock(&q->buffer_rwlock[0]);
+	pthread_rwlock_wrlock(&q->buffer_rwlock[1]);
+	q->queue_next[0] = 0;
+	q->queue_next[1] = 0;
+	q->queue_version[0]++;
+	q->queue_version[1]++;
+	q->active_buffer_version = q->queue_version[q->active_buffer];
+	pthread_rwlock_unlock(&q->buffer_rwlock[1]);
+	pthread_rwlock_unlock(&q->buffer_rwlock[0]);
+	pthread_rwlock_unlock(&q->active_buffer_rwlock);
+	return 0;
+}
+
 int datum_queue_process(DATUM_QUEUE *q) {
 	// process any items in the specified queue
 	// only one thread should ever call this, realistically.
