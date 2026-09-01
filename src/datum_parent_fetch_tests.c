@@ -33,6 +33,11 @@
  *
  */
 
+// Needed for INADDR_LOOPBACK on BSD
+#if defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#define __BSD_VISIBLE 1
+#endif
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <pthread.h>
