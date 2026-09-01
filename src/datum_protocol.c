@@ -2885,7 +2885,6 @@ void *datum_protocol_client(void *args) {
 	struct addrinfo hints, *res, *p;
 	int sockfd = -1;
 	int epollfd, nfds;
-	int flag = 1;
 	struct epoll_event ev, events[MAX_DATUM_CLIENT_EVENTS];
 	struct timeval start, now;
 	int ret,i,n;
