@@ -786,11 +786,8 @@ void *datum_gateway_listener_thread(void *arg) {
 	return NULL;
 }
 
-bool datum_socket_setoptions(int sock) {
-	int opts;
-	static const int flag = 1;
-	
-	opts = fcntl(sock,F_GETFL);
+bool datum_socket_set_nonblock(const int sock) {
+	int opts = fcntl(sock, F_GETFL);
 	if (opts < 0) {
 		DLOG_ERROR("fcntl(F_GETFL) failed: %s", strerror(errno));
 		return false;
@@ -800,6 +797,13 @@ bool datum_socket_setoptions(int sock) {
 		DLOG_ERROR("fcntl(F_SETFL) failed: %s", strerror(errno));
 		return false;
 	}
+	return true;
+}
+
+bool datum_socket_setoptions(int sock) {
+	static const int flag = 1;
+	
+	if (!datum_socket_set_nonblock(sock)) return false;
 	
 	// Set the TCP_NODELAY option
 	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (void *)&flag, sizeof(flag)) < 0) {
