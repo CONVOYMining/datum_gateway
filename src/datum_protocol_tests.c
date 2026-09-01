@@ -132,8 +132,9 @@ static void datum_protocol_bulk_tests(void) {
 	const size_t payload_size = DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 1024;
 	unsigned char *payload = malloc(payload_size);
 	int sockets[2] = {-1, -1};
-	const int socket_result = socketpair(
-		AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sockets);
+	const int socket_result = socketpair(AF_UNIX, SOCK_STREAM, 0, sockets);
+	datum_test(datum_socket_set_nonblock(sockets[0]));
+	datum_test(datum_socket_set_nonblock(sockets[1]));
 	datum_test(payload != NULL);
 	datum_test(socket_result == 0);
 	if (!payload || socket_result) goto cleanup;
@@ -236,7 +237,9 @@ static void datum_protocol_bulk_tests(void) {
 	close(sockets[0]); sockets[0] = -1;
 	close(sockets[1]); sockets[1] = -1;
 	datum_protocol_bulk_reset();
-	datum_test(socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sockets) == 0);
+	datum_test(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+	datum_test(datum_socket_set_nonblock(sockets[0]));
+	datum_test(datum_socket_set_nonblock(sockets[1]));
 	receiver_header_key = sending_header_key;
 	memcpy(receiver_nonce, session_nonce_sender, sizeof(receiver_nonce));
 	datum_test(datum_protocol_mining_cmd((void *)share, sizeof(share)) == 0);
