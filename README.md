@@ -1,6 +1,6 @@
 # DATUM Gateway
 **Decentralized Alternative Templates for Universal Mining**
-(c) 2024-2025 Bitcoin Ocean, LLC, Jason Hughes, and individual contributors
+(c) 2024-2026 Bitcoin Ocean, LLC, Jason Hughes, and individual contributors
 
 The DATUM Gateway implements lightweight efficient client side decentralized block template creation for true solo mining.
 
