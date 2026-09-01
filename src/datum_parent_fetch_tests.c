@@ -133,7 +133,7 @@ void datum_parent_fetch_tests(void) {
 	parent_test_session_generation = 0;
 	parent_test_block_size = 0;
 	T_DATUM_PARENT_FETCH_TEST_SERVER server = {
-		.listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0),
+		.listen_fd = socket(AF_INET, SOCK_STREAM, 0),
 	};
 	datum_test(server.listen_fd >= 0);
 	if (server.listen_fd < 0) return;
