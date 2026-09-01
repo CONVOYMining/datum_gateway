@@ -161,68 +161,6 @@ void datum_submitblock_trigger(const char *ptr, const char *hash) {
 	pthread_mutex_unlock(&submitblock_mutex);
 }
 
-typedef struct {
-	const char *requests[2];
-	char hashes[2][256];
-	size_t consumed;
-} T_DATUM_SUBMITBLOCK_TEST_STATE;
-
-static void *datum_submitblock_test_consumer(void *ptr) {
-	T_DATUM_SUBMITBLOCK_TEST_STATE *state = ptr;
-	int i;
-	
-	usleep(10000);
-	for(i=0;i<2;i++) {
-		struct timespec deadline;
-		pthread_mutex_lock(&submitblock_mutex);
-		clock_gettime(CLOCK_REALTIME, &deadline);
-		deadline.tv_sec++;
-		while (!submit_block_triggered) {
-			int wait_result = pthread_cond_timedwait(&submitblock_cond, &submitblock_mutex, &deadline);
-			if (wait_result == ETIMEDOUT) {
-				pthread_mutex_unlock(&submitblock_mutex);
-				return NULL;
-			}
-			datum_test(wait_result == 0);
-			if (wait_result != 0) {
-				pthread_mutex_unlock(&submitblock_mutex);
-				return NULL;
-			}
-		}
-		
-		state->requests[i] = submitblock_ptr;
-		strcpy(state->hashes[i], submitblock_hash);
-		state->consumed++;
-		submitblock_ptr = NULL;
-		submit_block_triggered = 0;
-		pthread_cond_broadcast(&submitblock_cond);
-		pthread_mutex_unlock(&submitblock_mutex);
-	}
-	return NULL;
-}
-
-void datum_submitblock_tests(void) {
-	static const char first_request[] = "first block";
-	static const char second_request[] = "second block";
-	static const char first_hash[] = "00000001";
-	static const char second_hash[] = "00000002";
-	T_DATUM_SUBMITBLOCK_TEST_STATE state = {0};
-	pthread_t consumer;
-	int create_result;
-	
-	create_result = pthread_create(&consumer, NULL, datum_submitblock_test_consumer, &state);
-	datum_test(create_result == 0);
-	if (create_result != 0) return;
-	datum_submitblock_trigger(first_request, first_hash);
-	datum_submitblock_trigger(second_request, second_hash);
-	datum_submitblock_waitfree();
-	datum_test(pthread_join(consumer, NULL) == 0);
-	datum_test(state.consumed == 2);
-	datum_test(state.requests[0] == first_request);
-	datum_test(state.requests[1] == second_request);
-	datum_test(!strcmp(state.hashes[0], first_hash));
-	datum_test(!strcmp(state.hashes[1], second_hash));
-}
 
 void datum_submitblock_init(void) {
 	// TODO: Handle rare issues.

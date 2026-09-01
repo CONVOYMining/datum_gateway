@@ -19,20 +19,26 @@ include(GNUInstallDirs)
 
 add_executable(datum_gateway
 	src/datum_blocktemplates.c
+	src/datum_blocktemplates_tests.c
 	src/datum_coinbaser.c
+	src/datum_coinbaser_tests.c
 	src/datum_conf.c
 	src/datum_conf_tests.c
 	src/datum_gateway.c
 	src/datum_jsonrpc.c
 	src/datum_logger.c
 	src/datum_pow.c
+	src/datum_pow_tests.c
 	src/datum_protocol.c
+	src/datum_protocol_tests.c
 	src/datum_queue.c
 	src/datum_sockets.c
 	src/datum_stratum.c
 	src/datum_stratum_dupes.c
+	src/datum_stratum_dupes_tests.c
 	src/datum_stratum_tests.c
 	src/datum_submitblock.c
+	src/datum_submitblock_tests.c
 	src/datum_utils.c
 	src/datum_utils_tests.c
 	src/thirdparty_base58.c
