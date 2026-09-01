@@ -10,7 +10,7 @@
  *
  * ---
  *
- * Copyright (c) 2024-2025 Bitcoin Ocean, LLC & Jason Hughes
+ * Copyright (c) 2024-2026 Bitcoin Ocean, LLC, Jason Hughes, and individual contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -133,7 +133,7 @@ static struct argp argp = {options, parse_opt, args_doc, doc};
 void datum_print_banner(void) {
 	puts("");
 	puts(" *****************************************************************");
-	puts(" * DATUM Gateway --- Copyright (c) 2024-2025 Bitcoin Ocean, LLC, *");
+	puts(" * DATUM Gateway --- Copyright (c) 2024-2026 Bitcoin Ocean, LLC, *");
 	puts(" *                     Jason Hughes, and individual contributors *");
 	printf(" * git commit: %-49s *\n", GIT_COMMIT_HASH);
 	puts(" *****************************************************************");
