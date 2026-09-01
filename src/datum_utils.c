@@ -798,7 +798,13 @@ char **datum_deepcopy_charpp(const char * const * const p) {
 void datum_reexec() {
 	// FIXME: kill other threads (except logging?) before closing fds
 	
-	DIR * const D = opendir("/proc/self/fd");
+	DIR * const D = opendir(
+#ifdef __APPLE__
+	                        "/dev/fd"
+#else
+	                        "/proc/self/fd"
+#endif
+	);
 	if (D) {
 		for (struct dirent *ent; (ent = readdir(D)) != NULL; ) {
 			const int fd = datum_atoi_strict(ent->d_name, strlen(ent->d_name));
@@ -807,7 +813,13 @@ void datum_reexec() {
 		}
 		closedir(D);
 	} else {
-		DLOG_ERROR("%s: Failed to close files, this could cause issues! (Is /proc mounted?)", __func__);
+		DLOG_ERROR("%s: Failed to close files, this could cause issues! (Is "
+#ifdef __APPLE__
+			"/dev"
+#else
+			"/proc"
+#endif
+			" mounted?)", __func__);
 	}
 	
 	execv((void*)datum_argv[0], (void*)datum_argv);

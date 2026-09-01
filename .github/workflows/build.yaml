@@ -131,7 +131,7 @@ jobs:
               PKG_CACHE_DIR='/var/cache/binpkgs'
               INIT_CMD='
                 cat <<\EOF >>/etc/portage/make.conf
-          EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --quiet-build y --tree"
+          EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --quiet-build y --tree --autounmask-continue y --autounmask-keep-keywords y --autounmask-keep-masks y --autounmask-license n"
           FETCHCOMMAND="$FETCHCOMMAND --progress=dot:giga"  # assumes wget default
           EOF
 

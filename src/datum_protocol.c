@@ -71,6 +71,7 @@
 #include "datum_protocol.h"
 #include "datum_protocol_internal.h"
 #include "datum_conf.h"
+#include "datum_sockets.h"
 #include "datum_stratum.h"
 #include "datum_blocktemplates.h"
 #include "datum_coinbaser.h"
@@ -2971,18 +2972,7 @@ void *datum_protocol_client(void *args) {
 			continue;
 		}
 		
-		// Set socket to non-blocking
-		int flags = fcntl(sockfd, F_GETFL, 0);
-		if (flags == -1 || fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-			DLOG_ERROR("fcntl(...) error: %s",strerror(errno));
-			close(sockfd);
-			sockfd = -1;
-			continue;
-		}
-		
-		// TCP_NODELAY!  Probably not needed since we group sends, but can't hurt.
-		if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int)) < 0) {
-			DLOG_FATAL("setsockopt(TCP_NODELAY) failed: %s", strerror(errno));
+		if (!datum_socket_setoptions(sockfd)) {
 			close(sockfd);
 			sockfd = -1;
 			continue;

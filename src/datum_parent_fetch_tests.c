@@ -33,8 +33,14 @@
  *
  */
 
+// Needed for INADDR_LOOPBACK on BSD
+#if defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#define __BSD_VISIBLE 1
+#endif
+
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -133,7 +139,7 @@ void datum_parent_fetch_tests(void) {
 	parent_test_session_generation = 0;
 	parent_test_block_size = 0;
 	T_DATUM_PARENT_FETCH_TEST_SERVER server = {
-		.listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0),
+		.listen_fd = socket(AF_INET, SOCK_STREAM, 0),
 	};
 	datum_test(server.listen_fd >= 0);
 	if (server.listen_fd < 0) return;
