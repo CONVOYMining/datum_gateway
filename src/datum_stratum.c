@@ -1013,6 +1013,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	int i;
 	bool quickdiff = false;
 	bool empty_work = false;
+	bool was_block = false;
 	char new_notify_blockhash[65];
 	
 	// see if this is a real job
@@ -1252,6 +1253,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	if (datum_stratum_share_is_unmasked_block(job, share_hash)) {
+		was_block = true;
 		new_notify_blockhash[64] = 0;
 		for(i=0;i<32;i++) {
 			uchar_to_hex(&new_notify_blockhash[(31-i)<<1], share_hash[i]);
@@ -1259,6 +1261,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		DLOG_WARN("************************************************************************************************");
 		DLOG_WARN("******** BLOCK FOUND - %s ********", new_notify_blockhash);
 		DLOG_WARN("************************************************************************************************");
+		
+		if (job->is_datum_job) {
+			(void)datum_protocol_pow_submit(c, job, username_s, true,
+				empty_work, quickdiff, block_header, job_diff,
+				full_cb_txn, full_cb_txn_size, share_hash, cb,
+				extranonce_bin, coinbase_index);
+		}
 		
 		i = assembleBlockAndSubmit(block_header, full_cb_txn,
 			full_cb_txn_size, job, m->sdata, new_notify_blockhash,
@@ -1330,8 +1339,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// work accepted
-	if (job->is_datum_job && datum_protocol_pow_submit(c, job, username_s,
-		false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
+	if (job->is_datum_job && !was_block && datum_protocol_pow_submit(c, job,
+		username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
 		full_cb_txn_size, share_hash, cb, extranonce_bin,
 		coinbase_index) != 0) {
 		send_unknown_work_error(c, id);
@@ -1994,7 +2003,7 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	} else {
 		stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
 	}
-	if (s->is_datum_job) {
+	if (s->is_datum_job && td->abw_enabled) {
 		if (!td->abw_assignment_id) return false;
 		return datum_blake2b_header_commitment_from_key_hash(
 			commitment, td->version, td->previousblockhash_bin,
@@ -2013,7 +2022,7 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 bool datum_stratum_share_is_unmasked_block(
 	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash) {
 	return job && job->block_template && share_hash &&
-		!job->is_datum_job &&
+		(!job->is_datum_job || !job->block_template->abw_enabled) &&
 		compare_hashes(share_hash, job->block_target) <= 0;
 }
 

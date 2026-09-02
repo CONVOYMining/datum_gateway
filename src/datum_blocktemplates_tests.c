@@ -74,13 +74,19 @@ static void datum_blocktemplates_abw_mode_tests(void) {
 	
 	// Local work uses the null XOR key and needs no pool assignment.
 	datum_test(datum_blocktemplates_abw_ready(
-		&block_template, false));
+		&block_template, false, true));
+	datum_test(!block_template.abw_enabled);
+	datum_test(block_template.abw_assignment_id == 0);
+	
+	// A pool with ABW disabled also uses the null XOR key.
+	datum_test(datum_blocktemplates_abw_ready(
+		&block_template, true, false));
 	datum_test(!block_template.abw_enabled);
 	datum_test(block_template.abw_assignment_id == 0);
 	
 	// An ABW pool waits for its active assignment.
 	datum_test(!datum_blocktemplates_abw_ready(
-		&block_template, true));
+		&block_template, true, true));
 }
 
 void datum_blocktemplates_tests(void) {

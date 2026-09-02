@@ -86,9 +86,9 @@ void datum_blocktemplates_notify_othercause() {
 }
 
 bool datum_blocktemplates_abw_ready(T_DATUM_TEMPLATE_DATA *block_template,
-	bool datum_active) {
+	bool datum_active, bool abw_required) {
 	if (!block_template) return false;
-	if (!datum_active) return true;
+	if (!datum_active || !abw_required) return true;
 	return datum_protocol_abw_apply_active(block_template);
 }
 
@@ -498,7 +498,8 @@ void *datum_gateway_template_thread(void *args) {
 				DLOG_DEBUG("DEBUG: calling datum_gbt_parser (new=%d)", was_notified?1:0);
 				t = datum_gbt_parser(res_val);
 				if (t && !datum_blocktemplates_abw_ready(t,
-					datum_protocol_is_active())) {
+					datum_protocol_is_active(),
+					datum_protocol_abw_required())) {
 					DLOG_DEBUG("Waiting for the active BLAKE2b anti-withholding assignment");
 					t = NULL;
 				}

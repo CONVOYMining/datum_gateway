@@ -60,6 +60,7 @@ static void datum_protocol_config_v3_tests(void) {
 	payload[i++] = 3;
 	memcpy(payload + i, "tag", 3); i += 3;
 	pk_u64le(payload, i, 1024); i += 8;
+	const size_t config_flags = i;
 	payload[i++] = 0;
 	payload[i++] = 0xFE;
 	datum_state = 3;
@@ -69,7 +70,26 @@ static void datum_protocol_config_v3_tests(void) {
 	datum_test(datum_config.override_mining_pool_scriptsig[0] == 0x51);
 	datum_test(!strcmp(datum_config.override_mining_coinbase_tag_primary, "tag"));
 	datum_test(datum_config.override_vardiff_min == 1024);
+	unsigned char notice[36] = {
+		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 0,
+	};
+	memset(notice + 3, 0x5a, 32);
+	notice[35] = 0xFE;
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	datum_test(datum_protocol_abw_apply_active(&block_template));
 	payload[0] = 2;
+	datum_test(!datum_protocol_client_configure((int)i, payload));
+	payload[0] = 3;
+	payload[config_flags] = DATUM_CONFIG_FLAG_ABW_DISABLED;
+	datum_test(datum_protocol_client_configure((int)i, payload));
+	datum_test(!datum_protocol_abw_required());
+	memset(&block_template, 0, sizeof(block_template));
+	datum_test(!datum_protocol_abw_apply_active(&block_template));
+	payload[config_flags] = 0;
+	datum_test(datum_protocol_client_configure((int)i, payload));
+	datum_test(datum_protocol_abw_required());
+	payload[config_flags] = 0x80;
 	datum_test(!datum_protocol_client_configure((int)i, payload));
 	datum_config = saved_config;
 	datum_state = saved_state;
@@ -691,6 +711,16 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	pow.version = UINT32_C(0x20000000);
 	pow.target_byte_index = jobs[0].target_pot_index;
 	pow.target_byte = 1;
+	
+	// A pool without ABW omits section 0x05 and uses the null XOR key.
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 140);
+	datum_test(msg[39] == 0x03 && msg[40] == DATUM_POW_BLAKE2B);
+	datum_test(msg[57] == 0x04 && upk_u32le(msg, 58) == pow.time_on_wire);
+	datum_test(msg[62] == 0x01 && msg[63] == 0xa0);
+	datum_test(msg[131] == 0x02 && msg[137] == 0xc0 && msg[138] == 0xd0);
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	datum_protocol_next_job_idx = 0;
+	pow.datum_job_id = datum_protocol_setup_new_job_idx(&jobs[0]);
 	pow.abw_assignment_id = 1;
 	
 	// First use registers job 0 and its coinbase in remote slot 0.

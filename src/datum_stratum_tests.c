@@ -144,6 +144,11 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	datum_test(datum_stratum_job_blake2b_commitment(
 		&job, &job.coinbase[0], false, 14, c_local, NULL));
 	datum_test(memcmp(c_local, c_pot, sizeof(c_local)) != 0);
+	
+	// Pooled work can also operate without ABW.
+	job.is_datum_job = true;
+	datum_test(datum_stratum_job_blake2b_commitment(
+		&job, &job.coinbase[0], false, 14, c_local, NULL));
 }
 
 static void datum_blake2b_unmasked_block_tests(void) {
@@ -155,6 +160,8 @@ static void datum_blake2b_unmasked_block_tests(void) {
 	memset(job.block_target, 0xff, sizeof(job.block_target));
 	datum_test(datum_stratum_share_is_unmasked_block(&job, hash));
 	job.is_datum_job = true;
+	datum_test(datum_stratum_share_is_unmasked_block(&job, hash));
+	block_template.abw_enabled = true;
 	datum_test(!datum_stratum_share_is_unmasked_block(&job, hash));
 }
 
