@@ -148,8 +148,8 @@ typedef struct {
 	// when fetching the coinbaser, we'll just stash all of the possible and valid output scripts here
 	T_DATUM_TXN_OUTPUT available_coinbase_outputs[512];
 	int available_coinbase_outputs_count;
-	unsigned char pool_addr_script[64];
-	int pool_addr_script_len;
+	uint8_t pool_addr_script[MAX_OUTPUT_SCRIPT_LEN];
+	uint8_t pool_addr_script_len;
 	
 	// multiple coinbase options
 	// 0 = "empty" --- just pays pool addr, and possibly TIDES data.  extranonce in coinbase if fits, or in first output if not.

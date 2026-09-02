@@ -68,8 +68,8 @@ static void datum_protocol_config_v3_tests(void) {
 	atomic_store(&datum_protocol_client_active, 3);
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(datum_config.prime_id == UINT64_C(0x887766555d965e4e));
-	datum_test(datum_config.override_mining_pool_scriptsig_len == 1);
-	datum_test(datum_config.override_mining_pool_scriptsig[0] == 0x51);
+	datum_test(datum_config.override_mining_pool_scriptpubkey_len == 1);
+	datum_test(datum_config.override_mining_pool_scriptpubkey[0] == 0x51);
 	datum_test(!strcmp(datum_config.override_mining_coinbase_tag_primary, "tag"));
 	datum_test(datum_config.override_vardiff_min == 1024);
 	datum_test(!datum_protocol_is_active());

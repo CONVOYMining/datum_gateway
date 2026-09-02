@@ -356,8 +356,8 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	
 	if (datum_protocol_is_active()) {
 		// DATUM
-		s->pool_addr_script_len = datum_config.override_mining_pool_scriptsig_len;
-		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptsig, datum_config.override_mining_pool_scriptsig_len);
+		s->pool_addr_script_len = datum_config.override_mining_pool_scriptpubkey_len;
+		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptpubkey, datum_config.override_mining_pool_scriptpubkey_len);
 		s->is_datum_job = true;
 	} else {
 		// No pool
@@ -528,8 +528,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// Initial mainnet coinbaser
 	if (datum_protocol_is_active()) {
 		// DATUM
-		s->pool_addr_script_len = datum_config.override_mining_pool_scriptsig_len;
-		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptsig, datum_config.override_mining_pool_scriptsig_len);
+		s->pool_addr_script_len = datum_config.override_mining_pool_scriptpubkey_len;
+		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptpubkey, datum_config.override_mining_pool_scriptpubkey_len);
 		s->is_datum_job = true;
 		if (s->available_coinbase_outputs_count == 0) {
 			empty_only = true;

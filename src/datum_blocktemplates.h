@@ -59,6 +59,8 @@
 
 #define MAX_BLOCK_SIZE_BYTES 4000000
 
+#define MAX_OUTPUT_SCRIPT_LEN 83
+
 // Assumption notes
 
 // max possible transactions = 16394-ish .. close enough to say 16384, since we're just not going to be idiots

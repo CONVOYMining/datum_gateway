@@ -45,6 +45,8 @@
 
 #include <jansson.h>
 
+#include "datum_blocktemplates.h"
+
 enum datum_conf_vartype {
 	// NOTE: Keep in sync with datum_conf_var_type_text
 	DATUM_CONF_BOOL,
@@ -169,8 +171,8 @@ typedef struct {
 	uint64_t datum_protocol_global_timeout_ms;
 	
 	uint64_t prime_id;
-	unsigned char override_mining_pool_scriptsig[256];
-	int override_mining_pool_scriptsig_len;
+	uint8_t override_mining_pool_scriptpubkey[MAX_OUTPUT_SCRIPT_LEN];
+	uint8_t override_mining_pool_scriptpubkey_len;
 	char override_mining_coinbase_tag_primary[256];
 	uint64_t override_vardiff_min;
 } global_config_t;

@@ -1383,9 +1383,10 @@ err:
 	// read pool addr script
 	if (i >= len) goto err;
 	a = data[i]; i++;
+	if (a > MAX_OUTPUT_SCRIPT_LEN) goto err;
 	if (i + a > len) goto err;
-	memcpy(datum_config.override_mining_pool_scriptsig, &data[i], a); i+=a;
-	datum_config.override_mining_pool_scriptsig_len = a;
+	memcpy(datum_config.override_mining_pool_scriptpubkey, &data[i], a); i+=a;
+	datum_config.override_mining_pool_scriptpubkey_len = a;
 	
 	// Prime ID and the opaque token used to request this identity on reconnect.
 	if (i + 8 + DATUM_RESUME_TOKEN_SIZE > len) goto err;
@@ -1437,12 +1438,12 @@ err:
 	atomic_store(&datum_protocol_bulk_enabled, i + 6 <= len &&
 		!memcmp(data + i + 2, "DBF\x01", 4));
 	
-	memset(msg, 0, (datum_config.override_mining_pool_scriptsig_len<<1)+2);
-	for(i=0;i<datum_config.override_mining_pool_scriptsig_len;i++) {
-		uchar_to_hex(&msg[i<<1], datum_config.override_mining_pool_scriptsig[i]);
+	memset(msg, 0, (datum_config.override_mining_pool_scriptpubkey_len << 1) + 2);
+	for(i = 0; i < datum_config.override_mining_pool_scriptpubkey_len; ++i) {
+		uchar_to_hex(&msg[i << 1], datum_config.override_mining_pool_scriptpubkey[i]);
 	}
 	
-	DLOG_DEBUG("DATUM Pool Payout Scriptsig: (len %d) %s",datum_config.override_mining_pool_scriptsig_len, msg);
+	DLOG_DEBUG("DATUM Pool Payout Script:    (len %u) %s", (unsigned)datum_config.override_mining_pool_scriptpubkey_len, msg);
 	DLOG_DEBUG("DATUM Pool Coinbase Tag:     \"%s\"",datum_config.override_mining_coinbase_tag_primary);
 	DLOG_DEBUG("DATUM Pool Prime ID:         %16.16"PRIx64, datum_config.prime_id);
 	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIu64,datum_config.override_vardiff_min);
