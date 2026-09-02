@@ -76,7 +76,7 @@ static void datum_blake2b_refresh_time_offset_tests(void) {
 static void datum_blake2b_client_pot_commitment_tests(void) {
 	T_DATUM_TEMPLATE_DATA tdata;
 	T_DATUM_STRATUM_JOB job;
-	unsigned char c_ff[32], c_pot[32], c_variant[32], c_subsidy[32];
+	unsigned char c_ff[32], c_pot[32], c_variant[32], c_subsidy[32], c_local[32];
 	unsigned char c_from_txn[32];
 	unsigned char ff[39], pot[39];
 	unsigned char cb_txn[64];
@@ -92,6 +92,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	datum_test(datum_blake2b_xor_key_hash(
 		tdata.xor_key_hash, (const unsigned char[16]){0}));
 	job.block_template = &tdata;
+	job.is_datum_job = true;
 	job.blake2b_time_on_wire = 1000;
 	job.coinbase[0].coinb1_len = 20;
 	job.coinbase[0].coinb2_len = 8;
@@ -135,6 +136,26 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
 		&job, cb_txn, cb_len, 14, true, c_from_txn));
 	datum_test(!memcmp(c_from_txn, c_subsidy, 32));
+	
+	// Work without an assignment commits to the null XOR key.
+	tdata.abw_enabled = false;
+	tdata.abw_assignment_id = 0;
+	job.is_datum_job = false;
+	datum_test(datum_stratum_job_blake2b_commitment(
+		&job, &job.coinbase[0], false, 14, c_local, NULL));
+	datum_test(memcmp(c_local, c_pot, sizeof(c_local)) != 0);
+}
+
+static void datum_blake2b_unmasked_block_tests(void) {
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	unsigned char hash[32] = {0};
+	
+	job.block_template = &block_template;
+	memset(job.block_target, 0xff, sizeof(job.block_target));
+	datum_test(datum_stratum_share_is_unmasked_block(&job, hash));
+	job.is_datum_job = true;
+	datum_test(!datum_stratum_share_is_unmasked_block(&job, hash));
 }
 
 static void datum_blake2b_h_not_zero_tests(void) {
@@ -477,6 +498,7 @@ void datum_stratum_tests(void) {
 	datum_blake2b_coinbase_selection_tests();
 	datum_blake2b_h_not_zero_tests();
 	datum_blake2b_client_pot_commitment_tests();
+	datum_blake2b_unmasked_block_tests();
 	datum_stratum_abw_block_request_tests();
 	datum_blake2b_refresh_time_offset_tests();
 	datum_block_coinbase_witness_tests();

@@ -1013,6 +1013,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	int i;
 	bool quickdiff = false;
 	bool empty_work = false;
+	char new_notify_blockhash[65];
 	
 	// see if this is a real job
 	job_id = json_array_get(params_obj, 1);
@@ -1250,8 +1251,25 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		}
 	}
 	
-	// The XOR key is withheld, so only Apex can classify a network candidate
-	// before disclosure. Gateway retains enough data to audit and reconstruct it.
+	if (datum_stratum_share_is_unmasked_block(job, share_hash)) {
+		new_notify_blockhash[64] = 0;
+		for(i=0;i<32;i++) {
+			uchar_to_hex(&new_notify_blockhash[(31-i)<<1], share_hash[i]);
+		}
+		DLOG_WARN("************************************************************************************************");
+		DLOG_WARN("******** BLOCK FOUND - %s ********", new_notify_blockhash);
+		DLOG_WARN("************************************************************************************************");
+		
+		i = assembleBlockAndSubmit(block_header, full_cb_txn,
+			full_cb_txn_size, job, m->sdata, new_notify_blockhash,
+			empty_work, extranonce_bin);
+		if (i) {
+			datum_blocktemplates_notifynew(new_notify_blockhash, job->height + 1);
+		}
+	}
+	
+	// For ABW work the XOR key is withheld, so only Apex can classify a
+	// network candidate before disclosure.
 	if (job->is_stale_prevblock) {
 		// share is from a stale job
 		send_rejected_stale_block(c, id);
@@ -1976,13 +1994,27 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	} else {
 		stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
 	}
-	if (!td->abw_enabled || !td->abw_assignment_id) return false;
-	return datum_blake2b_header_commitment_from_key_hash(
+	if (s->is_datum_job) {
+		if (!td->abw_assignment_id) return false;
+		return datum_blake2b_header_commitment_from_key_hash(
+			commitment, td->version, td->previousblockhash_bin,
+			(uint32_t)td->height, merkle, s->blake2b_time_on_wire,
+			td->bits_uint, subsidy_only ? 1 : td->txn_count + 1,
+			s->blake2b_flags, datum_blake2b_abw_clear_bits(target_pot),
+			td->xor_key_hash, (const unsigned char[32]){0});
+	}
+	return datum_blake2b_header_commitment(
 		commitment, td->version, td->previousblockhash_bin,
 		(uint32_t)td->height, merkle, s->blake2b_time_on_wire, td->bits_uint,
-		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags,
-		datum_blake2b_abw_clear_bits(target_pot), td->xor_key_hash,
-		(const unsigned char[32]){0});
+		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags, 0,
+		(const unsigned char[16]){0}, (const unsigned char[32]){0});
+}
+
+bool datum_stratum_share_is_unmasked_block(
+	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash) {
+	return job && job->block_template && share_hash &&
+		!job->is_datum_job &&
+		compare_hashes(share_hash, job->block_target) <= 0;
 }
 
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1) {

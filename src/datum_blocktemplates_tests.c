@@ -68,6 +68,22 @@ static void datum_gbt_rules_blake2b_tests(void) {
 	datum_test(!datum_gbt_rules_want_blake2b(gbt));
 	json_decref(gbt);
 }
+
+static void datum_blocktemplates_abw_mode_tests(void) {
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	
+	// Local work uses the null XOR key and needs no pool assignment.
+	datum_test(datum_blocktemplates_abw_ready(
+		&block_template, false));
+	datum_test(!block_template.abw_enabled);
+	datum_test(block_template.abw_assignment_id == 0);
+	
+	// An ABW pool waits for its active assignment.
+	datum_test(!datum_blocktemplates_abw_ready(
+		&block_template, true));
+}
+
 void datum_blocktemplates_tests(void) {
 	datum_gbt_rules_blake2b_tests();
+	datum_blocktemplates_abw_mode_tests();
 }
