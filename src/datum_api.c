@@ -493,6 +493,7 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 	if (username) {
 		ret = MHD_digest_auth_check2(connection, realm, username, datum_config.api_admin_password, 300, algo);
 		free(username);
+		if (ret == MHD_YES && !datum_config.api_admin_password_len) ret = MHD_NO;
 	} else {
 		ret = MHD_NO;
 	}
