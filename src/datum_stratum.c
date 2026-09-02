@@ -930,15 +930,15 @@ const char *datum_stratum_mod_username(const char *username_s, char * const user
 	}
 	
 	const char * const tilde = &modname[-1];
+	size_t pretilde_len = tilde - username_s;
 	if (range->addr_len == 0) {
-		size_t len = tilde - username_s;
-		if (len >= username_buf_sz) len = username_buf_sz - 1;
-		memcpy(username_buf, username_s, len);
-		username_buf[len] = '\0';
+		if (pretilde_len >= username_buf_sz) pretilde_len = username_buf_sz - 1;
+		memcpy(username_buf, username_s, pretilde_len);
+		username_buf[pretilde_len] = '\0';
 		return username_buf;
 	}
 	
-	const char * const period = strchr(username_s, '.');
+	const char * const period = memchr(username_s, '.', pretilde_len);
 	if (range->addr_len >= username_buf_sz || !period) {
 		return range->addr;
 	}

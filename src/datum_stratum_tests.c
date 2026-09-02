@@ -361,7 +361,7 @@ static void datum_stratum_minimum_difficulty_configure_tests(void) {
 
 
 void datum_stratum_mod_username_tests() {
-	const char * const s_umods = "{\"x\":{\"addrA\": 0.3}, \"abc\":{\"addrB\":0.3,\"addrC\":0.3},\":)\":{\"\":0.5}}";
+	const char * const s_umods = "{\"x\":{\"addrA\": 0.3}, \"abc\":{\"addrB\":0.3,\"addrC\":0.3},\":)\":{\"\":0.5},\"a.c\":{\"addrD\":1.0}}";
 	json_error_t err;
 	json_t * const j_umods = JSON_LOADS(s_umods, &err);
 	assert(j_umods);
@@ -444,6 +444,11 @@ void datum_stratum_mod_username_tests() {
 	datum_test(0 == strcmp(buf, "def.ghi"));
 	datum_test(datum_stratum_mod_username(s, buf, sizeof(buf), 0x8000, modname, 2) == pool_addr);
 	datum_test(datum_stratum_mod_username(s, buf, sizeof(buf), 0xffff, modname, 2) == pool_addr);
+	
+	s = "xyz~a.c";
+	modname = &s[4];
+	res = datum_stratum_mod_username(s, buf, sizeof(buf), 0, modname, 3);
+	datum_test(0 == strcmp(res, "addrD"));
 	
 	// Intentionally overflow buf with address: we lose the worker name, but get the full address via its umod buffer
 	s = "def.ghi~x";
