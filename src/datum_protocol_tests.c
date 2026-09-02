@@ -47,6 +47,7 @@
 static void datum_protocol_config_v3_tests(void) {
 	global_config_t saved_config = datum_config;
 	const unsigned char saved_state = datum_state;
+	const int saved_client_active = atomic_load(&datum_protocol_client_active);
 	unsigned char payload[128] = {0};
 	size_t i = 0;
 	
@@ -64,18 +65,21 @@ static void datum_protocol_config_v3_tests(void) {
 	payload[i++] = 0;
 	payload[i++] = 0xFE;
 	datum_state = 3;
+	atomic_store(&datum_protocol_client_active, 3);
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(datum_config.prime_id == UINT64_C(0x887766555d965e4e));
 	datum_test(datum_config.override_mining_pool_scriptsig_len == 1);
 	datum_test(datum_config.override_mining_pool_scriptsig[0] == 0x51);
 	datum_test(!strcmp(datum_config.override_mining_coinbase_tag_primary, "tag"));
 	datum_test(datum_config.override_vardiff_min == 1024);
+	datum_test(!datum_protocol_is_active());
 	unsigned char notice[36] = {
 		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 0,
 	};
 	memset(notice + 3, 0x5a, 32);
 	notice[35] = 0xFE;
 	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	datum_test(datum_protocol_is_active());
 	T_DATUM_TEMPLATE_DATA block_template = {0};
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	payload[0] = 2;
@@ -84,15 +88,21 @@ static void datum_protocol_config_v3_tests(void) {
 	payload[config_flags] = DATUM_CONFIG_FLAG_ABW_DISABLED;
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(!datum_protocol_abw_required());
+	datum_test(datum_protocol_is_active());
 	memset(&block_template, 0, sizeof(block_template));
 	datum_test(!datum_protocol_abw_apply_active(&block_template));
 	payload[config_flags] = 0;
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(datum_protocol_abw_required());
+	datum_test(!datum_protocol_is_active());
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	datum_test(datum_protocol_is_active());
 	payload[config_flags] = 0x80;
 	datum_test(!datum_protocol_client_configure((int)i, payload));
+	datum_protocol_abw_reset();
 	datum_config = saved_config;
 	datum_state = saved_state;
+	atomic_store(&datum_protocol_client_active, saved_client_active);
 }
 
 static size_t datum_protocol_test_flush_read(int sender, int receiver,

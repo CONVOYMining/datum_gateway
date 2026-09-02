@@ -651,6 +651,21 @@ bool datum_protocol_abw_health_ok(void) {
 	return atomic_load(&datum_abw_health_latched);
 }
 
+static bool datum_protocol_abw_active(void) {
+	bool active;
+	pthread_mutex_lock(&datum_abw_mutex);
+	active = datum_abw_active_assignment_id != 0;
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return active;
+}
+
+static void datum_protocol_abw_deactivate(void) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	datum_abw_active_assignment_id = 0;
+	memset(datum_abw_active_key_hash, 0, sizeof(datum_abw_active_key_hash));
+	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
 static void datum_protocol_abw_pending_clear(T_DATUM_ABW_PENDING *pending) {
 	if (!pending) return;
 	free(pending->coinbase);
@@ -1036,6 +1051,7 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!activated) DLOG_ERROR("Activated ABW slot was not preseeded");
+	if (activated) datum_blocktemplates_notifynew(NULL, 0);
 	return activated ? 1 : 0;
 }
 
@@ -2892,8 +2908,8 @@ bool datum_protocol_thread_is_active(void) {
 }
 
 bool datum_protocol_is_active(void) {
-	if (datum_protocol_client_active == 3) return true;
-	return false;
+	if (datum_protocol_client_active != 3) return false;
+	return !datum_protocol_abw_required() || datum_protocol_abw_active();
 }
 
 bool datum_protocol_abw_required(void) {
@@ -2918,6 +2934,7 @@ void *datum_protocol_client(void *args) {
 	bool break_again = false;
 	T_DATUM_PROTOCOL_HEADER s_header;
 	datum_connection_configured = false;
+	datum_protocol_abw_deactivate();
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
 	for(i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {

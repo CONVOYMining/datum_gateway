@@ -43,6 +43,7 @@
 typedef struct T_DATUM_REPLAY_PENDING T_DATUM_REPLAY_PENDING;
 
 extern DATUM_ENC_PRECOMP session_precomp;
+extern atomic_int datum_protocol_client_active;
 extern unsigned char datum_state;
 extern int server_out_buf;
 extern unsigned char server_send_buffer[DATUM_PROTOCOL_BUFFER_SIZE];

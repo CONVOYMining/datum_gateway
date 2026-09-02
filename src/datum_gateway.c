@@ -219,21 +219,9 @@ int main(const int argc, const char * const * const argv) {
 		exit(1);
 	}
 	
-	// Try to connect to the DATUM server, if setup to do so.
+	// Connect concurrently so local work remains available while the pool becomes ready.
 	if (datum_config.datum_pool_host[0] != 0) {
-		while((current_time_millis()-15000 < last_datum_protocol_connect_tsms) && (!datum_protocol_is_active())) {
-			DLOG_INFO("Waiting on DATUM server... %d", (int)((last_datum_protocol_connect_tsms-(current_time_millis()-15000))/1000));
-			sleep(1);
-			if ((datum_config.datum_pool_host[0] != 0) && (!datum_protocol_thread_is_active())) {
-				datum_protocol_start_connector();
-			}
-		}
-	}
-	
-	// TODO: Churn and continue to try and connect while leaving the Stratum server down if pooled mining only
-	if (datum_config.datum_pooled_mining_only && (!datum_protocol_is_active())) {
-		DLOG_ERROR("DATUM server connection could not be established.");
-		fflush(stdout);
+		datum_protocol_start_connector();
 	}
 	
 	DLOG_DEBUG("Starting template fetcher thread");
