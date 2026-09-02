@@ -1549,6 +1549,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	if (!share_nbits) return -1;
 	
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
+	const int notify_out_buf_start = c->out_buf;
 	datum_socket_send_string_to_client(c, "{\"id\":null,\"method\":\"mining.notify\",\"params\":[");
 	
 	cbselect = datum_stratum_coinbase_index(sdata, m, new_block);
@@ -1566,8 +1567,8 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// this may look silly, but the send buffer doesn't get emptied until this thread's loop runs. so might as well just utilize it
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
-	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff,
-		blake2b_commitment, blake2bcoinb1)) {
+	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, blake2b_commitment, blake2bcoinb1)) {
+		c->out_buf = notify_out_buf_start;
 		return -1;
 	}
 	for(i=0;i<(int)sizeof(blake2bcoinb1);i++) {
