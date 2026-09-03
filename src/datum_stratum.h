@@ -120,7 +120,7 @@ typedef struct {
 	int sigops;
 } T_DATUM_TXN_OUTPUT;
 
-typedef struct {
+typedef struct T_DATUM_STRATUM_JOB {
 	int global_index;
 	
 	char job_id[24];

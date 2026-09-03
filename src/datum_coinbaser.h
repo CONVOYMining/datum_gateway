@@ -36,6 +36,10 @@
 #ifndef _DATUM_COINBASE_H_
 #define _DATUM_COINBASE_H_
 
+#define MAX_COINBASE_TAG_SPACE 82 // leaves space for BIP34 height, extranonces, datum prime tag, etc.
+
+typedef struct T_DATUM_STRATUM_JOB T_DATUM_STRATUM_JOB;
+
 int datum_coinbaser_init(void);
 int generate_coinbase_input(int height, char *cb, int *target_pot_index);
 void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1);

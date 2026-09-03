@@ -1406,6 +1406,10 @@ err:
 	// pool coinbase tag
 	if (i >= len) goto err;
 	a = data[i]; i++;
+	if (a >= MAX_COINBASE_TAG_SPACE) {
+		DLOG_ERROR("DATUM server sent a coinbase tag too long to ever fit (%u bytes)!", (unsigned)a);
+		return 0;
+	}
 	if (i + a > len) goto err;
 	memcpy(datum_config.override_mining_coinbase_tag_primary, &data[i], a); i+=a;
 	datum_config.override_mining_coinbase_tag_primary[a] = 0;

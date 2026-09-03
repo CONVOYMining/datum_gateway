@@ -46,6 +46,7 @@
 #include <jansson.h>
 
 #include "datum_blocktemplates.h"
+#include "datum_coinbaser.h"
 
 enum datum_conf_vartype {
 	// NOTE: Keep in sync with datum_conf_var_type_text
@@ -173,7 +174,7 @@ typedef struct {
 	uint64_t prime_id;
 	uint8_t override_mining_pool_scriptpubkey[MAX_OUTPUT_SCRIPT_LEN];
 	uint8_t override_mining_pool_scriptpubkey_len;
-	char override_mining_coinbase_tag_primary[256];
+	char override_mining_coinbase_tag_primary[MAX_COINBASE_TAG_SPACE + 1];
 	uint64_t override_vardiff_min;
 } global_config_t;
 
