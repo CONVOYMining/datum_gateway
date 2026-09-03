@@ -2336,7 +2336,6 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	CURL *tcurl;
 	int ret = 0;
 	bool free_submitblock_req = false;
-	char *s = NULL;
 	unsigned char v2hdr[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
 	unsigned char merkle[32];
 	unsigned char en[12];
@@ -2459,32 +2458,10 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	// make the call!
 	r = bitcoind_json_rpc_call(tcurl, &datum_config, submitblock_req);
 	curl_easy_cleanup(tcurl);
-	if (!r) {
-		// Didn't get a usable response at all: either the request never reached the node, or it
-		// returned something we couldn't parse as a valid JSON-RPC reply, or a genuine top-level
-		// JSON-RPC error occurred. In every case we genuinely don't know if the block was
-		// accepted -- don't claim success. The dedicated submitblock thread triggered above is
-		// still independently submitting this same block.
-		DLOG_ERROR("Did not get a valid response submitting block %s! It may or may not have been accepted -- check your node!", block_hash_hex);
-		ret = 0;
-	} else {
-		json_t * const res_val = json_object_get(r, "result");
-		if (json_is_null(res_val)) {
-			// a null result means success here
-			DLOG_INFO("Block %s submitted to upstream node successfully!",block_hash_hex);
-			ret = 1;
-		} else {
-			s = json_dumps(res_val, JSON_ENCODE_ANY);
-			if (!s) {
-				DLOG_WARN("Upstream node rejected our block! (unknown)");
-			} else {
-				DLOG_WARN("Upstream node rejected our block! (%s)",s);
-				free(s);
-			}
-			ret = 0;
-		}
-		json_decref(r);
-	}
+	// The dedicated submitblock thread triggered above is still independently
+	// submitting this same block, so one of the two is answered "duplicate".
+	ret = datum_submitblock_log_reply(r, block_hash_hex) ? 1 : 0;
+	if (r) json_decref(r);
 	
 	// cleanup
 	if (free_submitblock_req) {
