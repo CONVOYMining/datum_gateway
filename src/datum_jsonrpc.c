@@ -213,6 +213,7 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 			DLOG_DEBUG("JSON-RPC call failed: %s", s);
 			
 			free(s);
+			json_decref(val);
 			
 			goto err_out;
 		}
