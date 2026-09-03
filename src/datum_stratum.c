@@ -930,15 +930,15 @@ const char *datum_stratum_mod_username(const char *username_s, char * const user
 	}
 	
 	const char * const tilde = &modname[-1];
+	size_t pretilde_len = tilde - username_s;
 	if (range->addr_len == 0) {
-		size_t len = tilde - username_s;
-		if (len >= username_buf_sz) len = username_buf_sz - 1;
-		memcpy(username_buf, username_s, len);
-		username_buf[len] = '\0';
+		if (pretilde_len >= username_buf_sz) pretilde_len = username_buf_sz - 1;
+		memcpy(username_buf, username_s, pretilde_len);
+		username_buf[pretilde_len] = '\0';
 		return username_buf;
 	}
 	
-	const char * const period = strchr(username_s, '.');
+	const char * const period = memchr(username_s, '.', pretilde_len);
 	if (range->addr_len >= username_buf_sz || !period) {
 		return range->addr;
 	}
@@ -1013,6 +1013,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	int i;
 	bool quickdiff = false;
 	bool empty_work = false;
+	bool was_block = false;
+	char new_notify_blockhash[65];
 	
 	// see if this is a real job
 	job_id = json_array_get(params_obj, 1);
@@ -1250,8 +1252,33 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		}
 	}
 	
-	// The XOR key is withheld, so only Apex can classify a network candidate
-	// before disclosure. Gateway retains enough data to audit and reconstruct it.
+	if (datum_stratum_share_is_unmasked_block(job, share_hash)) {
+		was_block = true;
+		new_notify_blockhash[64] = 0;
+		for(i=0;i<32;i++) {
+			uchar_to_hex(&new_notify_blockhash[(31-i)<<1], share_hash[i]);
+		}
+		DLOG_WARN("************************************************************************************************");
+		DLOG_WARN("******** BLOCK FOUND - %s ********", new_notify_blockhash);
+		DLOG_WARN("************************************************************************************************");
+		
+		if (job->is_datum_job) {
+			(void)datum_protocol_pow_submit(c, job, username_s, true,
+				empty_work, quickdiff, block_header, job_diff,
+				full_cb_txn, full_cb_txn_size, share_hash, cb,
+				extranonce_bin, coinbase_index);
+		}
+		
+		i = assembleBlockAndSubmit(block_header, full_cb_txn,
+			full_cb_txn_size, job, m->sdata, new_notify_blockhash,
+			empty_work, extranonce_bin);
+		if (i) {
+			datum_blocktemplates_notifynew(new_notify_blockhash, job->height + 1);
+		}
+	}
+	
+	// For ABW work the XOR key is withheld, so only Apex can classify a
+	// network candidate before disclosure.
 	if (job->is_stale_prevblock) {
 		// share is from a stale job
 		send_rejected_stale_block(c, id);
@@ -1312,8 +1339,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// work accepted
-	if (job->is_datum_job && datum_protocol_pow_submit(c, job, username_s,
-		false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
+	if (job->is_datum_job && !was_block && datum_protocol_pow_submit(c, job,
+		username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
 		full_cb_txn_size, share_hash, cb, extranonce_bin,
 		coinbase_index) != 0) {
 		send_unknown_work_error(c, id);
@@ -1522,6 +1549,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	if (!share_nbits) return -1;
 	
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
+	const int notify_out_buf_start = c->out_buf;
 	datum_socket_send_string_to_client(c, "{\"id\":null,\"method\":\"mining.notify\",\"params\":[");
 	
 	cbselect = datum_stratum_coinbase_index(sdata, m, new_block);
@@ -1539,8 +1567,8 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// this may look silly, but the send buffer doesn't get emptied until this thread's loop runs. so might as well just utilize it
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
-	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff,
-		blake2b_commitment, blake2bcoinb1)) {
+	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, blake2b_commitment, blake2bcoinb1)) {
+		c->out_buf = notify_out_buf_start;
 		return -1;
 	}
 	for(i=0;i<(int)sizeof(blake2bcoinb1);i++) {
@@ -1976,13 +2004,27 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 	} else {
 		stratum_job_merkle_root_calc((T_DATUM_STRATUM_JOB *)s, cb_hash, merkle);
 	}
-	if (!td->abw_enabled || !td->abw_assignment_id) return false;
-	return datum_blake2b_header_commitment_from_key_hash(
+	if (s->is_datum_job && td->abw_enabled) {
+		if (!td->abw_assignment_id) return false;
+		return datum_blake2b_header_commitment_from_key_hash(
+			commitment, td->version, td->previousblockhash_bin,
+			(uint32_t)td->height, merkle, s->blake2b_time_on_wire,
+			td->bits_uint, subsidy_only ? 1 : td->txn_count + 1,
+			s->blake2b_flags, datum_blake2b_abw_clear_bits(target_pot),
+			td->xor_key_hash, (const unsigned char[32]){0});
+	}
+	return datum_blake2b_header_commitment(
 		commitment, td->version, td->previousblockhash_bin,
 		(uint32_t)td->height, merkle, s->blake2b_time_on_wire, td->bits_uint,
-		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags,
-		datum_blake2b_abw_clear_bits(target_pot), td->xor_key_hash,
-		(const unsigned char[32]){0});
+		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags, 0,
+		(const unsigned char[16]){0}, (const unsigned char[32]){0});
+}
+
+bool datum_stratum_share_is_unmasked_block(
+	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash) {
+	return job && job->block_template && share_hash &&
+		(!job->is_datum_job || !job->block_template->abw_enabled) &&
+		compare_hashes(share_hash, job->block_target) <= 0;
 }
 
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1) {
@@ -2418,19 +2460,30 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	r = bitcoind_json_rpc_call(tcurl, &datum_config, submitblock_req);
 	curl_easy_cleanup(tcurl);
 	if (!r) {
-		// oddly, this means success here.
-		DLOG_INFO("Block %s submitted to upstream node successfully!",block_hash_hex);
-		ret = 1;
+		// Didn't get a usable response at all: either the request never reached the node, or it
+		// returned something we couldn't parse as a valid JSON-RPC reply, or a genuine top-level
+		// JSON-RPC error occurred. In every case we genuinely don't know if the block was
+		// accepted -- don't claim success. The dedicated submitblock thread triggered above is
+		// still independently submitting this same block.
+		DLOG_ERROR("Did not get a valid response submitting block %s! It may or may not have been accepted -- check your node!", block_hash_hex);
+		ret = 0;
 	} else {
-		s = json_dumps(r, JSON_ENCODE_ANY);
-		if (!s) {
-			DLOG_WARN("Upstream node rejected our block! (unknown)");
+		json_t * const res_val = json_object_get(r, "result");
+		if (json_is_null(res_val)) {
+			// a null result means success here
+			DLOG_INFO("Block %s submitted to upstream node successfully!",block_hash_hex);
+			ret = 1;
 		} else {
-			DLOG_WARN("Upstream node rejected our block! (%s)",s);
-			free(s);
+			s = json_dumps(res_val, JSON_ENCODE_ANY);
+			if (!s) {
+				DLOG_WARN("Upstream node rejected our block! (unknown)");
+			} else {
+				DLOG_WARN("Upstream node rejected our block! (%s)",s);
+				free(s);
+			}
+			ret = 0;
 		}
 		json_decref(r);
-		ret = 0;
 	}
 	
 	// cleanup

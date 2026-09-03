@@ -139,6 +139,7 @@ typedef struct {
 int datum_protocol_init(void);
 int datum_encrypt_generate_keys(DATUM_ENC_KEYS *keys);
 bool datum_protocol_is_active(void);
+bool datum_protocol_abw_required(void);
 void datum_increment_session_nonce(void *s);
 int datum_protocol_fetch_coinbaser(uint64_t value);
 int datum_protocol_coinbaser_fetch(void *s);
@@ -179,6 +180,8 @@ extern uint64_t datum_accepted_share_count;
 extern uint64_t datum_accepted_share_diff;
 extern uint64_t datum_rejected_share_count;
 extern uint64_t datum_rejected_share_diff;
+
+#define DATUM_CONFIG_FLAG_ABW_DISABLED 0x01
 
 #define DATUM_REJECT_BAD_JOB_ID 10
 #define DATUM_REJECT_BAD_COINBASE_ID 11

@@ -74,15 +74,24 @@ void datum_submitblock_doit(CURL *tcurl, char *url, const char *submitblock_req,
 		r = json_rpc_call(tcurl, url, NULL, submitblock_req);
 	}
 	if (!r) {
-		// oddly, this means success here.
-		DLOG_INFO("Block %s submitted to upstream node successfully!",block_hash_hex);
+		// Didn't get a usable response at all: either the request never reached the node, or it
+		// returned something we couldn't parse as a valid JSON-RPC reply, or a genuine top-level
+		// JSON-RPC error occurred. In every case, we genuinely don't know whether the block was
+		// accepted -- don't claim success.
+		DLOG_ERROR("Did not get a valid response submitting block %s! It may or may not have been accepted -- check your node!", block_hash_hex);
 	} else {
-		s = json_dumps(r, JSON_ENCODE_ANY);
-		if (!s) {
-			DLOG_WARN("Upstream node rejected our block! (unknown)");
+		json_t * const res_val = json_object_get(r, "result");
+		if (json_is_null(res_val)) {
+			// a null result means success here
+			DLOG_INFO("Block %s submitted to upstream node successfully!",block_hash_hex);
 		} else {
-			DLOG_WARN("Upstream node rejected our block! (%s)",s);
-			free(s);
+			s = json_dumps(res_val, JSON_ENCODE_ANY);
+			if (!s) {
+				DLOG_WARN("Upstream node rejected our block! (unknown)");
+			} else {
+				DLOG_WARN("Upstream node rejected our block! (%s)",s);
+				free(s);
+			}
 		}
 		json_decref(r);
 	}

@@ -59,6 +59,8 @@
 
 #define MAX_BLOCK_SIZE_BYTES 4000000
 
+#define MAX_OUTPUT_SCRIPT_LEN 83
+
 // Assumption notes
 
 // max possible transactions = 16394-ish .. close enough to say 16384, since we're just not going to be idiots
@@ -196,6 +198,8 @@ extern const char *datum_blocktemplates_error;
 int datum_template_init(void);
 bool datum_gbt_rules_want_blake2b(json_t *gbt);
 T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt);
+bool datum_blocktemplates_abw_ready(T_DATUM_TEMPLATE_DATA *block_template,
+	bool datum_active, bool abw_required);
 void *datum_gateway_template_thread(void *args);
 void datum_blocktemplates_notifynew_sighandler();
 void datum_blocktemplates_notifynew(const char *prevhash, int height);

@@ -201,7 +201,15 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 		res_val = json_object_get(val, "result");
 		err_val = json_object_get(val, "error");
 		
-		if (!res_val || json_is_null(res_val) || (err_val && !json_is_null(err_val))) {
+		// A JSON-RPC reply's "result" being present-but-null is a legitimate, successful reply
+		// (e.g. submitblock/preciousblock return null on success) -- it's the caller's job to
+		// decide what a given method's result means, not ours. The only conditions that actually
+		// indicate we didn't get a usable reply are: the "result" key being missing outright (a
+		// non-compliant response), or a genuine non-null "error".
+		const bool has_error = err_val && !json_is_null(err_val);
+		const bool missing_result = !res_val;
+		
+		if (has_error || missing_result) {
 			char *s;
 			
 			if (err_val) {
@@ -213,6 +221,7 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 			DLOG_DEBUG("JSON-RPC call failed: %s", s);
 			
 			free(s);
+			json_decref(val);
 			
 			goto err_out;
 		}

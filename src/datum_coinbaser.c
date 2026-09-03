@@ -59,8 +59,6 @@ CURL *coinbaser_curl = NULL;
 
 const char *cbstart_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff"; // 82 len hex, 41 bytes
 
-#define MAX_COINBASE_TAG_SPACE 86 // leaves space for BIP34 height, extranonces, datum prime tag, etc.
-
 int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 	int cb_input_sz = 0;
 	int tag_len[2] = { 0, 0 };
@@ -356,8 +354,8 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	
 	if (datum_protocol_is_active()) {
 		// DATUM
-		s->pool_addr_script_len = datum_config.override_mining_pool_scriptsig_len;
-		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptsig, datum_config.override_mining_pool_scriptsig_len);
+		s->pool_addr_script_len = datum_config.override_mining_pool_scriptpubkey_len;
+		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptpubkey, datum_config.override_mining_pool_scriptpubkey_len);
 		s->is_datum_job = true;
 	} else {
 		// No pool
@@ -528,8 +526,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// Initial mainnet coinbaser
 	if (datum_protocol_is_active()) {
 		// DATUM
-		s->pool_addr_script_len = datum_config.override_mining_pool_scriptsig_len;
-		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptsig, datum_config.override_mining_pool_scriptsig_len);
+		s->pool_addr_script_len = datum_config.override_mining_pool_scriptpubkey_len;
+		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptpubkey, datum_config.override_mining_pool_scriptpubkey_len);
 		s->is_datum_job = true;
 		if (s->available_coinbase_outputs_count == 0) {
 			empty_only = true;

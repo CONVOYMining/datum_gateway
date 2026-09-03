@@ -169,6 +169,7 @@ static unsigned char datum_requested_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0}
 static bool datum_has_resume_token = false;
 static bool datum_requested_resume = false;
 static bool datum_connection_configured = false;
+static atomic_bool datum_pool_abw_enabled = true;
 
 extern DATUM_QUEUE pow_queue;
 
@@ -650,6 +651,21 @@ bool datum_protocol_abw_health_ok(void) {
 	return atomic_load(&datum_abw_health_latched);
 }
 
+static bool datum_protocol_abw_active(void) {
+	bool active;
+	pthread_mutex_lock(&datum_abw_mutex);
+	active = datum_abw_active_assignment_id != 0;
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return active;
+}
+
+static void datum_protocol_abw_deactivate(void) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	datum_abw_active_assignment_id = 0;
+	memset(datum_abw_active_key_hash, 0, sizeof(datum_abw_active_key_hash));
+	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
 static void datum_protocol_abw_pending_clear(T_DATUM_ABW_PENDING *pending) {
 	if (!pending) return;
 	free(pending->coinbase);
@@ -1035,6 +1051,7 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!activated) DLOG_ERROR("Activated ABW slot was not preseeded");
+	if (activated) datum_blocktemplates_notifynew(NULL, 0);
 	return activated ? 1 : 0;
 }
 
@@ -1366,9 +1383,10 @@ err:
 	// read pool addr script
 	if (i >= len) goto err;
 	a = data[i]; i++;
+	if (a > MAX_OUTPUT_SCRIPT_LEN) goto err;
 	if (i + a > len) goto err;
-	memcpy(datum_config.override_mining_pool_scriptsig, &data[i], a); i+=a;
-	datum_config.override_mining_pool_scriptsig_len = a;
+	memcpy(datum_config.override_mining_pool_scriptpubkey, &data[i], a); i+=a;
+	datum_config.override_mining_pool_scriptpubkey_len = a;
 	
 	// Prime ID and the opaque token used to request this identity on reconnect.
 	if (i + 8 + DATUM_RESUME_TOKEN_SIZE > len) goto err;
@@ -1385,16 +1403,13 @@ err:
 	memcpy(datum_resume_token, configured_resume_token,
 		DATUM_RESUME_TOKEN_SIZE);
 	datum_has_resume_token = configured_prime_id != 0;
-	if (first_configuration && !resumed) {
-		datum_queue_clear(&pow_queue);
-		datum_protocol_replay_clear();
-		datum_protocol_abw_reset();
-	}
-	datum_connection_configured = true;
-	
 	// pool coinbase tag
 	if (i >= len) goto err;
 	a = data[i]; i++;
+	if (a >= MAX_COINBASE_TAG_SPACE) {
+		DLOG_ERROR("DATUM server sent a coinbase tag too long to ever fit (%u bytes)!", (unsigned)a);
+		return 0;
+	}
 	if (i + a > len) goto err;
 	memcpy(datum_config.override_mining_coinbase_tag_primary, &data[i], a); i+=a;
 	datum_config.override_mining_coinbase_tag_primary[a] = 0;
@@ -1407,22 +1422,37 @@ err:
 	}
 	
 	if (i + 2 > len) goto err;
-	if ((data[i] != 0) || (data[i+1] != 0xFE)) {
+	const unsigned char config_flags = data[i];
+	if ((config_flags & ~DATUM_CONFIG_FLAG_ABW_DISABLED) ||
+	    data[i+1] != 0xFE) {
 		DLOG_ERROR("Invalid data structure in configuration :(  Is this client up to date???");
 		return 0;
 	}
+	const bool pool_abw_enabled =
+		!(config_flags & DATUM_CONFIG_FLAG_ABW_DISABLED);
+	const bool abw_policy_changed = pool_abw_enabled !=
+		atomic_load(&datum_pool_abw_enabled);
+	if ((first_configuration && !resumed) || abw_policy_changed) {
+		datum_queue_clear(&pow_queue);
+		datum_protocol_replay_clear();
+		datum_protocol_abw_reset();
+	}
+	atomic_store(&datum_pool_abw_enabled, pool_abw_enabled);
+	datum_connection_configured = true;
 	atomic_store(&datum_protocol_bulk_enabled, i + 6 <= len &&
 		!memcmp(data + i + 2, "DBF\x01", 4));
 	
-	memset(msg, 0, (datum_config.override_mining_pool_scriptsig_len<<1)+2);
-	for(i=0;i<datum_config.override_mining_pool_scriptsig_len;i++) {
-		uchar_to_hex(&msg[i<<1], datum_config.override_mining_pool_scriptsig[i]);
+	memset(msg, 0, (datum_config.override_mining_pool_scriptpubkey_len << 1) + 2);
+	for(i = 0; i < datum_config.override_mining_pool_scriptpubkey_len; ++i) {
+		uchar_to_hex(&msg[i << 1], datum_config.override_mining_pool_scriptpubkey[i]);
 	}
 	
-	DLOG_DEBUG("DATUM Pool Payout Scriptsig: (len %d) %s",datum_config.override_mining_pool_scriptsig_len, msg);
+	DLOG_DEBUG("DATUM Pool Payout Script:    (len %u) %s", (unsigned)datum_config.override_mining_pool_scriptpubkey_len, msg);
 	DLOG_DEBUG("DATUM Pool Coinbase Tag:     \"%s\"",datum_config.override_mining_coinbase_tag_primary);
 	DLOG_DEBUG("DATUM Pool Prime ID:         %16.16"PRIx64, datum_config.prime_id);
 	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIu64,datum_config.override_vardiff_min);
+	DLOG_DEBUG("DATUM Pool ABW:              %s",
+		pool_abw_enabled ? "enabled" : "disabled");
 	
 	const bool became_ready = datum_state != 3;
 	datum_state = 3; // fully ready to make work
@@ -1433,7 +1463,8 @@ err:
 	} else if (first_configuration && datum_requested_resume) {
 		DLOG_WARN("DATUM resume was declined; discarded queued shares from the old session");
 	}
-	if (became_ready) datum_blocktemplates_notify_othercause();
+	if (became_ready || abw_policy_changed)
+		datum_blocktemplates_notify_othercause();
 	
 	return 1;
 }
@@ -2609,8 +2640,8 @@ int datum_protocol_pow_submit(
 	if (!job || !job->block_template || !block_header || !full_cb_tx ||
 	    !raw_pow_hash || job->target_pot_index < 0 ||
 	    (size_t)job->target_pot_index >= full_cb_tx_size ||
-	    !job->block_template->abw_enabled ||
-	    !job->block_template->abw_assignment_id) return -1;
+	    (job->block_template->abw_enabled &&
+	     !job->block_template->abw_assignment_id)) return -1;
 	memset(&pow, 0, sizeof(pow));
 	pow.datum_job_id = job->datum_job_idx;
 	memcpy(pow.extranonce, extranonce, 12);
@@ -2625,17 +2656,19 @@ int datum_protocol_pow_submit(
 	pow.sjob = (T_DATUM_STRATUM_JOB *)job;
 	memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
 	pow.blake2b_use_time_offset = (job->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
-	pow.abw_assignment_id = job->block_template->abw_assignment_id;
+	pow.abw_assignment_id = job->block_template->abw_enabled ?
+		job->block_template->abw_assignment_id : 0;
 	memcpy(pow.raw_pow_hash, raw_pow_hash, sizeof(pow.raw_pow_hash));
 	pow.ntime = upk_u64le(block_header, 40);
 	pow.nonce = upk_u64le(block_header, 32);
 	pow.time_on_wire = job->blake2b_time_on_wire;
 	pow.version = job->version_uint;
-	if (datum_protocol_abw_assignment_revealed(pow.abw_assignment_id)) {
+	if (pow.abw_assignment_id &&
+	    datum_protocol_abw_assignment_revealed(pow.abw_assignment_id)) {
 		DLOG_ERROR("Could not submit POW for a disclosed anti-withholding assignment");
 		return -1;
 	}
-	if (!datum_protocol_abw_cache_candidate(
+	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
 		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
 		DLOG_ERROR("BLAKE2b anti-withholding candidate cache is full");
 		return -1;
@@ -2644,7 +2677,7 @@ int datum_protocol_pow_submit(
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
 	
 	const int queued = datum_queue_add_item(&pow_queue, &pow);
-	if (queued != 0) {
+	if (queued != 0 && pow.abw_assignment_id) {
 		datum_protocol_abw_forget_exact(pow.abw_assignment_id, pow.raw_pow_hash);
 	}
 	return queued;
@@ -2710,16 +2743,19 @@ static int datum_protocol_pow_build_message_mode(
 	}
 	i += 4;
 
-	if (!pow->abw_assignment_id ||
-	    (size_t)i + 25 >= msg_size) return 0;
+	const size_t pow_extension_size = 23 +
+		(pow->abw_assignment_id ? 2 : 0);
+	if ((size_t)i + pow_extension_size >= msg_size) return 0;
 	msg[i++] = 0x03;
 	msg[i++] = DATUM_POW_BLAKE2B;
 	pk_u64le(msg, i, pow->ntime); i += 8;
 	pk_u64le(msg, i, pow->nonce); i += 8;
 	msg[i++] = 0x04;
 	pk_u32le(msg, i, pow->time_on_wire); i += 4;
-	msg[i++] = 0x05;
-	msg[i++] = pow->abw_assignment_id - 1;
+	if (pow->abw_assignment_id) {
+		msg[i++] = 0x05;
+		msg[i++] = pow->abw_assignment_id - 1;
+	}
 
 	pthread_rwlock_rdlock(&datum_jobs_rwlock);
 	pj = &datum_jobs[pow->datum_job_id];
@@ -2877,8 +2913,12 @@ bool datum_protocol_thread_is_active(void) {
 }
 
 bool datum_protocol_is_active(void) {
-	if (datum_protocol_client_active == 3) return true;
-	return false;
+	if (datum_protocol_client_active != 3) return false;
+	return !datum_protocol_abw_required() || datum_protocol_abw_active();
+}
+
+bool datum_protocol_abw_required(void) {
+	return atomic_load(&datum_pool_abw_enabled);
 }
 
 void *datum_protocol_client(void *args) {
@@ -2899,6 +2939,7 @@ void *datum_protocol_client(void *args) {
 	bool break_again = false;
 	T_DATUM_PROTOCOL_HEADER s_header;
 	datum_connection_configured = false;
+	datum_protocol_abw_deactivate();
 	
 	pthread_rwlock_wrlock(&datum_jobs_rwlock);
 	for(i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {

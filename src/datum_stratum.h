@@ -120,7 +120,7 @@ typedef struct {
 	int sigops;
 } T_DATUM_TXN_OUTPUT;
 
-typedef struct {
+typedef struct T_DATUM_STRATUM_JOB {
 	int global_index;
 	
 	char job_id[24];
@@ -148,8 +148,8 @@ typedef struct {
 	// when fetching the coinbaser, we'll just stash all of the possible and valid output scripts here
 	T_DATUM_TXN_OUTPUT available_coinbase_outputs[512];
 	int available_coinbase_outputs_count;
-	unsigned char pool_addr_script[64];
-	int pool_addr_script_len;
+	uint8_t pool_addr_script[MAX_OUTPUT_SCRIPT_LEN];
+	uint8_t pool_addr_script_len;
 	
 	// multiple coinbase options
 	// 0 = "empty" --- just pays pool addr, and possibly TIDES data.  extranonce in coinbase if fits, or in first output if not.
@@ -271,6 +271,8 @@ void update_stratum_job(T_DATUM_TEMPLATE_DATA *block_template, bool new_block, i
 void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s);
 bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, unsigned char *commitment);
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1);
+bool datum_stratum_share_is_unmasked_block(
+	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash);
 unsigned int datum_stratum_coinbase_index(const T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const T_DATUM_MINER_DATA *miner, bool new_block);
 void stratum_job_merkle_root_calc(T_DATUM_STRATUM_JOB *s, unsigned char *coinbase_txn_hash, unsigned char *merkle_root_output);
 int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce);
