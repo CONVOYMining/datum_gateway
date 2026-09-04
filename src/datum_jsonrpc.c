@@ -140,8 +140,9 @@ err_out:
 }
 
 json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, const char *rpc_req, const char *extra_header, long * const http_resp_code_out) {
-	json_t *val, *err_val, *res_val;
+	json_t *val = NULL, *err_val, *res_val;
 	CURLcode rc;
+	long http_resp_code = 0;
 	struct data_buffer all_data = { };
 	struct upload_buffer upload_data;
 	json_error_t err = { };
@@ -151,7 +152,9 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_ENCODING, "");
-	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+	// No CURLOPT_FAILONERROR: bitcoind answers an RPC error with HTTP 500 and
+	// the reason in the body, which FAILONERROR would discard unread.
+	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 0L);
 	curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, all_data_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &all_data);
@@ -184,8 +187,9 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	
 	rc = curl_easy_perform(curl);
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_resp_code);
+	if (http_resp_code_out) *http_resp_code_out = http_resp_code;
 	if (rc) {
-		if (http_resp_code_out) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_resp_code_out);
 		DLOG_DEBUG("json_rpc_call: HTTP request failed: %s", curl_err_str);
 		DLOG_DEBUG("json_rpc_call: Request was: %s",rpc_req);
 		goto err_out;
@@ -193,7 +197,11 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	
 	val = JSON_LOADS(all_data.buf, &err);
 	if (!val) {
-		DLOG_DEBUG("JSON decode failed(%d): %s", err.line, err.text);
+		if (http_resp_code >= 400) {
+			DLOG_ERROR("json_rpc_call: HTTP %ld from %s%s", http_resp_code, url, (http_resp_code == 401) ? " (authentication rejected)" : "");
+		} else {
+			DLOG_DEBUG("JSON decode failed(%d): %s", err.line, err.text);
+		}
 		goto err_out;
 	}
 	
@@ -210,21 +218,23 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 		const bool missing_result = !res_val;
 		
 		if (has_error || missing_result) {
-			char *s;
-			
-			if (err_val) {
-				s = json_dumps(err_val, JSON_INDENT(3));
+			if (has_error) {
+				// The node's reason, compact so it stays one line
+				char * const s = json_dumps(err_val, JSON_COMPACT);
+				DLOG_ERROR("JSON-RPC call failed: %s", s);
+				free(s);
 			} else {
-				s = strdup("(unknown reason)");
+				DLOG_DEBUG("JSON-RPC call failed: no result in the reply");
 			}
-			
-			DLOG_DEBUG("JSON-RPC call failed: %s", s);
-			
-			free(s);
-			json_decref(val);
 			
 			goto err_out;
 		}
+	}
+	
+	if (http_resp_code >= 400) {
+		// An error status with a well-formed result is not something to trust
+		DLOG_ERROR("json_rpc_call: HTTP %ld from %s", http_resp_code, url);
+		goto err_out;
 	}
 	
 	databuf_free(&all_data);
@@ -233,6 +243,7 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	return val;
 
 err_out:
+	if (val) json_decref(val);
 	databuf_free(&all_data);
 	curl_slist_free_all(headers);
 	curl_easy_reset(curl);
