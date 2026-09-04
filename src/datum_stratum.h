@@ -136,6 +136,8 @@ typedef struct T_DATUM_STRATUM_JOB {
 	// BLAKE2b job fields
 	uint32_t blake2b_time_on_wire;
 	uint8_t blake2b_flags;
+	// Tagged hash shared by every submitted share for this job.
+	unsigned char blake2b_prevblock_hidden[32];
 	
 	T_DATUM_TEMPLATE_DATA *block_template;
 	
