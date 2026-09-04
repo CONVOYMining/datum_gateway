@@ -202,8 +202,15 @@ unsigned char datum_protocol_setup_new_job_idx(void *sx) {
 	return a;
 }
 
+_Static_assert(sizeof(T_DATUM_PROTOCOL_HEADER) == sizeof(uint32_t), "T_DATUM_PROTOCOL_HEADER must be four bytes");
+
 static inline void datum_xor_header_key(void *h, uint32_t key) {
-	*((uint32_t *)h) ^= key;
+	// The header is packed and may sit at any address, so go through memcpy
+	// rather than storing through a uint32_t pointer.
+	uint32_t v;
+	memcpy(&v, h, sizeof(v));
+	v ^= key;
+	memcpy(h, &v, sizeof(v));
 }
 
 uint32_t datum_header_xor_feedback(const uint32_t i) {
