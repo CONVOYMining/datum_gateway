@@ -174,7 +174,7 @@ static atomic_bool datum_pool_abw_enabled = true;
 extern DATUM_QUEUE pow_queue;
 
 // may be used by this thread when crafting replies to server commands
-unsigned char temp_data[DATUM_PROTOCOL_MAX_CMD_DATA_SIZE + 16384];
+unsigned char temp_data[DATUM_PROTOCOL_TEMP_DATA_SIZE];
 
 unsigned char datum_protocol_setup_new_job_idx(void *sx) {
 	// Called by the stratum job updater.  Must be thread safe.
@@ -1634,9 +1634,17 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	return 1;
 }
 
-int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
+// The 0x50 0x11 reply is built in temp_data and sent as one command, so it
+// must stay under what datum_protocol_bulk_cmd accepts with room for the 0xFE
+// terminator and up to 111 bytes of padding appended after the loop.
+bool datum_protocol_stxlist_reply_fits(size_t offset, size_t txn_size) {
+	return offset + 3 + txn_size <= DATUM_STXLIST_REPLY_MAX;
+}
+
+int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 	// the server is requesting missing transactions
 	// send them
+	if (len < 3) return 0;
 	unsigned char job_index = data[0];
 	uint16_t req_count = upk_u16le(data, 1);
 	
@@ -1654,6 +1662,23 @@ int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
 		msg[i] = 0x91; i++;
 		msg[i] = 0xFF; i++;
 		msg[i] = 0xF3; i++;
+		
+		// pad with some randomness
+		j = 1 + (rand() % 100);
+		memset(&msg[i], rand(), j);
+		i+=j;
+		
+		datum_protocol_mining_cmd(msg, i);
+		return 1;
+	}
+	
+	if (3 + 2 * (int)req_count > len) {
+		// the index list is shorter than the count claims
+		// error response to 0x50 0x11
+		msg[i] = 0x50; i++;
+		msg[i] = 0x91; i++;
+		msg[i] = job_index; i++;
+		msg[i] = 0xF4; i++;
 		
 		// pad with some randomness
 		j = 1 + (rand() % 100);
@@ -1736,6 +1761,28 @@ int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
 		if (req_id >= block_template->txn_count) {
 			// error....
 			pthread_rwlock_unlock(&datum_jobs_rwlock);
+			// error response to 0x50 0x11
+			i = 0; // reset index
+			msg[i] = 0x50; i++;
+			msg[i] = 0x91; i++;
+			msg[i] = job_index; i++;
+			msg[i] = 0xF4; i++;
+			
+			// pad with some randomness
+			j = 1 + (rand() % 100);
+			memset(&msg[i], rand(), j);
+			i+=j;
+			
+			datum_protocol_mining_cmd(msg, i);
+			return 1;
+		}
+		
+		// The count gate above does not stop a request that names the same
+		// index repeatedly, so bound the reply as it grows rather than trust
+		// the list to sum to at most one block.
+		if (!datum_protocol_stxlist_reply_fits((size_t)i, block_template->txns[req_id].size)) {
+			pthread_rwlock_unlock(&datum_jobs_rwlock);
+			DLOG_WARN("DATUM server requested %u transactions for job %d, more than one reply can carry; refusing", (unsigned)req_count, (int)job_index);
 			// error response to 0x50 0x11
 			i = 0; // reset index
 			msg[i] = 0x50; i++;
@@ -1968,7 +2015,7 @@ int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 		case 0x11: {
 			// send the requested txns
 			// 16-bit indexes
-			return datum_protocol_job_validation_stxlist_byid(p);
+			return datum_protocol_job_validation_stxlist_byid(len - 1, p);
 			break;
 		}
 		
