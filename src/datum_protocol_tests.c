@@ -130,7 +130,13 @@ static int datum_protocol_test_decrypt_frame(const unsigned char *wire,
 	size_t clear_size) {
 	if (*offset + sizeof(*header) > wire_size) return -1;
 	memcpy(header, wire + *offset, sizeof(*header));
-	*((uint32_t *)header) ^= *header_key;
+	{
+		// packed header: XOR through a copy, same as datum_xor_header_key
+		uint32_t v;
+		memcpy(&v, header, sizeof(v));
+		v ^= *header_key;
+		memcpy(header, &v, sizeof(v));
+	}
 	*header_key = datum_header_xor_feedback(*header_key);
 	*offset += sizeof(*header);
 	if (!header->is_encrypted_channel || header->cmd_len < crypto_box_MACBYTES ||
