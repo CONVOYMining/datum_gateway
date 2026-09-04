@@ -58,6 +58,20 @@ bool datum_pow_decode_hex_exact(const char *hex, size_t out_len, unsigned char *
 	return hex[out_len<<1] == 0;
 }
 
+bool datum_pow_decode_u32_hex_exact(const char *hex, uint32_t *out) {
+	uint32_t value = 0;
+	int nibble;
+	if (!hex || !out) return false;
+	for (size_t i = 0; i < 8; i++) {
+		nibble = datum_hex_nibble(hex[i]);
+		if (nibble < 0) return false;
+		value = (value << 4) | (uint32_t)nibble;
+	}
+	if (hex[8] != 0) return false;
+	*out = value;
+	return true;
+}
+
 bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, uint8_t flags) {
 	if (!out) return false;
 	if (ntime > UINT32_MAX) return false;
@@ -224,11 +238,21 @@ void datum_blake2b_prevblock_hidden(unsigned char *out, const unsigned char *pre
 	memset(out, 0, 6);
 }
 
-void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root) {
-	datum_blake2b_prevblock_hidden(work, prevhash);
+void datum_blake2b_build_work_header_from_hidden(
+	unsigned char *work, const unsigned char *prevhash_hidden,
+	const unsigned char *nonce, const unsigned char *ntime,
+	const unsigned char *root
+) {
+	memcpy(work, prevhash_hidden, 32);
 	memcpy(work + 32, nonce, 8);
 	memcpy(work + 40, ntime, 8);
 	memcpy(work + 48, root, 32);
+}
+
+void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root) {
+	unsigned char prevhash_hidden[32];
+	datum_blake2b_prevblock_hidden(prevhash_hidden, prevhash);
+	datum_blake2b_build_work_header_from_hidden(work, prevhash_hidden, nonce, ntime, root);
 }
 
 bool datum_blake2b_header_commitment_from_key_hash(

@@ -126,7 +126,7 @@ static void datum_pow_blake2b_vector_tests(void) {
 		"101112131415161718191a1b1c1d1e1f39300000"
 		"808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f";
 	unsigned char merkle[32], xor_key[16], rhs[32], extranonce[12], prevhash[32];
-	unsigned char nonce[8], ntime[8], commitment[32], root[32], work[80], hash_le[32];
+	unsigned char nonce[8], ntime[8], commitment[32], root[32], work[80], cached_work[80], hash_le[32];
 	unsigned char share_target[32];
 	unsigned char coinb1[39], arbitrary_tx[51], leaf_preimage[52] = {0};
 	unsigned char header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE], expected[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
@@ -163,6 +163,17 @@ static void datum_pow_blake2b_vector_tests(void) {
 		datum_test(compare_hashes(advertised, accepted) <= 0);
 	}
 	datum_test(datum_blake2b_accounting_difficulty(65535.0L) == 65536.0L);
+	datum_test(datum_pow_decode_u32_hex_exact("00000000", &time_on_wire));
+	datum_test(time_on_wire == 0);
+	datum_test(datum_pow_decode_u32_hex_exact("1234aBcD", &time_on_wire));
+	datum_test(time_on_wire == UINT32_C(0x1234abcd));
+	datum_test(datum_pow_decode_u32_hex_exact("FFFFFFFF", &time_on_wire));
+	datum_test(time_on_wire == UINT32_MAX);
+	datum_test(!datum_pow_decode_u32_hex_exact("1234567", &time_on_wire));
+	datum_test(!datum_pow_decode_u32_hex_exact("1234567g", &time_on_wire));
+	datum_test(!datum_pow_decode_u32_hex_exact("123456789", &time_on_wire));
+	datum_test(!datum_pow_decode_u32_hex_exact(NULL, &time_on_wire));
+	datum_test(!datum_pow_decode_u32_hex_exact("00000000", NULL));
 	char difficulty[64];
 	datum_test(datum_blake2b_format_stratum_difficulty(
 		difficulty, sizeof(difficulty), 1) > 0);
@@ -203,6 +214,8 @@ static void datum_pow_blake2b_vector_tests(void) {
 	datum_test(!memcmp(work, expected, sizeof(work)));
 	datum_blake2b_prevblock_hidden(expected, prevhash);
 	datum_test(!memcmp(expected, work, 32));
+	datum_blake2b_build_work_header_from_hidden(cached_work, expected, nonce, ntime, root);
+	datum_test(!memcmp(cached_work, work, sizeof(work)));
 	datum_test(datum_blake2b_pow_hash_le(hash_le, work, xor_key, 13));
 	datum_test(datum_pow_decode_hex_exact(expected_hash_le_hex, 32, expected));
 	datum_test(!memcmp(hash_le, expected, 32));
