@@ -80,6 +80,7 @@ void uchar_to_hex(char *s, const unsigned char b);
 int get_bitcoin_varint_len_bytes(uint64_t n);
 bool strncpy_uachars(char *out, const char *in, size_t maxlen);
 bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
+bool strncpy_printable(char *out, const char *in, size_t maxlen);
 long double calc_network_difficulty(const char *bits_hex);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);

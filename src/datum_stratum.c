@@ -966,6 +966,17 @@ static void stratum_note_share(T_DATUM_MINER_DATA *m, bool accepted, uint64_t di
 	}
 }
 
+// Name the client behind a block for the log. Used by the local path
+// below and by the ABW reveal in datum_protocol.c. The username comes
+// straight from mining.submit, so it is filtered here; the user agent was
+// already filtered by strncpy_uachars at subscribe.
+void datum_stratum_describe_block_finder(char *out, size_t outsz, const T_DATUM_CLIENT_DATA *c, const char *username, bool empty_work) {
+	const T_DATUM_MINER_DATA * const m = c->app_client_data;
+	char who[192];
+	strncpy_printable(who, username ? username : "NULL", sizeof(who));
+	snprintf(out, outsz, "%s from %s (client %d/%d, session %08x, agent %s%s)", who, c->rem_host, c->datum_thread->thread_id, c->cid, m->sid, m->useragent[0] ? m->useragent : "unknown", empty_work ? ", on empty work" : "");
+}
+
 int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
 	// {"params": ["username", "job", "extranonce2", "time", "nonce"], "id": 1, "method": "mining.submit"}
 	// 0 = username
@@ -1261,6 +1272,11 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		DLOG_WARN("************************************************************************************************");
 		DLOG_WARN("******** BLOCK FOUND - %s ********", new_notify_blockhash);
 		DLOG_WARN("************************************************************************************************");
+		{
+			char finder[320];
+			datum_stratum_describe_block_finder(finder, sizeof(finder), c, username_s, empty_work);
+			DLOG_WARN("Block %s at height %llu found by %s", new_notify_blockhash, (unsigned long long)job->height, finder);
+		}
 		
 		if (job->is_datum_job) {
 			(void)datum_protocol_pow_submit(c, job, username_s, true,

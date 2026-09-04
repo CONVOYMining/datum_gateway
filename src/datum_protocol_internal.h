@@ -77,7 +77,7 @@ void datum_protocol_abw_reset(void);
 bool datum_protocol_abw_assignment_revealed(uint8_t assignment_id);
 bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	const unsigned char *full_cb_tx, size_t full_cb_tx_size,
-	const unsigned char *raw_pow_hash);
+	const unsigned char *raw_pow_hash, const char *finder);
 int datum_protocol_abw_candidate_receipt(int len, unsigned char *data);
 int datum_protocol_abw_candidate_release(int len, unsigned char *data);
 int datum_protocol_abw_activation(int len, unsigned char *data);

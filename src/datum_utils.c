@@ -580,6 +580,25 @@ bool strncpy_workerchars(char *out, const char *in, size_t maxlen) {
 	return true;
 }
 
+bool strncpy_printable(char *out, const char *in, size_t maxlen) {
+	// copy a string from in to out for the log, replacing anything outside
+	// printable ASCII with '?' so a client cannot put line breaks or terminal
+	// escapes into the log
+	// copy a max of maxlen-1 chars from in to out
+	size_t i = 0;
+
+	if (in == NULL || out == NULL || maxlen == 0) {
+		return false;
+	}
+
+	for (; in[i] != 0 && i + 1 < maxlen; i++) {
+		const unsigned char c = (unsigned char)in[i];
+		out[i] = (c >= 0x20 && c <= 0x7e) ? (char)c : '?';
+	}
+	out[i] = 0;
+	return true;
+}
+
 bool strncpy_uachars(char *out, const char *in, size_t maxlen) {
 	// copy a string from in to out, stripping out unwanted characters
 	// copy a max of maxlen chars from in to out
