@@ -278,6 +278,7 @@ void stratum_job_merkle_root_calc(T_DATUM_STRATUM_JOB *s, unsigned char *coinbas
 int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce);
 size_t datum_stratum_coinbase_for_block_hex(char *out, size_t out_size, const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness);
 bool datum_stratum_block_needs_witness(const T_DATUM_STRATUM_JOB *job, bool subsidy_only);
+void datum_stratum_describe_block_finder(char *out, size_t outsz, const T_DATUM_CLIENT_DATA *c, const char *username, bool empty_work);
 size_t datum_stratum_build_block_request_parts(char *out, size_t out_size,
 	const uint8_t *block_header,
 	const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness,
