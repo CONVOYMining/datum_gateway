@@ -40,6 +40,7 @@
 #include "datum_stratum.h"
 #include "datum_coinbaser.h"
 #include "datum_utils.h"
+#include "datum_pow.h"
 
 int datum_stratum_coinbase_fit_to_template(
 	int max_sz, int fixed_bytes, T_DATUM_STRATUM_JOB *s);
@@ -74,6 +75,19 @@ static void datum_blake2b_coinbase_limit_tests(void) {
 	
 	/* The 164-byte header shrinks the coinbase leftover by 84 bytes. */
 	datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 866);
+	
+	/* The weight limit: the header and a five-byte count at four units a byte,
+	 * the coinbase's 36 witness bytes, then 950 bytes of coinbase at four
+	 * each. With the 80-byte header's 340 the leftover was 1000 (unbound). */
+	tdata.sizelimit = 4000000;
+	tdata.weightlimit = ((DATUM_BLAKE2B_BLOCK_HEADER_SIZE + 5) * 4) + 36 + (4 * 950);
+	datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 950);
+	/* The transactions' weight counts the same way. */
+	tdata.txn_total_weight = 4000;
+	tdata.weightlimit += 4000;
+	datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 950);
+	/* Fixed bytes are subtracted from the leftover. */
+	datum_test(datum_stratum_coinbase_fit_to_template(1000, 100, &job) == 850);
 }
 
 static void datum_coinbaser_value_overflow_tests(void) {

@@ -357,7 +357,7 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 		cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000036a0100"); // TODO: Is a naked OP_RETURN without any bytes after safe?  Above TODO is probably better than investigating.
 	}
 	
-	// witness commit output costs 46 bytes
+	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
 	cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
@@ -376,8 +376,13 @@ int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_
 		msz1 = j;
 	}
 	
-	if (((i<<2)+s->block_template->txn_total_weight+340+36) > s->block_template->weightlimit) {
-		j = ((s->block_template->weightlimit - (s->block_template->txn_total_weight+340+36))>>2) - fixed_bytes;
+	// Block weight: four units a byte for the header and the transaction count
+	// (at most five bytes), four a byte for the coinbase (no witness data of
+	// its own) plus the 36 bytes of witness the node adds to it (marker, flag,
+	// one 32-byte item), and the template's transactions at their weight. The
+	// original 340 covered the 80-byte SHA256d header.
+	if (((i<<2)+s->block_template->txn_total_weight+((DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5)<<2)+36) > s->block_template->weightlimit) {
+		j = ((s->block_template->weightlimit - (s->block_template->txn_total_weight+((DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5)<<2)+36))>>2) - fixed_bytes;
 		if (j < 0) return 0;
 		msz1 = j;
 	}
@@ -505,7 +510,7 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 		k = cb2idx[0];
 	}
 	
-	// witness commit output costs 46 bytes
+	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
 	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
@@ -711,7 +716,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		k = cb2idx[0];
 	}
 	
-	// witness commit output costs 46 bytes
+	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
 	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
@@ -737,7 +742,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		// ok, let's figure out how much space, if any, we have for miner payout outputs
 		// we first need to figure out how much space we are using for each type after required data, so let's do that
 		
-		// witness output = 46 bytes
+		// witness commitment output = 47 bytes (8 value, 1 length, 38 script)
 		// pool output = pool_addr_script_len + 9
 		// coinbase itself = cb_input_sz
 		// coinbase len = 1
@@ -745,17 +750,23 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		// lock time = 4 bytes
 		// "sequence" = 4 bytes
 		// extranonce size = 15 bytes (w/len push needed for either coinbase or OP_RETURN formats)
-		// output count... could technically be up to three bytes for types 3 + 4, most likely 1 byte for 0,1,2.
-		//     --- lets give ourselves the wiggle room and say 3 bytes
+		// output count: one byte up to 252 outputs, three bytes past that (the
+		// largest class holds several hundred); counted at three so the coinbase
+		// never exceeds what datum_stratum_coinbase_fit_to_template allowed.
 		//
-		// total static bytes = 46+9+1+41+4+3+4+15 = 123 bytes
+		// total static bytes = 47+9+1+41+4+3+4+15 = 124 bytes
 		// not-static bytes = pool_addr_script_len + cb_input_sz + (space_for_en_in_coinbase?0:10)
 		//     --- it costs 10 extra bytes to do the OP_RETURN based extranonce
+		//
+		// This was 119, three bytes under the transaction with a one-byte output
+		// count and five under it with a three-byte count; a coinbase built to a
+		// template's room then exceeded the block's weight limit by up to 20
+		// weight units.
 		
 		if (!space_for_en_in_coinbase) {
-			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 119 + s->pool_addr_script_len + cb_input_sz + 10;
+			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + cb_input_sz + 10;
 		} else {
-			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 119 + s->pool_addr_script_len + cb_input_sz;
+			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + cb_input_sz;
 			cb_req_sz[2] += 10; // always OP_RETURN extranonce for type 2
 		}
 		
