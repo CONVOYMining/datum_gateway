@@ -184,6 +184,42 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 	return cb_input_sz;
 }
 
+// The sigop cost of a coinbase output script: Bitcoin's legacy count
+// (CScript::GetSigOpCount(false)) times 4. OP_CHECKSIG and OP_CHECKSIGVERIFY
+// count 1, OP_CHECKMULTISIG and OP_CHECKMULTISIGVERIFY count 20, pushed data
+// is skipped, and counting stops at a push that runs past the end.
+int datum_script_sigop_cost(const unsigned char *script, int len) {
+	int i = 0, n = 0;
+	uint32_t push;
+	
+	while (i < len) {
+		const unsigned char op = script[i++];
+		push = 0;
+		if (op < 0x4c) {
+			push = op;
+		} else if (op == 0x4c) { // OP_PUSHDATA1
+			if (len - i < 1) break;
+			push = script[i];
+			i += 1;
+		} else if (op == 0x4d) { // OP_PUSHDATA2
+			if (len - i < 2) break;
+			push = upk_u16le(script, i);
+			i += 2;
+		} else if (op == 0x4e) { // OP_PUSHDATA4
+			if (len - i < 4) break;
+			push = upk_u32le(script, i);
+			i += 4;
+		} else if ((op == 0xac) || (op == 0xad)) { // OP_CHECKSIG, OP_CHECKSIGVERIFY
+			n += 1;
+		} else if ((op == 0xae) || (op == 0xaf)) { // OP_CHECKMULTISIG, OP_CHECKMULTISIGVERIFY
+			n += 20;
+		}
+		if (push > (uint32_t)(len - i)) break;
+		i += (int)push;
+	}
+	return n * 4;
+}
+
 void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1) {
 	// This function finishes off the stratum coinb1+coinb2 using the available outputs in the job and other flags specified.
 	// it does not attempt to maximize coinb1's size to any specific size
@@ -206,9 +242,20 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 	// technically an output script could be > 0x4B, meaning an extra byte would be eaten here... but that's not currently the standard
 	// this needs to match the loop lower in this function, as the count will get thrown off if it does not.
 	
-	// TODO: Enforce max sigops! Note: This is not currently enforced in eloipool, either, so punting for now and will monitor network stats to determine priority.
+	// The sigop cost available to these outputs: the template's sigoplimit
+	// (from GBT, in sigop cost units, where one legacy CHECKSIG counts 4) minus
+	// the cost of the template's transactions and minus the cost of the pool's
+	// own output. available_coinbase_outputs[].sigops is set by the coinbaser
+	// parser to datum_script_sigop_cost of the output's script, and the pool
+	// output is charged the same way. An output whose cost exceeds the
+	// remaining budget is skipped, the same as an output that exceeds the
+	// remaining size, in both this counting pass and the writing pass below.
+	int64_t sigops_budget = (int64_t)s->block_template->sigoplimit - (int64_t)s->block_template->txn_total_sigops;
+	sigops_budget -= datum_script_sigop_cost(s->pool_addr_script, s->pool_addr_script_len);
+	if (sigops_budget < 0) sigops_budget = 0;
+	int64_t sigops_left = sigops_budget;
 	for(k=0;k<s->available_coinbase_outputs_count;k++) {
-		if (((s->available_coinbase_outputs[k].output_script_len+9) <= i) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value))  {
+		if (((s->available_coinbase_outputs[k].output_script_len+9) <= i) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value) && (s->available_coinbase_outputs[k].sigops <= sigops_left))  {
 			if ((special_coinb1) && (!c1full) && ((s->available_coinbase_outputs[k].output_script_len+9) <= i2)) {
 				i2 -= (s->available_coinbase_outputs[k].output_script_len+9);
 				c1cnt++;
@@ -217,6 +264,7 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 			}
 			
 			i -= (s->available_coinbase_outputs[k].output_script_len+9);
+			sigops_left -= s->available_coinbase_outputs[k].sigops;
 			m++;
 			mval += s->available_coinbase_outputs[k].value_sats;
 			if (i < 30) break;
@@ -244,9 +292,11 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 	
 	// append "m" payouts. find them the same way we did before
 	mval = 0;
+	sigops_left = sigops_budget;
 	for(k=0;k<s->available_coinbase_outputs_count;k++) {
-		if (((s->available_coinbase_outputs[k].output_script_len+9) <= j) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value)) {
+		if (((s->available_coinbase_outputs[k].output_script_len+9) <= j) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value) && (s->available_coinbase_outputs[k].sigops <= sigops_left)) {
 			j -= (s->available_coinbase_outputs[k].output_script_len+9);
+			sigops_left -= s->available_coinbase_outputs[k].sigops;
 			m--;
 			
 			mval += s->available_coinbase_outputs[k].value_sats;
@@ -813,11 +863,7 @@ int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, i
 		memcpy(s->available_coinbase_outputs[cbvalid].output_script, &coinbaser[cidx], slen); cidx+=slen;
 		// 64-bit value in sats is part of the output
 		s->available_coinbase_outputs[cbvalid].value_sats = outval;
-		if (s->available_coinbase_outputs[cbvalid].output_script[0] == 0x76) { // kludge for checking for P2PKH output
-			s->available_coinbase_outputs[cbvalid].sigops = 4;
-		} else {
-			s->available_coinbase_outputs[cbvalid].sigops = 0;
-		}
+		s->available_coinbase_outputs[cbvalid].sigops = datum_script_sigop_cost(s->available_coinbase_outputs[cbvalid].output_script, slen);
 		
 		s->available_coinbase_outputs[cbvalid].output_script_len = slen;
 		

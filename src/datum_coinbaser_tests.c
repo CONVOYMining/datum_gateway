@@ -33,6 +33,7 @@
  *
  */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "datum_conf.h"
@@ -88,8 +89,145 @@ static void datum_coinbaser_value_overflow_tests(void) {
 	datum_test(job.available_coinbase_outputs[0].value_sats == 1);
 }
 
+/* P2PKH: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG, 25 bytes. */
+static const unsigned char datum_test_p2pkh_script[25] = {0x76, 0xa9, 0x14, [23] = 0x88, 0xac};
+/* P2WPKH: OP_0 <20 bytes>, 22 bytes. */
+static const unsigned char datum_test_p2wpkh_script[22] = {0x00, 0x14};
+/* Bare P2PK: <33-byte key> OP_CHECKSIG, 35 bytes. */
+static const unsigned char datum_test_p2pk_script[35] = {0x21, [34] = 0xac};
+/* Bare 1-of-1 multisig: OP_1 <33-byte key> OP_1 OP_CHECKMULTISIG, 37 bytes. */
+static const unsigned char datum_test_multisig_script[37] = {0x51, 0x21, [35] = 0x51, 0xae};
+
+/* datum_script_sigop_cost against Bitcoin's legacy count times 4. */
+static void datum_script_sigop_cost_tests(void) {
+	static const unsigned char p2sh[23] = {0xa9, 0x14, [22] = 0x87};
+	static const unsigned char p2tr[34] = {0x51, 0x20};
+	static const unsigned char checksigverify[1] = {0xad};
+	static const unsigned char checkmultisigverify[1] = {0xaf};
+	static const unsigned char several[3] = {0xac, 0xac, 0xae};
+	/* Opcode bytes inside pushed data are not counted. */
+	static const unsigned char pushed[4] = {0x03, 0xac, 0xac, 0xac};
+	static const unsigned char pushdata1[4] = {0x4c, 0x02, 0xae, 0xae};
+	static const unsigned char pushdata2[6] = {0x4d, 0x02, 0x00, 0xac, 0xac, 0xac};
+	/* Counting stops at a push that runs past the end, or whose length does. */
+	static const unsigned char truncated_push[3] = {0xac, 0x05, 0xac};
+	static const unsigned char truncated_length[3] = {0xac, 0x4d, 0x01};
+	
+	datum_test(datum_script_sigop_cost(datum_test_p2pkh_script, sizeof(datum_test_p2pkh_script)) == 4);
+	datum_test(datum_script_sigop_cost(datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script)) == 0);
+	datum_test(datum_script_sigop_cost(p2sh, sizeof(p2sh)) == 0);
+	datum_test(datum_script_sigop_cost(p2tr, sizeof(p2tr)) == 0);
+	datum_test(datum_script_sigop_cost(datum_test_p2pk_script, sizeof(datum_test_p2pk_script)) == 4);
+	datum_test(datum_script_sigop_cost(datum_test_multisig_script, sizeof(datum_test_multisig_script)) == 80);
+	datum_test(datum_script_sigop_cost(checksigverify, sizeof(checksigverify)) == 4);
+	datum_test(datum_script_sigop_cost(checkmultisigverify, sizeof(checkmultisigverify)) == 80);
+	datum_test(datum_script_sigop_cost(several, sizeof(several)) == 88);
+	datum_test(datum_script_sigop_cost(pushed, sizeof(pushed)) == 0);
+	datum_test(datum_script_sigop_cost(pushdata1, sizeof(pushdata1)) == 0);
+	datum_test(datum_script_sigop_cost(pushdata2, sizeof(pushdata2)) == 4);
+	datum_test(datum_script_sigop_cost(truncated_push, sizeof(truncated_push)) == 4);
+	datum_test(datum_script_sigop_cost(truncated_length, sizeof(truncated_length)) == 4);
+}
+
+/* The coinbaser parser charges each dictated output its script's cost. */
+static void datum_coinbaser_parse_sigops_tests(void) {
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
+	unsigned char response[1 + 2 * 9 + sizeof(datum_test_p2pk_script) + sizeof(datum_test_multisig_script)];
+	size_t i = 0;
+	
+	datum_test(job != NULL);
+	if (!job) return;
+	job->coinbase_value = 5000000000ULL;
+	response[i++] = 1;
+	pk_u64le(response, i, 1000); i += 8;
+	response[i++] = sizeof(datum_test_p2pk_script);
+	memcpy(&response[i], datum_test_p2pk_script, sizeof(datum_test_p2pk_script)); i += sizeof(datum_test_p2pk_script);
+	pk_u64le(response, i, 1000); i += 8;
+	response[i++] = sizeof(datum_test_multisig_script);
+	memcpy(&response[i], datum_test_multisig_script, sizeof(datum_test_multisig_script)); i += sizeof(datum_test_multisig_script);
+	
+	datum_test(datum_coinbaser_v2_parse(job, response, (int)i) == 2);
+	datum_test(job->available_coinbase_outputs[0].sigops == 4);
+	datum_test(job->available_coinbase_outputs[1].sigops == 80);
+	free(job);
+}
+
+/* Builds one coinbase class with the template's used sigop cost set to
+ * sigops_used and the pool script set to P2PKH or P2WPKH, and returns the hex
+ * output count that follows the 8-character sequence at the start of coinb2.
+ * The count covers the included outputs plus the pool output and the witness
+ * commitment. The job's candidate outputs are two P2PKH outputs (cost 4 each)
+ * and one P2WPKH output (cost 0). */
+static const char *datum_coinbase_output_count_hex(T_DATUM_STRATUM_JOB *job, uint32_t sigops_used, bool pool_p2pkh) {
+	int cb1idx[MAX_COINBASE_TYPES] = {0};
+	int cb2idx[MAX_COINBASE_TYPES] = {0};
+	
+	job->block_template->txn_total_sigops = sigops_used;
+	if (pool_p2pkh) {
+		memcpy(job->pool_addr_script, datum_test_p2pkh_script, sizeof(datum_test_p2pkh_script));
+		job->pool_addr_script_len = sizeof(datum_test_p2pkh_script);
+	} else {
+		memcpy(job->pool_addr_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
+		job->pool_addr_script_len = sizeof(datum_test_p2wpkh_script);
+	}
+	memset(job->coinbase[1].coinb2, 0, sizeof(job->coinbase[1].coinb2));
+	generate_coinbase_txns_for_stratum_job_subtypebysize(job, 1, 1000, true, cb1idx, cb2idx, false);
+	return job->coinbase[1].coinb2 + 8;
+}
+
+static void datum_blake2b_coinbase_sigops_tests(void) {
+	T_DATUM_TEMPLATE_DATA tdata;
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
+	int cb1idx[MAX_COINBASE_TYPES] = {0};
+	int cb2idx[MAX_COINBASE_TYPES] = {0};
+	int k;
+	
+	datum_test(job != NULL);
+	if (!job) return;
+	memset(&tdata, 0, sizeof(tdata));
+	tdata.sigoplimit = 80000;
+	job->block_template = &tdata;
+	job->coinbase_value = 5000000000ULL;
+	for (k = 0; k < 3; k++) {
+		job->available_coinbase_outputs[k].value_sats = 100000000;
+		if (k < 2) {
+			memcpy(job->available_coinbase_outputs[k].output_script, datum_test_p2pkh_script, sizeof(datum_test_p2pkh_script));
+			job->available_coinbase_outputs[k].output_script_len = sizeof(datum_test_p2pkh_script);
+			job->available_coinbase_outputs[k].sigops = 4;
+		} else {
+			memcpy(job->available_coinbase_outputs[k].output_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
+			job->available_coinbase_outputs[k].output_script_len = sizeof(datum_test_p2wpkh_script);
+			job->available_coinbase_outputs[k].sigops = 0;
+		}
+	}
+	job->available_coinbase_outputs_count = 3;
+	
+	/* Space for every output: all three, the pool output and the witness commitment. */
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 0, false), "05", 2));
+	/* Budget for one P2PKH output: the first P2PKH is included, the second is
+	 * skipped, and the P2WPKH is included. */
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 80000 - 4, false), "04", 2));
+	/* Budget of 0: only the P2WPKH output is included. */
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 80000, false), "03", 2));
+	/* A P2PKH pool output takes the remaining 4 units of the budget, so neither
+	 * P2PKH candidate is included. */
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 80000 - 4, true), "03", 2));
+	/* A bare P2PK pool output is charged its script's cost, 4, the same as a
+	 * P2PKH one. */
+	memcpy(job->pool_addr_script, datum_test_p2pk_script, sizeof(datum_test_p2pk_script));
+	job->pool_addr_script_len = sizeof(datum_test_p2pk_script);
+	tdata.txn_total_sigops = 80000 - 4;
+	memset(job->coinbase[1].coinb2, 0, sizeof(job->coinbase[1].coinb2));
+	generate_coinbase_txns_for_stratum_job_subtypebysize(job, 1, 1000, true, cb1idx, cb2idx, false);
+	datum_test(!strncmp(job->coinbase[1].coinb2 + 8, "03", 2));
+	free(job);
+}
+
 void datum_coinbaser_tests(void) {
 	datum_prime_id_64bit_tests();
 	datum_blake2b_coinbase_limit_tests();
 	datum_coinbaser_value_overflow_tests();
+	datum_blake2b_coinbase_sigops_tests();
+	datum_script_sigop_cost_tests();
+	datum_coinbaser_parse_sigops_tests();
 }
