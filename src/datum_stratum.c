@@ -1746,14 +1746,12 @@ int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	// mark them as subscribed so that notifies actually work
 	m->subscribed = true;
 	
+	// begin vardiff sampling before the first notify can evaluate it
+	reset_vardiff_stats(c);
+	m->subscribe_tsms = m->sdata->loop_tsms;
+	
 	// clean work on connect, not quickdiff, doesn't matter if new block or not (don't need empty work speedup on connect)
 	send_mining_notify(c,true,false,false);
-	
-	// reset vardiff tallies
-	m->share_count_since_snap = 0;
-	m->share_diff_since_snap = 0;
-	m->share_snap_tsms = m->sdata->loop_tsms;
-	m->subscribe_tsms = m->sdata->loop_tsms;
 	
 	return 0;
 }
