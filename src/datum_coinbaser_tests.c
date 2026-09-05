@@ -75,7 +75,21 @@ static void datum_blake2b_coinbase_limit_tests(void) {
 	datum_test(datum_stratum_coinbase_fit_to_template(1000, 0, &job) == 866);
 }
 
+static void datum_coinbaser_value_overflow_tests(void) {
+	T_DATUM_STRATUM_JOB job = {.coinbase_value = UINT64_C(5000000000)};
+	unsigned char response[] = {
+		1,
+		1, 0, 0, 0, 0, 0, 0, 0, 2, 0x51, 0x51,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 2, 0x51, 0x51,
+	};
+	
+	datum_test(datum_coinbaser_v2_parse(&job, response, sizeof(response), false) == 1);
+	datum_test(job.available_coinbase_outputs_count == 1);
+	datum_test(job.available_coinbase_outputs[0].value_sats == 1);
+}
+
 void datum_coinbaser_tests(void) {
 	datum_prime_id_64bit_tests();
 	datum_blake2b_coinbase_limit_tests();
+	datum_coinbaser_value_overflow_tests();
 }
