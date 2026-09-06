@@ -1620,68 +1620,7 @@ int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c) {
 }
 
 void datum_stratum_fingerprint_by_UA(T_DATUM_MINER_DATA *m) {
-	// TODO: Make this a little more efficient. perhaps move to a loadable definitions file of some kind.
-	
-	if (strstr(m->useragent, "Antminer A3") == m->useragent) {
-		m->coinbase_selection = 0;
-		return;
-	}
-
-	// S21 tested to handle 2.25KB coinbase work on all versions released
-	// UA starts with: Antminer S21/
-	// S21 Pro NOT confirmed to work this way (yet)... so keep the /
-	if (strstr(m->useragent, "Antminer S21/") == m->useragent) {
-		m->coinbase_selection = 5; // ANTMAIN2
-		return;
-	}
-	
-	// the ePIC control boards can handle almost any size coinbase
-	// UA starts with: PowerPlay-BM/
-	if (strstr(m->useragent, "PowerPlay-BM/") == m->useragent) {
-		m->coinbase_selection = 4; // YUGE
-		return;
-	}
-	
-	// "vinsh" reports as xminer
-	// Tested to handle up to 16KB
-	if (strstr(m->useragent, "xminer-1.") == m->useragent) {
-		m->coinbase_selection = 4; // YUGE
-		return;
-	}
-	
-	// whatsminer works fine with about a 6.5 KB coinbase
-	// UA starts with: whatsminer/v1
-	if (strstr(m->useragent, "whatsminer/v1") == m->useragent) {
-		m->coinbase_selection = 3; // RESPECTABLE
-		return;
-	}
-	
-	// Braiins firmware
-	// Appears to handle arbitrary coinbase sizes, however not extensively tested on all firmware versions
-	// feed the S21-like coinbase for now, which is at least moderately sized
-	// UA contains: bosminer-plus-tuner
-	if (strstr(m->useragent, "bosminer-plus-tuner") != NULL) { // match anywhere in string, not just beginning
-		m->coinbase_selection = 5; // ANTMAIN2
-		return;
-	}
-	
-	// Nicehash, sadly needs a smaller coinbase than even antminer s19s
-	// they also need a high minimum difficulty
-	if (strstr(m->useragent, "NiceHash/") == m->useragent) {
-		m->current_diff=524288;
-		m->forced_high_min_diff=524288;
-		m->coinbase_selection = 1; // TINY
-		return;
-	}
-	
-	// The Bitaxe is tested to work with a large coinbase
-	// However, it does slow work changes slightly when they're YUGE, so we'll go with
-	// the whatsminer tested size as a compromise.  also should save some bandwidth, which
-	// is probably not a bad plan, given the low odds of a bitaxe finding a block.
-	if (strstr(m->useragent, "bitaxe") == m->useragent) {
-		m->coinbase_selection = 3; // RESPECTABLE
-		return;
-	}
+	// TODO: Stub for now
 }
 
 int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
@@ -1704,9 +1643,9 @@ int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	// set default diff
 	m->current_diff = datum_config.stratum_v1_vardiff_min;
 	
-	// default to the antminer workaround, which appears to be universally compatible
-	// except for NiceHash.
-	m->coinbase_selection = 2;
+	// Sv1 is blind to the generation transaction now, so go as large as we want
+	// TODO: We may want to shrink based on block free space in the future
+	m->coinbase_selection = COINBASE_TYPE_YUGE;
 	
 	m->useragent[0] = 0;
 	if (params_obj) {
