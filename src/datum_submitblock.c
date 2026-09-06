@@ -69,14 +69,21 @@ datum_submitblock_status datum_submitblock_reply_status(const json_t *reply) {
 	if (!reply) return DATUM_SUBMITBLOCK_UNKNOWN;
 	const json_t * const result = json_object_get(reply, "result");
 	if (json_is_null(result)) return DATUM_SUBMITBLOCK_ACCEPTED;
+	if (json_is_string(result) && !strcmp(json_string_value(result), "duplicate")) return DATUM_SUBMITBLOCK_DUPLICATE;
 	return DATUM_SUBMITBLOCK_REJECTED;
 }
 
-// Log what the node said about our block. Returns true when the node took it.
+// Log what the node said about our block. Returns true when the block is in
+// the node's chain, which includes "duplicate": the block is handed in twice,
+// once inline from the share that found it and once from the submit thread,
+// and the second copy is not a rejection.
 bool datum_submitblock_log_reply(const json_t *reply, const char *block_hash_hex) {
 	switch (datum_submitblock_reply_status(reply)) {
 		case DATUM_SUBMITBLOCK_ACCEPTED:
 			DLOG_INFO("Block %s submitted to upstream node successfully!", block_hash_hex);
+			return true;
+		case DATUM_SUBMITBLOCK_DUPLICATE:
+			DLOG_INFO("Block %s was already accepted by the upstream node (duplicate submission)", block_hash_hex);
 			return true;
 		case DATUM_SUBMITBLOCK_UNKNOWN:
 			// Didn't get a usable response at all: either the request never reached the node, or it

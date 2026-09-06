@@ -129,7 +129,11 @@ void datum_submitblock_reply_tests(void) {
 	datum_test(status_of("{\"result\":null,\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_ACCEPTED);
 	
 	// Already have it and it is valid: the block is in the chain
+	datum_test(status_of("{\"result\":\"duplicate\",\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_DUPLICATE);
 	
+	// Every other string is a rejection, including the other duplicate-* forms
+	datum_test(status_of("{\"result\":\"duplicate-invalid\",\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_REJECTED);
+	datum_test(status_of("{\"result\":\"duplicate-inconclusive\",\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_REJECTED);
 	datum_test(status_of("{\"result\":\"inconclusive\",\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_REJECTED);
 	datum_test(status_of("{\"result\":\"bad-txnmrklroot\",\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_REJECTED);
 	datum_test(status_of("{\"result\":\"prev-blk-not-found\",\"error\":null,\"id\":1}") == DATUM_SUBMITBLOCK_REJECTED);

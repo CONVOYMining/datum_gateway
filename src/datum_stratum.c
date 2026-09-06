@@ -2459,7 +2459,7 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	r = bitcoind_json_rpc_call(tcurl, &datum_config, submitblock_req);
 	curl_easy_cleanup(tcurl);
 	// The dedicated submitblock thread triggered above is still independently
-	// submitting this same block.
+	// submitting this same block, so one of the two is answered "duplicate".
 	ret = datum_submitblock_log_reply(r, block_hash_hex) ? 1 : 0;
 	if (r) json_decref(r);
 	

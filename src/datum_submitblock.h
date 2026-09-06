@@ -44,7 +44,8 @@
 typedef enum {
 	DATUM_SUBMITBLOCK_UNKNOWN = 0,	// no usable reply: the node may or may not have the block
 	DATUM_SUBMITBLOCK_ACCEPTED,		// null result: the node took the block
-	DATUM_SUBMITBLOCK_REJECTED,		// anything else
+	DATUM_SUBMITBLOCK_DUPLICATE,	// "duplicate": the node already had it, and it is valid
+	DATUM_SUBMITBLOCK_REJECTED,		// anything else, including "duplicate-invalid"
 } datum_submitblock_status;
 
 datum_submitblock_status datum_submitblock_reply_status(const json_t *reply);
