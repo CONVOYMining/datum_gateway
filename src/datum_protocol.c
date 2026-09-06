@@ -1006,7 +1006,7 @@ static bool datum_protocol_abw_mark_handled_exact(
 int datum_protocol_abw_candidate_receipt(int len, unsigned char *data) {
 	if (len != 35 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[34] != 0xFE) {
-		DLOG_ERROR("Invalid BLAKE2b anti-withholding candidate receipt");
+		DLOG_ERROR("Invalid anti-withholding candidate receipt");
 		return 0;
 	}
 	const uint8_t assignment_id = data[1] + 1;
@@ -1024,7 +1024,7 @@ int datum_protocol_abw_candidate_receipt(int len, unsigned char *data) {
 int datum_protocol_abw_candidate_release(int len, unsigned char *data) {
 	if (len != 35 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[34] != 0xFE) {
-		DLOG_ERROR("Invalid BLAKE2b anti-withholding candidate release");
+		DLOG_ERROR("Invalid anti-withholding candidate release");
 		return 0;
 	}
 	if (!datum_config.mining_abw_verify_all_shares_on_disclosure) {
@@ -1036,7 +1036,7 @@ int datum_protocol_abw_candidate_release(int len, unsigned char *data) {
 int datum_protocol_abw_activation(int len, unsigned char *data) {
 	if (len != 3 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[2] != 0xFE) {
-		DLOG_ERROR("Invalid BLAKE2b anti-withholding activation");
+		DLOG_ERROR("Invalid anti-withholding activation");
 		return 0;
 	}
 	const uint8_t assignment_id = data[1] + 1;
@@ -1059,7 +1059,7 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	if (len != 36 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    (data[1] & ~DATUM_ABW_ASSIGNMENT_ACTIVE) ||
 	    data[2] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[35] != 0xFE) {
-		DLOG_ERROR("Invalid BLAKE2b anti-withholding assignment notice");
+		DLOG_ERROR("Invalid anti-withholding assignment notice");
 		return 0;
 	}
 	const uint8_t assignment_id = data[2] + 1;
@@ -1072,7 +1072,7 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!installed) {
-		DLOG_ERROR("Could not retain BLAKE2b anti-withholding assignment");
+		DLOG_ERROR("Could not retain anti-withholding assignment");
 	}
 	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
 		datum_blocktemplates_notifynew(NULL, 0);
@@ -1147,7 +1147,7 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 	if (len != 19 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    data[18] != 0xFE || data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS ||
 	    !datum_blake2b_xor_key_hash(key_hash, data + 2)) {
-		DLOG_ERROR("Invalid BLAKE2b anti-withholding reveal");
+		DLOG_ERROR("Invalid anti-withholding reveal");
 		return 0;
 	}
 	const uint8_t assignment_id = data[1] + 1;
@@ -1165,7 +1165,7 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		}
 		pthread_mutex_unlock(&datum_abw_mutex);
 		if (has_pending) {
-			DLOG_ERROR("BLAKE2b anti-withholding reveal has proofs without a commitment");
+			DLOG_ERROR("Anti-withholding reveal has proofs without a commitment");
 			return 0;
 		}
 		DLOG_DEBUG("Ignored disclosure for an ABW slot not held by this session");
@@ -1177,7 +1177,7 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 			assignment_id, key_hash);
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!commitment_matched) {
-		DLOG_ERROR("BLAKE2b anti-withholding reveal did not match its commitment");
+		DLOG_ERROR("Anti-withholding reveal did not match its commitment");
 		return 0;
 	}
 	size_t submitted = 0;
@@ -1201,15 +1201,15 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		}
 		if (!datum_submitblock_trigger_owned(block_request, block_hash)) {
 			free(block_request);
-			DLOG_ERROR("Could not queue a revealed BLAKE2b block for local submission");
+			DLOG_ERROR("Could not queue a revealed block for local submission");
 			continue;
 		}
 		submitted++;
-		DLOG_WARN("DATUM server revealed a verified BLAKE2b block key for candidate %s",
+		DLOG_WARN("DATUM server revealed a verified block key for candidate %s",
 			block_hash);
 	}
 	if (!submitted) {
-		DLOG_INFO("DATUM server retired BLAKE2b assignment slot %u",
+		DLOG_INFO("DATUM server retired ABW assignment slot %u",
 			(unsigned)(assignment_id - 1));
 	}
 	if (retired_active) datum_blocktemplates_notifynew(NULL, 0);
@@ -2670,7 +2670,7 @@ int datum_protocol_pow_submit(
 	}
 	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
 		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
-		DLOG_ERROR("BLAKE2b anti-withholding candidate cache is full");
+		DLOG_ERROR("Anti-withholding candidate cache is full");
 		return -1;
 	}
 	

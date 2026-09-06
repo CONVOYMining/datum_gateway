@@ -1964,7 +1964,7 @@ void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 			// commitment, notify and DATUM submission all read it from there.
 			// time_on_wire already holds curtime: the helper only writes on
 			// success.
-			DLOG_ERROR("Could not derive the BLAKE2b wire time from curtime %llu; mining this template without the time offset",
+			DLOG_ERROR("Could not derive the wire time from curtime %llu; mining this template without the time offset",
 				(unsigned long long)block_template->curtime);
 			s->blake2b_flags &= ~DATUM_BLAKE2B_USE_TIME_OFFSET;
 		}
