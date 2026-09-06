@@ -208,6 +208,10 @@ static void datum_blake2b_malformed_submit_job_tests(void) {
 	static const char * const submits[] = {
 		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0dg00\",\"0000000000000000\",\"00000000\",\"00000000\"]}",
 		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0de00\",\"000000000000000g\",\"00000000\",\"00000000\"]}",
+		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0de00\",\"0000000000000000\",\"0000000g\",\"00000000\"]}",
+		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0de00\",\"0000000000000000\",\"000000000000000g\",\"00000000\"]}",
+		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0de00\",\"0000000000000000\",\"00000000\",\"0000000g\"]}",
+		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0de00\",\"0000000000000000\",\"00000000\",\"000000000000000g\"]}",
 	};
 	static const char expected[] =
 		"{\"error\":[20,\"unknown-work\",null],\"id\":8,\"result\":null}\n";

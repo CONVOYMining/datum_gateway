@@ -1177,10 +1177,18 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	if (ntime_len == 8) {
-		ntime_val = (uint32_t)strtoul(ntime_s, NULL, 16);
+		if (!hex_to_u32(ntime_s, &ntime_val)) {
+			send_unknown_work_error(c, id);
+			stratum_note_share(m, false, job_diff);
+			return 0;
+		}
 		pk_u32le(ntime8, 0, ntime_val);
 	} else {
-		for(i=0;i<8;i++) ntime8[i] = hex2bin_uchar(&ntime_s[i << 1]);
+		if (!hex_to_bin_exact(ntime_s, ntime8, 8)) {
+			send_unknown_work_error(c, id);
+			stratum_note_share(m, false, job_diff);
+			return 0;
+		}
 		ntime_val = upk_u32le(ntime8, 0);
 	}
 	ntime64 = upk_u64le(ntime8, 0);
@@ -1205,10 +1213,18 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	if (nonce_len == 8) {
-		nonce_val = (uint32_t)strtoul(nonce_s, NULL, 16);
+		if (!hex_to_u32(nonce_s, &nonce_val)) {
+			send_unknown_work_error(c, id);
+			stratum_note_share(m, false, job_diff);
+			return 0;
+		}
 		pk_u32le(nonce8, 0, nonce_val);
 	} else {
-		for(i=0;i<8;i++) nonce8[i] = hex2bin_uchar(&nonce_s[i << 1]);
+		if (!hex_to_bin_exact(nonce_s, nonce8, 8)) {
+			send_unknown_work_error(c, id);
+			stratum_note_share(m, false, job_diff);
+			return 0;
+		}
 		nonce_val = upk_u32le(nonce8, 0);
 	}
 	nonce64 = upk_u64le(nonce8, 0);
