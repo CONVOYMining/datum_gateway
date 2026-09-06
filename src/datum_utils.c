@@ -375,6 +375,14 @@ bool hex_to_bin_exact(const char *hex, unsigned char *bin, const size_t bin_len)
 	return hex[bin_len<<1] == 0;
 }
 
+bool hex_to_u32(const char *hex, uint32_t *out) {
+	unsigned char bin[4];
+	if (!out || !hex_to_bin_exact(hex, bin, sizeof(bin))) return false;
+	*out = ((uint32_t)bin[0] << 24) | ((uint32_t)bin[1] << 16) |
+		((uint32_t)bin[2] << 8) | bin[3];
+	return true;
+}
+
 void panic_from_thread(int a) {
 	// set panic flag
 	panic_mode = 1;
