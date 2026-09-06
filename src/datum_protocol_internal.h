@@ -63,7 +63,7 @@ extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
 #define DATUM_STXLIST_REPLY_MAX (DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 113)
 extern unsigned char temp_data[DATUM_PROTOCOL_TEMP_DATA_SIZE];
 bool datum_protocol_stxlist_reply_fits(size_t offset, size_t txn_size);
-int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data);
+int datum_protocol_job_validation_stxlist_byid(const int len, const unsigned char * const data);
 
 uint32_t datum_header_xor_feedback(uint32_t i);
 void datum_header_upk(T_DATUM_PROTOCOL_HEADER *h, const uint8_t *src, size_t offset, uint32_t *xor_key);

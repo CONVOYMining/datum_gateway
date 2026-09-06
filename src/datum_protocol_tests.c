@@ -1510,9 +1510,7 @@ static void datum_protocol_stxlist_byid_tests(void) {
 	
 	// A list cut short of its count is refused before it is read.
 	pk_u16le(request, 1, 4);
-	temp_data[3] = 0;
-	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 3, request) == 1);
-	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF4);
+	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 3, request) == 0);
 	datum_test(datum_protocol_job_validation_stxlist_byid(2, request) == 0);
 	
 	// The bound leaves room for the terminator and the padding.
@@ -1533,6 +1531,31 @@ cleanup:
 	free(job);
 }
 
+int datum_protocol_job_validation_cmd(int len, unsigned char *data);
+
+static void datum_protocol_job_validation_bounds_test(void) {
+	// stxlist-by-id: subcommand 0x11, job index, 16-bit id count, then two
+	// bytes per id. Each request sits in a buffer of exactly its length, so
+	// a read past it is a sanitizer report.
+	unsigned char *req = malloc(1 + 3 + 2 * 3 - 1);  // third id one byte short
+	datum_test(req);
+	req[0] = 0x11;
+	req[1] = 0;
+	pk_u16le(req, 2, 3);
+	memset(&req[4], 0, 2 * 3 - 1);
+	datum_test(!datum_protocol_job_validation_cmd(1 + 3 + 2 * 3 - 1, req));
+	free(req);
+	
+	req = malloc(1 + 3 + 2);  // one id sent, 65535 requested
+	datum_test(req);
+	req[0] = 0x11;
+	req[1] = 0;
+	pk_u16le(req, 2, 0xffff);
+	memset(&req[4], 0, 2);
+	datum_test(!datum_protocol_job_validation_cmd(1 + 3 + 2, req));
+	free(req);
+}
+
 void datum_protocol_tests(void) {
 	datum_protocol_hello_framing_offer_tests();
 	datum_protocol_receive_mode_tests();
@@ -1548,4 +1571,5 @@ void datum_protocol_tests(void) {
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 	datum_protocol_stxlist_byid_tests();
+	datum_protocol_job_validation_bounds_test();
 }

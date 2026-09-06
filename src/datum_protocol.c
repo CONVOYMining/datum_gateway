@@ -1551,7 +1551,8 @@ void datum_protocol_job_validation_send_error(unsigned char * const msg, const u
 	datum_protocol_mining_cmd(msg, 4 + j);
 }
 
-int datum_protocol_job_validation_stxlist(unsigned char *data) {
+int datum_protocol_job_validation_stxlist(const int len, const unsigned char * const data) {
+	if (len < 1) return 0;
 	// similar to compact blocks, we're going to send a list of short transaction IDs for the requested job
 	unsigned char job_index = data[0];
 	T_DATUM_PROTOCOL_JOB *dj;
@@ -1667,12 +1668,13 @@ bool datum_protocol_stxlist_reply_fits(size_t offset, size_t txn_size) {
 	return offset + 3 + txn_size <= DATUM_STXLIST_REPLY_MAX;
 }
 
-int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
+int datum_protocol_job_validation_stxlist_byid(const int len, const unsigned char * const data) {
+	if (len < 3) return 0;
 	// the server is requesting missing transactions
 	// send them
-	if (len < 3) return 0;
 	unsigned char job_index = data[0];
 	uint16_t req_count = upk_u16le(data, 1);
+	if (len < 3 + 2 * req_count) return 0;  // the server asked for more ids than it sent
 	
 	T_DATUM_PROTOCOL_JOB *dj;
 	T_DATUM_STRATUM_JOB *sj;
@@ -1769,7 +1771,8 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 	return 1;
 }
 
-int datum_protocol_job_validation_sblock(unsigned char *data) {
+int datum_protocol_job_validation_sblock(const int len, const unsigned char * const data) {
+	if (len < 1) return 0;
 	// the server decided our template probably is too unique from what it knows about, or was
 	// otherwise not able to validate the block using faster negotiations.
 	// It would like us to just send the entire transaction blob for validation as-is.
@@ -1910,7 +1913,7 @@ int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 	switch (cmd) {
 		case 0x10: {
 			// send short txn list
-			return datum_protocol_job_validation_stxlist(p);
+			return datum_protocol_job_validation_stxlist(len - 1, p);
 			break;
 		}
 		
@@ -1923,7 +1926,7 @@ int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 		
 		case 0x12: {
 			// send the entire block, except the coinbase txn
-			return datum_protocol_job_validation_sblock(p);
+			return datum_protocol_job_validation_sblock(len - 1, p);
 			break;
 		}
 		
