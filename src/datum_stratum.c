@@ -1243,7 +1243,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
-	datum_blake2b_build_work_header(work, job->prevhash_bin, nonce8, ntime8, root);
+	datum_blake2b_build_work_header_from_hidden(work, job->blake2b_prevblock_hidden, nonce8, ntime8, root);
 	memcpy(block_header, work, 80);
 	if (!datum_blake2b_pow_hash_le(share_hash, work, (const unsigned char[16]){0}, 0)) {
 		send_unknown_work_error(c, id);
@@ -2073,7 +2073,6 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_
 
 void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	T_DATUM_TEMPLATE_DATA *block_template;
-	unsigned char prevblock_hidden[32];
 	uint32_t time_on_wire;
 	int i;
 
@@ -2099,10 +2098,10 @@ void datum_stratum_job_refresh_blake2b(T_DATUM_STRATUM_JOB *s) {
 	}
 	s->blake2b_time_on_wire = time_on_wire;
 
-	datum_blake2b_prevblock_hidden(prevblock_hidden, block_template->previousblockhash_bin);
+	datum_blake2b_prevblock_hidden(s->blake2b_prevblock_hidden, block_template->previousblockhash_bin);
 
 	for(i=0;i<32;i++) {
-		uchar_to_hex(&s->prevhash[i << 1], prevblock_hidden[i]);
+		uchar_to_hex(&s->prevhash[i << 1], s->blake2b_prevblock_hidden[i]);
 	}
 	s->prevhash[64] = 0;
 }

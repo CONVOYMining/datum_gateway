@@ -206,11 +206,21 @@ void datum_blake2b_prevblock_hidden(unsigned char *out, const unsigned char *pre
 	memset(out, 0, 6);
 }
 
-void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root) {
-	datum_blake2b_prevblock_hidden(work, prevhash);
+void datum_blake2b_build_work_header_from_hidden(
+	unsigned char *work, const unsigned char *prevhash_hidden,
+	const unsigned char *nonce, const unsigned char *ntime,
+	const unsigned char *root
+) {
+	memcpy(work, prevhash_hidden, 32);
 	memcpy(work + 32, nonce, 8);
 	memcpy(work + 40, ntime, 8);
 	memcpy(work + 48, root, 32);
+}
+
+void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root) {
+	unsigned char prevhash_hidden[32];
+	datum_blake2b_prevblock_hidden(prevhash_hidden, prevhash);
+	datum_blake2b_build_work_header_from_hidden(work, prevhash_hidden, nonce, ntime, root);
 }
 
 bool datum_blake2b_header_commitment_from_key_hash(

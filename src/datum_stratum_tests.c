@@ -48,6 +48,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 static void datum_blake2b_refresh_time_offset_tests(void) {
 	T_DATUM_TEMPLATE_DATA tdata;
 	T_DATUM_STRATUM_JOB job;
+	unsigned char expected_hidden[32];
+	char expected_hex[65];
 	
 	/* A job snapshots whether miners may submit a time offset. */
 	memset(&tdata, 0, sizeof(tdata));
@@ -58,6 +60,13 @@ static void datum_blake2b_refresh_time_offset_tests(void) {
 	datum_stratum_job_refresh_blake2b(&job);
 	datum_test(job.blake2b_time_on_wire == 2000000000u);
 	datum_test(job.blake2b_flags == DATUM_BLAKE2B_USE_TIME_OFFSET);
+	datum_blake2b_prevblock_hidden(expected_hidden, tdata.previousblockhash_bin);
+	datum_test(!memcmp(job.blake2b_prevblock_hidden, expected_hidden, sizeof(expected_hidden)));
+	for (size_t i = 0; i < sizeof(expected_hidden); i++) {
+		uchar_to_hex(expected_hex + (i << 1), expected_hidden[i]);
+	}
+	expected_hex[64] = 0;
+	datum_test(!strcmp(job.prevhash, expected_hex));
 	
 	/* Without the flag the offset is ignored and curtime goes on the wire as is. */
 	tdata.curtime = 2000000000;
