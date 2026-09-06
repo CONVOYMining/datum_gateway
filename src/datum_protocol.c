@@ -1469,7 +1469,8 @@ err:
 	return 1;
 }
 
-int datum_protocol_job_validation_stxlist(unsigned char *data) {
+int datum_protocol_job_validation_stxlist(const int len, const unsigned char * const data) {
+	if (len < 1) return 0;
 	// similar to compact blocks, we're going to send a list of short transaction IDs for the requested job
 	unsigned char job_index = data[0];
 	T_DATUM_PROTOCOL_JOB *dj;
@@ -1634,11 +1635,13 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	return 1;
 }
 
-int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
+int datum_protocol_job_validation_stxlist_byid(const int len, const unsigned char * const data) {
+	if (len < 3) return 0;
 	// the server is requesting missing transactions
 	// send them
 	unsigned char job_index = data[0];
 	uint16_t req_count = upk_u16le(data, 1);
+	if (len < 3 + 2 * req_count) return 0;  // the server asked for more ids than it sent
 	
 	T_DATUM_PROTOCOL_JOB *dj;
 	T_DATUM_STRATUM_JOB *sj;
@@ -1781,7 +1784,8 @@ int datum_protocol_job_validation_stxlist_byid(unsigned char *data) {
 	return 1;
 }
 
-int datum_protocol_job_validation_sblock(unsigned char *data) {
+int datum_protocol_job_validation_sblock(const int len, const unsigned char * const data) {
+	if (len < 1) return 0;
 	// the server decided our template probably is too unique from what it knows about, or was
 	// otherwise not able to validate the block using faster negotiations.
 	// It would like us to just send the entire transaction blob for validation as-is.
@@ -1961,20 +1965,20 @@ int datum_protocol_job_validation_cmd(int len, unsigned char *data) {
 	switch (cmd) {
 		case 0x10: {
 			// send short txn list
-			return datum_protocol_job_validation_stxlist(p);
+			return datum_protocol_job_validation_stxlist(len - 1, p);
 			break;
 		}
 		
 		case 0x11: {
 			// send the requested txns
 			// 16-bit indexes
-			return datum_protocol_job_validation_stxlist_byid(p);
+			return datum_protocol_job_validation_stxlist_byid(len - 1, p);
 			break;
 		}
 		
 		case 0x12: {
 			// send the entire block, except the coinbase txn
-			return datum_protocol_job_validation_sblock(p);
+			return datum_protocol_job_validation_sblock(len - 1, p);
 			break;
 		}
 		
