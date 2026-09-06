@@ -141,9 +141,25 @@ static void datum_utils_tests_pdiff_to_bdiff(void) {
 	datum_test(datum_pdiff_to_bdiff(16) == 15.999755859375L);
 }
 
+static void datum_utils_tests_strncpy_printable(void) {
+	char out[8];
+	datum_test(!strncpy_printable(out, NULL, sizeof(out)));
+	datum_test(!strncpy_printable(NULL, "x", sizeof(out)));
+	datum_test(!strncpy_printable(out, "x", 0));
+	datum_test(strncpy_printable(out, "ab\n\x1b[1m", sizeof(out)));
+	datum_test(strcmp(out, "ab??[1m") == 0);
+	datum_test(strncpy_printable(out, "0123456789", sizeof(out)));
+	datum_test(strcmp(out, "0123456") == 0);
+	datum_test(strncpy_printable(out, "\xc3\xa9", sizeof(out)));
+	datum_test(strcmp(out, "??") == 0);
+	datum_test(strncpy_printable(out, "", sizeof(out)));
+	datum_test(out[0] == 0);
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
 	datum_utils_tests_secure_strequals();
 	datum_utils_tests_scriptnum();
 	datum_utils_tests_pdiff_to_bdiff();
+	datum_utils_tests_strncpy_printable();
 }
