@@ -260,37 +260,10 @@ void * datum_logger_thread(void *ptr) {
 	DLOG_MSG *msg;
 	char time_buffer[20];
 	char log_line[1200];
-	FILE *log_handle = NULL;
+	FILE *log_handle = ptr;  // opened by datum_logger_init()
 	time_t next_log_rotate = get_midnight_timestamp();
 	time_t log_file_opened = time(NULL);
 	
-	msg_buffer[0] = calloc((DLOG_MSG_BUF_SIZE * 2) + (1024*8),1);
-	if (!msg_buffer[0]) {
-		DLOG(DLOG_LEVEL_FATAL, "Could not allocate memory for logger queue!");
-		panic_from_thread(__LINE__);
-	}
-	// split the allocation in half for the double buffering
-	msg_buffer[1] = &msg_buffer[0][DLOG_MSG_BUF_SIZE + (1024*4)];
-	
-	dlog_queue_max_entries = (DLOG_MSG_BUF_SIZE / sizeof(DLOG_MSG)) - 1;
-	if (dlog_queue_max_entries < 1024) dlog_queue_max_entries = 1024;
-	dlog_queue[0] = calloc(dlog_queue_max_entries * 2 * sizeof(DLOG_MSG),1);
-	if (!dlog_queue[0]) {
-		DLOG(DLOG_LEVEL_FATAL, "Could not allocate memory for logger queue list!");
-		panic_from_thread(__LINE__);
-	}
-	dlog_queue[1] = &dlog_queue[0][dlog_queue_max_entries];
-	
-	if ((log_to_file) && (log_file[0] != 0)) {
-		log_handle = fopen(log_file,"a");
-		if (!log_handle) {
-			DLOG(DLOG_LEVEL_FATAL, "Could not open log file (%s): %s!", log_file, strerror(errno));
-			panic_from_thread(__LINE__);
-		}
-	}
-	
-	// alert the masses.
-	datum_logger_initialized = true;
 	
 	DLOG(DLOG_LEVEL_DEBUG, "Logging thread started! (Approximately %d MB of RAM allocated for up to %d entries per cycle)", (DLOG_MSG_BUF_SIZE * 4)/1024/1024, dlog_queue_max_entries);
 	lflush = 0;
@@ -462,8 +435,42 @@ int datum_logger_init(void) {
 	}
 	
 	pthread_t pthread_datum_logger_thread;
+	FILE *log_handle = NULL;
 	
-	pthread_create(&pthread_datum_logger_thread, NULL, datum_logger_thread, NULL);
+	// Set the queue and the log file up here, before the writer thread
+	// exists, so a message logged right after init has somewhere to go.
+	msg_buffer[0] = calloc((DLOG_MSG_BUF_SIZE * 2) + (1024*8),1);
+	if (!msg_buffer[0]) {
+		DLOG(DLOG_LEVEL_FATAL, "Could not allocate memory for logger queue!");
+		return -1;
+	}
+	// split the allocation in half for the double buffering
+	msg_buffer[1] = &msg_buffer[0][DLOG_MSG_BUF_SIZE + (1024*4)];
+	
+	dlog_queue_max_entries = (DLOG_MSG_BUF_SIZE / sizeof(DLOG_MSG)) - 1;
+	if (dlog_queue_max_entries < 1024) dlog_queue_max_entries = 1024;
+	dlog_queue[0] = calloc(dlog_queue_max_entries * 2 * sizeof(DLOG_MSG),1);
+	if (!dlog_queue[0]) {
+		DLOG(DLOG_LEVEL_FATAL, "Could not allocate memory for logger queue list!");
+		return -1;
+	}
+	dlog_queue[1] = &dlog_queue[0][dlog_queue_max_entries];
+	
+	if ((log_to_file) && (log_file[0] != 0)) {
+		log_handle = fopen(log_file,"a");
+		if (!log_handle) {
+			DLOG(DLOG_LEVEL_FATAL, "Could not open log file (%s): %s!", log_file, strerror(errno));
+			return -1;
+		}
+	}
+	
+	const int result = pthread_create(&pthread_datum_logger_thread, NULL, datum_logger_thread, log_handle);
+	if (result != 0) {
+		DLOG_FATAL("datum_logger_init: pthread_create failed with code %d", result);
+		return -1;
+	}
+	
+	datum_logger_initialized = true;
 	
 	return 0;
 }

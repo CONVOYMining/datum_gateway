@@ -196,7 +196,10 @@ int main(const int argc, const char * const * const argv) {
 	datum_gateway_config_filename = arguments.config_file;
 	
 	// Initialize logger thread
-	datum_logger_init();
+	if (datum_logger_init()) {
+		DLOG_FATAL("Error initializing the logger!");
+		exit(1);
+	}
 	
 	if (datum_protocol_init()) {
 		DLOG_FATAL("Error initializing the DATUM protocol!");
