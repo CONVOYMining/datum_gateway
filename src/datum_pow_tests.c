@@ -187,10 +187,10 @@ static void datum_pow_blake2b_vector_tests(void) {
 	datum_test(datum_blake2b_header_commitment(commitment, 0x20000000, prevhash,
 		12345, merkle, 0x6553412f, 0x207fffff, 3, DATUM_BLAKE2B_USE_TIME_OFFSET, 13,
 		xor_key, rhs));
-	datum_test(datum_pow_decode_hex_exact(expected_commitment_hex, 32, expected));
+	datum_test(hex_to_bin_exact(expected_commitment_hex, expected, 32));
 	datum_test(!memcmp(commitment, expected, 32));
 	datum_test(datum_blake2b_work_root(root, commitment, extranonce));
-	datum_test(datum_pow_decode_hex_exact(expected_root_hex, 32, expected));
+	datum_test(hex_to_bin_exact(expected_root_hex, expected, 32));
 	datum_test(!memcmp(root, expected, 32));
 	datum_blake2b_coinb1(coinb1, commitment);
 	memcpy(arbitrary_tx, coinb1, sizeof(coinb1));
@@ -199,19 +199,18 @@ static void datum_pow_blake2b_vector_tests(void) {
 	datum_test(datum_blake2b_256(expected, leaf_preimage, sizeof(leaf_preimage)));
 	datum_test(!memcmp(root, expected, 32));
 	datum_blake2b_build_work_header(work, prevhash, nonce, ntime, root);
-	datum_test(datum_pow_decode_hex_exact(expected_work_hex, sizeof(work), expected));
+	datum_test(hex_to_bin_exact(expected_work_hex, expected, sizeof(work)));
 	datum_test(!memcmp(work, expected, sizeof(work)));
 	datum_blake2b_prevblock_hidden(expected, prevhash);
 	datum_test(!memcmp(expected, work, 32));
 	datum_test(datum_blake2b_pow_hash_le(hash_le, work, xor_key, 13));
-	datum_test(datum_pow_decode_hex_exact(expected_hash_le_hex, 32, expected));
+	datum_test(hex_to_bin_exact(expected_hash_le_hex, expected, 32));
 	datum_test(!memcmp(hash_le, expected, 32));
 	datum_blake2b_serialize_block_header(header, 0x20000000, prevhash, merkle,
 		0x6553412f, 0x207fffff, nonce, ntime, extranonce, 3,
 		DATUM_BLAKE2B_USE_TIME_OFFSET, 13, xor_key, 12345, rhs);
-	datum_test(datum_pow_decode_hex_exact(expected_header_hex, sizeof(header), expected));
+	datum_test(hex_to_bin_exact(expected_header_hex, expected, sizeof(header)));
 	datum_test(!memcmp(header, expected, sizeof(header)));
-	datum_test(!datum_pow_decode_hex_exact("xyz", 1, nonce));
 	
 	/* Canonical profile-0 vector published with Knots' header-v2 implementation:
 	 * profile_0_time_offset from src/test/data/block_header_v2.json. Its "h2",
@@ -240,9 +239,9 @@ static void datum_pow_blake2b_vector_tests(void) {
 		unsigned char knots_prevhash[32], knots_merkle[32], knots_rhs[32];
 		unsigned char knots_nonce[8], knots_ntime[8];
 		
-		datum_test(datum_pow_decode_hex_exact(knots_prevhash_hex, 32, knots_prevhash));
-		datum_test(datum_pow_decode_hex_exact(knots_merkle_hex, 32, knots_merkle));
-		datum_test(datum_pow_decode_hex_exact(knots_rhs_hex, 32, knots_rhs));
+		datum_test(hex_to_bin_exact(knots_prevhash_hex, knots_prevhash, 32));
+		datum_test(hex_to_bin_exact(knots_merkle_hex, knots_merkle, 32));
+		datum_test(hex_to_bin_exact(knots_rhs_hex, knots_rhs, 32));
 		memset(xor_key, 0, sizeof(xor_key));
 		pk_u32le(knots_nonce, 0, UINT32_C(0x0badf00d));
 		pk_u32le(knots_nonce, 4, UINT32_C(0x11223344));
@@ -252,16 +251,16 @@ static void datum_pow_blake2b_vector_tests(void) {
 		datum_test(datum_blake2b_header_commitment(commitment, 0x20000000,
 			knots_prevhash, 840000, knots_merkle, UINT32_C(2000000000) - 600,
 			0x1d00ffff, 3, 0x1c, 0, xor_key, knots_rhs));
-		datum_test(datum_pow_decode_hex_exact(knots_commitment_hex, 32, expected));
+		datum_test(hex_to_bin_exact(knots_commitment_hex, expected, 32));
 		datum_test(!memcmp(commitment, expected, 32));
 		
-		datum_test(datum_pow_decode_hex_exact(knots_root_hex, 32, root));
+		datum_test(hex_to_bin_exact(knots_root_hex, root, 32));
 		datum_blake2b_build_work_header(work, knots_prevhash, knots_nonce,
 			knots_ntime, root);
-		datum_test(datum_pow_decode_hex_exact(knots_work_hex, sizeof(work), expected));
+		datum_test(hex_to_bin_exact(knots_work_hex, expected, sizeof(work)));
 		datum_test(!memcmp(work, expected, sizeof(work)));
 		datum_test(datum_blake2b_pow_hash_le(hash_le, work, xor_key, 0));
-		datum_test(datum_pow_decode_hex_exact(knots_hash_le_hex, 32, expected));
+		datum_test(hex_to_bin_exact(knots_hash_le_hex, expected, 32));
 		datum_test(!memcmp(hash_le, expected, 32));
 	}
 }

@@ -60,6 +60,7 @@ void datum_utils_tests_hex_to_bin(const uint8_t c, char * const x, const char * 
 
 void datum_utils_tests_hex(void) {
 	char x[6], x2[6];
+	unsigned char exact[2] = {0x0e, 0x0e};
 	strcpy(&x[2], "00");
 	for (unsigned int c = 0; ; ++c) {
 		datum_utils_tests_hex_to_bin(c, &x2[1], "%2.2X");
@@ -94,6 +95,14 @@ void datum_utils_tests_hex(void) {
 			++x[3];
 		}
 	}
+
+	datum_test(hex_to_bin_exact("00fF", exact, sizeof(exact)));
+	datum_test(exact[0] == 0 && exact[1] == 0xff);
+	datum_test(!hex_to_bin_exact("00fg", exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact("00f", exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact("00ff0", exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact(NULL, exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact("00ff", NULL, sizeof(exact)));
 }
 
 void datum_utils_tests_secure_strequals(void) {

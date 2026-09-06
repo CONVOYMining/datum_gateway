@@ -40,24 +40,6 @@
 #include "datum_pow.h"
 #include "datum_utils.h"
 
-static int datum_hex_nibble(const char c) {
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-	return -1;
-}
-
-bool datum_pow_decode_hex_exact(const char *hex, size_t out_len, unsigned char *out) {
-	size_t i;
-	if (!hex || !out) return false;
-	for (i = 0; i < out_len; i++) {
-		if (datum_hex_nibble(hex[i<<1]) < 0) return false;
-		if (datum_hex_nibble(hex[(i<<1)+1]) < 0) return false;
-		out[i] = hex2bin_uchar(&hex[i<<1]);
-	}
-	return hex[out_len<<1] == 0;
-}
-
 bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, uint8_t flags) {
 	if (!out) return false;
 	if (ntime > UINT32_MAX) return false;

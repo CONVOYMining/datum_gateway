@@ -71,6 +71,7 @@ void panic_from_thread(int a);
 bool double_sha256(void *out, const void *in, size_t length);
 void hex_to_bin_le(const char *hex, unsigned char *bin);
 void hex_to_bin(const char *hex, unsigned char *bin);
+bool hex_to_bin_exact(const char *hex, unsigned char *bin, size_t bin_len);
 void hash2hex(unsigned char *bytes, char *hexString);
 uint64_t roundDownToPowerOfTwo_64(uint64_t x);
 int addr_2_output_script(const char *addr, unsigned char *script, int max_len);

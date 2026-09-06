@@ -356,6 +356,25 @@ void hex_to_bin(const char *hex, unsigned char *bin) {
 	}
 }
 
+static int hex_value(const char c) {
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	return -1;
+}
+
+bool hex_to_bin_exact(const char *hex, unsigned char *bin, const size_t bin_len) {
+	int high, low;
+	if (!hex || !bin) return false;
+	for (size_t i = 0; i < bin_len; i++) {
+		high = hex_value(hex[i<<1]);
+		low = hex_value(hex[(i<<1)+1]);
+		if (high < 0 || low < 0) return false;
+		bin[i] = (unsigned char)((high << 4) | low);
+	}
+	return hex[bin_len<<1] == 0;
+}
+
 void panic_from_thread(int a) {
 	// set panic flag
 	panic_mode = 1;
