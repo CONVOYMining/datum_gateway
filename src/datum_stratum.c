@@ -1005,6 +1005,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	unsigned char coinbase_index = 0;
 	T_DATUM_STRATUM_COINBASE *cb = NULL;
 	unsigned char extranonce_bin[12];
+	unsigned char job_id_bin[8];
 	
 	unsigned char block_header[80];
 	unsigned char share_hash[40];
@@ -1046,6 +1047,11 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 			return 0;
 		}
 	}
+	if (!hex_to_bin_exact(job_id_s, job_id_bin, sizeof(job_id_bin))) {
+		send_unknown_work_error(c,id);
+		stratum_note_share(m, false, m->last_sent_diff); // guestimate here
+		return 0;
+	}
 	
 	// jobID is
 	// 4 bytes time (who cares)
@@ -1054,7 +1060,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// 1 byte coinbase index used
 	// 6625a3d53cc0e500
 	// 0123456789ABCDEF
-	g_job_index = (hex2bin_uchar(&job_id_s[0xA])<<8) | hex2bin_uchar(&job_id_s[0xC]);
+	g_job_index = (job_id_bin[5]<<8) | job_id_bin[6];
 	g_job_index ^= STRATUM_JOB_INDEX_XOR;
 	if (g_job_index >= MAX_STRATUM_JOBS) {
 		send_unknown_work_error(c,id);
@@ -1101,12 +1107,14 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
-	for(i=0;i<8;i++) {
-		extranonce_bin[i+4] = hex2bin_uchar(&extranonce2_s[i<<1]);
+	if (!hex_to_bin_exact(extranonce2_s, extranonce_bin + 4, 8)) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
 	}
 	
 	// need to build the full coinbase txn
-	coinbase_index = hex2bin_uchar(&job_id_s[0xE]);
+	coinbase_index = job_id_bin[7];
 	if (coinbase_index >= MAX_COINBASE_TYPES) {
 		if (!(empty_work && coinbase_index == DATUM_COINBASE_ID_EMPTY)) {
 			send_unknown_work_error(c, id);

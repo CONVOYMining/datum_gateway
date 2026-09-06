@@ -199,6 +199,42 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	global_cur_stratum_jobs[0] = saved_job;
 }
 
+static void datum_blake2b_malformed_submit_job_tests(void) {
+	T_DATUM_CLIENT_DATA client = {0};
+	T_DATUM_MINER_DATA miner = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_TEMPLATE_DATA tdata = {0};
+	T_DATUM_STRATUM_JOB *saved_job = global_cur_stratum_jobs[0];
+	static const char * const submits[] = {
+		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0dg00\",\"0000000000000000\",\"00000000\",\"00000000\"]}",
+		"{\"id\":8,\"method\":\"mining.submit\",\"params\":[\"miner\",\"0000000000c0de00\",\"000000000000000g\",\"00000000\",\"00000000\"]}",
+	};
+	static const char expected[] =
+		"{\"error\":[20,\"unknown-work\",null],\"id\":8,\"result\":null}\n";
+	char submit[192];
+
+	client.app_client_data = &miner;
+	job.block_template = &tdata;
+	job.target_pot_index = 0;
+	job.coinbase[0].coinb1_len = 1;
+	job.coinbase[0].coinb1_bin[0] = 0xff;
+	strcpy(job.job_id, "0000000000c0de00");
+	miner.stratum_job_diffs[0] = 1;
+	global_cur_stratum_jobs[0] = &job;
+
+	for (size_t i = 0; i < sizeof(submits) / sizeof(submits[0]); i++) {
+		const uint64_t rejected_before = miner.share_count_rejected;
+		client.out_buf = 0;
+		strcpy(submit, submits[i]);
+		datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, submit) == 0);
+		datum_test(miner.share_count_rejected == rejected_before + 1);
+		datum_test(client.out_buf == (int)strlen(expected));
+		datum_test(!memcmp(client.w_buffer, expected, strlen(expected)));
+	}
+
+	global_cur_stratum_jobs[0] = saved_job;
+}
+
 static void datum_blake2b_coinbase_selection_tests(void) {
 	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = calloc(1, sizeof(*sdata));
 	T_DATUM_STRATUM_JOB job = {0};
@@ -509,6 +545,7 @@ void datum_stratum_tests(void) {
 	datum_stratum_string_request_id_tests();
 	datum_blake2b_coinbase_selection_tests();
 	datum_blake2b_h_not_zero_tests();
+	datum_blake2b_malformed_submit_job_tests();
 	datum_blake2b_client_pot_commitment_tests();
 	datum_blake2b_unmasked_block_tests();
 	datum_stratum_abw_block_request_tests();
