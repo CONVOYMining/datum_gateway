@@ -36,6 +36,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -60,6 +61,8 @@ void datum_utils_tests_hex_to_bin(const uint8_t c, char * const x, const char * 
 
 void datum_utils_tests_hex(void) {
 	char x[6], x2[6];
+	unsigned char exact[2] = {0x0e, 0x0e};
+	uint32_t value;
 	strcpy(&x[2], "00");
 	for (unsigned int c = 0; ; ++c) {
 		datum_utils_tests_hex_to_bin(c, &x2[1], "%2.2X");
@@ -93,6 +96,38 @@ void datum_utils_tests_hex(void) {
 		} else {
 			++x[3];
 		}
+	}
+
+	datum_test(hex_to_bin_exact("00fF", exact, sizeof(exact)));
+	datum_test(exact[0] == 0 && exact[1] == 0xff);
+	datum_test(!hex_to_bin_exact("00fg", exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact("00f", exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact("00ff0", exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact(NULL, exact, sizeof(exact)));
+	datum_test(!hex_to_bin_exact("00ff", NULL, sizeof(exact)));
+
+	datum_test(hex_to_u32("00000000", &value));
+	datum_test(value == 0);
+	datum_test(hex_to_u32("1234aBcD", &value));
+	datum_test(value == UINT32_C(0x1234abcd));
+	datum_test(hex_to_u32("FFFFFFFF", &value));
+	datum_test(value == UINT32_MAX);
+	datum_test(!hex_to_u32("1234567", &value));
+	datum_test(!hex_to_u32("1234567g", &value));
+	datum_test(!hex_to_u32("123456789", &value));
+	datum_test(!hex_to_u32(NULL, &value));
+	datum_test(!hex_to_u32("00000000", NULL));
+
+	/* Exact allocations expose reads past the terminator under ASan. */
+	for (size_t len = 0; len < 8; ++len) {
+		unsigned char bin[4];
+		char *truncated = malloc(len + 1);
+		if (!datum_test(truncated != NULL)) break;
+		memcpy(truncated, "1234aBcD", len);
+		truncated[len] = '\0';
+		datum_test(!hex_to_bin_exact(truncated, bin, sizeof(bin)));
+		datum_test(!hex_to_u32(truncated, &value));
+		free(truncated);
 	}
 }
 

@@ -50,8 +50,6 @@
 #define DATUM_POW_RESERVED_BLAKE2B_USE_TIME_OFFSET 0x01
 #define DATUM_POW_FLAG_BLAKE2B 0x08
 
-bool datum_pow_decode_hex_exact(const char *hex, size_t out_len, unsigned char *out);
-
 bool datum_blake2b_time_on_wire(uint32_t *out, uint64_t ntime, uint64_t offset, uint8_t flags);
 /* The nTime a node reads from a header-v2 block built from this share: the
  * job's wire time plus the hasher's four time-offset bytes when the offset
@@ -66,6 +64,11 @@ long double datum_blake2b_accounting_difficulty(long double x);
 bool datum_blake2b_256(unsigned char *out, const unsigned char *in, size_t len);
 void datum_blake2b_coinb1(unsigned char *out, const unsigned char *commitment);
 void datum_blake2b_prevblock_hidden(unsigned char *out, const unsigned char *prevhash);
+void datum_blake2b_build_work_header_from_hidden(
+	unsigned char *work, const unsigned char *prevhash_hidden,
+	const unsigned char *nonce, const unsigned char *ntime,
+	const unsigned char *root
+);
 void datum_blake2b_build_work_header(unsigned char *work, const unsigned char *prevhash, const unsigned char *nonce, const unsigned char *ntime, const unsigned char *root);
 
 /* version may be with or without 0x80000000; H1 always includes the v2 bit. */
