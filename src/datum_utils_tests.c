@@ -36,6 +36,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -116,6 +117,18 @@ void datum_utils_tests_hex(void) {
 	datum_test(!hex_to_u32("123456789", &value));
 	datum_test(!hex_to_u32(NULL, &value));
 	datum_test(!hex_to_u32("00000000", NULL));
+
+	/* Exact allocations expose reads past the terminator under ASan. */
+	for (size_t len = 0; len < 8; ++len) {
+		unsigned char bin[4];
+		char *truncated = malloc(len + 1);
+		if (!datum_test(truncated != NULL)) break;
+		memcpy(truncated, "1234aBcD", len);
+		truncated[len] = '\0';
+		datum_test(!hex_to_bin_exact(truncated, bin, sizeof(bin)));
+		datum_test(!hex_to_u32(truncated, &value));
+		free(truncated);
+	}
 }
 
 void datum_utils_tests_secure_strequals(void) {

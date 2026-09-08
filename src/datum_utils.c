@@ -368,8 +368,9 @@ bool hex_to_bin_exact(const char *hex, unsigned char *bin, const size_t bin_len)
 	if (!hex || !bin) return false;
 	for (size_t i = 0; i < bin_len; i++) {
 		high = hex_value(hex[i<<1]);
+		if (high < 0) return false;
 		low = hex_value(hex[(i<<1)+1]);
-		if (high < 0 || low < 0) return false;
+		if (low < 0) return false;
 		bin[i] = (unsigned char)((high << 4) | low);
 	}
 	return hex[bin_len<<1] == 0;
