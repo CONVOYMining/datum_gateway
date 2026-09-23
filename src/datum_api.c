@@ -1485,6 +1485,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 		const char * const checkboxes = json_string_value(j_checkboxes);
 		const size_t checkboxes_len = json_string_length(j_checkboxes);
 		const char *p = checkboxes;
+		if (!p) p = "";
 		char buf[0x100];
 		while (p[0] != '\0') {
 			const char *p2 = strchr(p, ' ');
