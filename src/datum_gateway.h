@@ -45,15 +45,24 @@
 #endif
 
 // For SV1
-// client buffer must be large enough to hold entire coinbase in hex at max size
+// BLAKE2b work sends the miner a 39-byte coinb1 and an empty coinb2, so this
+// no longer has to hold a coinbase in hex.
 // TODO: Make somewhat more dynamic without having to hammer [cm]alloc
 #define CLIENT_BUFFER ((16384*3)+1024)
 
-// in ascii hex
+// in ascii hex. coinb1 holds the fixed prefix; every dictated output goes in
+// coinb2, so only coinb2 grows with the payout count. The share's section
+// (0x02) writes each length as a uint16, which caps either part at 65535 bytes;
+// coinb2 here is at most 32767 bytes.
 #define STRATUM_COINBASE1_MAX_LEN 1024
-#define STRATUM_COINBASE2_MAX_LEN 32768
+#define STRATUM_COINBASE2_MAX_LEN 65536
 
 #define MAX_COINBASE_TXN_SIZE_BYTES (((STRATUM_COINBASE1_MAX_LEN+STRATUM_COINBASE2_MAX_LEN)>>1)+64)
+
+// A share message (0x27) with its job and coinbase sections: the coinbase's two
+// parts reach MAX_COINBASE_TXN_SIZE_BYTES, the rest is the merkle branches, the
+// username and the pad.
+#define MAX_POW_MESSAGE_SIZE (MAX_COINBASE_TXN_SIZE_BYTES+4096)
 
 #define STRATUM_JOB_INDEX_XOR ((uint16_t)0xC0DE)
 

@@ -471,7 +471,7 @@ void datum_protocol_replay_clear(void) {
 T_DATUM_REPLAY_PENDING *datum_protocol_replay_add(
 	const T_DATUM_PROTOCOL_POW *pow, const unsigned char *message,
 	size_t message_size) {
-	if (!pow || !message || !message_size || message_size > 32768)
+	if (!pow || !message || !message_size || message_size > MAX_POW_MESSAGE_SIZE)
 		return NULL;
 	
 	T_DATUM_REPLAY_PENDING *pending = calloc(1, sizeof(*pending));
@@ -1218,7 +1218,7 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 
 pthread_mutex_t datum_protocol_coinbaser_fetch_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t datum_protocol_coinbaser_fetch_cond = PTHREAD_COND_INITIALIZER;
-unsigned char datum_coinbaser_v2_response_buf[2][32768] = { 0 };
+unsigned char datum_coinbaser_v2_response_buf[2][DATUM_PROTOCOL_COINBASER_BUFFER_SIZE] = { 0 };
 unsigned char *datum_coinbaser_v2_response = NULL;
 unsigned char datum_coinbaser_v2_response_buf_idx = 0;
 uint64_t datum_coinbaser_v2_response_value[2] = { 0, 0 };
@@ -1263,7 +1263,7 @@ int datum_protocol_coinbaser_fetch_response(int len, unsigned char *data) {
 	v = upk_u64le(data, 0);
 	x = upk_u32le(data, 8);
 	
-	if ((x > 32768-1) || (x<1) || x > (unsigned int)(len - 12)) {
+	if ((x > DATUM_PROTOCOL_COINBASER_BUFFER_SIZE-1) || (x<1) || x > (unsigned int)(len - 12)) {
 		DLOG_DEBUG("Invalid coinbaser received! %lu %lu", (unsigned long)x, (unsigned long)(len-12));
 		return 0;
 	}
@@ -2867,8 +2867,8 @@ static void datum_protocol_pow_forget_failed_send(
 // {"params": ["mzjP9Hn7aqaCLM5pSgMSQzgs3gnxSFv91B", "662599770700", "f40c000000000000", "66259976", "48220d13", "00d30000"], "id": 182, "method": "mining.submit"}
 int datum_protocol_pow(void *arg) {
 	T_DATUM_PROTOCOL_POW *pow = arg;
-	unsigned char msg[32768 + crypto_box_MACBYTES];
-	unsigned char replay_message[32768];
+	unsigned char msg[MAX_POW_MESSAGE_SIZE + crypto_box_MACBYTES];
+	unsigned char replay_message[MAX_POW_MESSAGE_SIZE];
 	T_DATUM_REPLAY_PENDING *pending;
 	int i, j;
 

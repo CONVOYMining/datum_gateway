@@ -57,6 +57,12 @@
 #define DATUM_PROTOCOL_CONNECT_TIMEOUT 30
 
 #define DATUM_PROTOCOL_MAX_CMD_DATA_SIZE 4194304 // 2^22 - protocol limit!
+
+// The coinbaser blob (server subcmd 0x10 response) the gateway accepts. Its
+// wire length field is a uint32, so this buffer is the only limit; at 43 bytes
+// an output it holds MAX_COINBASER_OUTPUTS taproot payouts. Matches RATUM's
+// MAX_COINBASER_BLOB_LEN + 1.
+#define DATUM_PROTOCOL_COINBASER_BUFFER_SIZE 65536
 #define DATUM_PROTOCOL_BUFFER_SIZE (DATUM_PROTOCOL_MAX_CMD_DATA_SIZE*3)
 #define DATUM_PROTOCOL_MAX_USERNAME_LEN 384
 

@@ -49,14 +49,35 @@
 
 #define MAX_STRATUM_JOBS 256
 
-#define MAX_COINBASE_TYPES 6
+#define MAX_COINBASE_TYPES 2
 #define DATUM_COINBASE_ID_EMPTY 0xff
 #define COINBASE_TYPE_TINY 0 // "empty", just pays pool
-#define COINBASE_TYPE_SMALL 1 // Nicehash needs a tiny coinb1, among other things. Max 500 bytes.
-#define COINBASE_TYPE_ANTMAIN 2 // Hack for antminer stock firmware to 750 bytes
-#define COINBASE_TYPE_RESPECTABLE 3 // 6500 byte max (whatsminers)
-#define COINBASE_TYPE_YUGE 4 // 16KB max (ePIC, bitaxe)
-#define COINBASE_TYPE_ANTMAIN2 5 // 2.25KB max (S21, +?)
+#define COINBASE_TYPE_YUGE 1 // MAX_DICTATED_COINBASE_SIZE bytes, every miner
+
+// The largest generation transaction this gateway builds, in bytes. It holds
+// about 1030 P2WPKH outputs (31 bytes each) or 740 taproot outputs (43 bytes
+// each), and keeps coinb2 inside STRATUM_COINBASE2_MAX_LEN.
+// datum_stratum_coinbase_fit_to_template cuts it to what the template's size,
+// weight and the block's sigop limit leave, which with the node's default
+// -blockreservedweight of 8000 weight units is about 1800 bytes on a full
+// block: raise -blockreservedweight to 4x the coinbase wanted.
+#define MAX_DICTATED_COINBASE_SIZE 32000
+
+// The dictated outputs one coinbaser response may carry, and the size of the
+// job's parsed output list. Matches RATUM's MAX_COINBASER_OUTPUTS.
+#define MAX_COINBASER_OUTPUTS 1024
+
+// SHA256d firmware set the class sizes, since those miners receive
+// coinb1/coinb2 and hash the coinbase. On BLAKE2b work the miner receives
+// 000000 || H2 || 00000000 as coinb1 (H2 is the "Merge-mining hook" tagged
+// hash, which commits to the coinbase) and an empty coinb2, and the work root
+// is blake2b(0x00 || coinb1 || extranonce), so the coinbase itself never
+// reaches the miner and no firmware size applies to it. The classes sized for
+// NiceHash, Antminer and Whatsminer firmware are gone; what remains is
+// COINBASE_TYPE_YUGE, served to every miner once the full coinbase is ready,
+// and COINBASE_TYPE_TINY, served before that
+// (datum_stratum_coinbase_index). An output the coinbase has no room for is
+// left out and its value paid to the pool's address as the remainder.
 
 // Submitblock json rpc command max size is max block size * 2 for ascii plus some breathing room
 #define MAX_SUBMITBLOCK_SIZE 8500000
@@ -146,18 +167,14 @@ typedef struct T_DATUM_STRATUM_JOB {
 	char merklebranches_full[4096];
 	
 	// when fetching the coinbaser, we'll just stash all of the possible and valid output scripts here
-	T_DATUM_TXN_OUTPUT available_coinbase_outputs[512];
+	T_DATUM_TXN_OUTPUT available_coinbase_outputs[MAX_COINBASER_OUTPUTS];
 	int available_coinbase_outputs_count;
 	uint8_t pool_addr_script[MAX_OUTPUT_SCRIPT_LEN];
 	uint8_t pool_addr_script_len;
 	
-	// multiple coinbase options
-	// 0 = "empty" --- just pays pool addr, and possibly TIDES data.  extranonce in coinbase if fits, or in first output if not.
-	// 1 = "nicehash" --- roughly 500 bytes total... smaller than antminer... has nothing before the extranonce OP_RETURN (or no extranonce OP_RETURN if enough space in the coinbase)
-	// 2 = "antminer" --- roughly 730 bytes max size, using a larger coinb1 and UART sync bits.  This also works as a good default.
-	// 3 = "whatsminer" --- max 6500 bytes tested.  does not need the extranonce OP_RETURN unless there's no space in the coinbase itself after tags
-	// 4 = "huge" --- max 16kB --- this is probably the most we should reasonably attempt to do in the coinbase... something like 380 to 530 outputs, depending on the type of output
-	// 5 = "antminer2" --- max 2250 bytes --- latest S21s appear to support this
+	// two coinbase options
+	// 0 = COINBASE_TYPE_TINY --- just pays pool addr.  extranonce in coinbase if fits, or in first output if not.
+	// 1 = COINBASE_TYPE_YUGE --- MAX_DICTATED_COINBASE_SIZE bytes, carries the coinbaser's outputs
 	T_DATUM_STRATUM_COINBASE coinbase[MAX_COINBASE_TYPES];
 	T_DATUM_STRATUM_COINBASE subsidy_only_coinbase;
 	int target_pot_index; // where in coinb1 do we put our per-user vardiff pot value?
@@ -234,8 +251,6 @@ typedef struct {
 	uint8_t stratum_job_targets[MAX_STRATUM_JOBS][32];
 	uint64_t stratum_job_diffs[MAX_STRATUM_JOBS];
 	
-	unsigned char coinbase_selection;
-	
 	uint64_t share_diff_accepted;
 	uint64_t share_count_accepted;
 	
@@ -250,8 +265,6 @@ typedef struct {
 	bool quickdiff_active;
 	uint64_t quickdiff_value;
 	uint8_t quickdiff_target[32];
-	
-	uint64_t forced_high_min_diff;
 	
 	int last_sent_stratum_job_index;
 	
@@ -273,7 +286,7 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1);
 bool datum_stratum_share_is_unmasked_block(
 	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash);
-unsigned int datum_stratum_coinbase_index(const T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const T_DATUM_MINER_DATA *miner, bool new_block);
+unsigned int datum_stratum_coinbase_index(const T_DATUM_STRATUM_THREADPOOL_DATA *sdata, bool new_block);
 void stratum_job_merkle_root_calc(T_DATUM_STRATUM_JOB *s, unsigned char *coinbase_txn_hash, unsigned char *merkle_root_output);
 int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce);
 size_t datum_stratum_coinbase_for_block_hex(char *out, size_t out_size, const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness);

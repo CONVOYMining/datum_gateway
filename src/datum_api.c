@@ -64,15 +64,6 @@ const char * const homepage_html_end = "</body></html>";
 
 #define DATUM_API_HOMEPAGE_MAX_SIZE 128000
 
-const char *cbnames[] = {
-	"Blank",
-	"Tiny",
-	"Default",
-	"Respect",
-	"Yuge",
-	"Antmain2"
-};
-
 typedef struct MHD_Response *(*create_response_func_t)();
 
 static struct MHD_Response *datum_api_create_empty_mhd_response() {
@@ -923,7 +914,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 		return MHD_YES;
 	}
 	
-	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
+	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
 	
 	for (j = 0; j < max_threads; ++j) {
 		for(ii=0;ii<global_stratum_app->max_clients_thread;ii++) {
@@ -969,17 +960,11 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>N/A</TD>");
 					}
 					
-					if (m->coinbase_selection < (sizeof(cbnames) / sizeof(cbnames[0]))) {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s</TD>", cbnames[m->coinbase_selection]);
-					} else {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>Unknown</TD>");
-					}
-					
 					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>");
 					sz += strncpy_html_escape(&output[sz], m->useragent, max_sz-1-sz);
 					sz += snprintf(&output[sz], max_sz-1-sz, "</TD>");
 				} else {
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD COLSPAN=\"8\">Not Subscribed</TD>");
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD COLSPAN=\"7\">Not Subscribed</TD>");
 				}
 				
 				sz += snprintf(&output[sz], max_sz-1-sz, "<TD><button name='kill_client' value='%d_%d_%lu_%lu' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d,t:%lu,id:%lu}); return false;\">Kick</button></TD></TR>", j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id, j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id);
@@ -1344,16 +1329,6 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		// TODO: apply change without restarting
 		// TODO: switch pools smoother (keep old connection alive for share submissions until those jobs expire)
 		status->need_restart = true;
-	} else if (0 == strcmp(key, "stratum_fingerprint_miners")) {
-		bool val_bool;
-		if (!datum_str_to_bool_strict(val, &val_bool)) {
-			json_array_append_new(errors, json_string_nocheck("\"Fingerprint and workaround known miner bugs\" must be 0 or 1"));
-			return false;
-		}
-		if (val_bool == datum_config.stratum_v1_fingerprint_miners) return true;
-		datum_config.stratum_v1_fingerprint_miners = val_bool;
-		datum_api_json_modify_new("stratum", "fingerprint_miners", json_boolean(val_bool));
-		// TODO: apply change to connected miners?
 	} else if (0 == strcmp(key, "datum_always_pay_self")) {
 		bool val_bool;
 		if (!datum_str_to_bool_strict(val, &val_bool)) {

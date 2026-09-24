@@ -699,10 +699,10 @@ static void datum_pow_recycled_protocol_job_test(void) {
 		job->datum_coinbaser_id = (unsigned char)i;
 		job->prevhash_bin[0] = (unsigned char)(0xa0 + i);
 		job->nbits_bin[0] = (unsigned char)(0xb0 + i);
-		job->coinbase[2].coinb1_len = 1;
-		job->coinbase[2].coinb2_len = 1;
-		job->coinbase[2].coinb1_bin[0] = (unsigned char)(0xc0 + i);
-		job->coinbase[2].coinb2_bin[0] = (unsigned char)(0xd0 + i);
+		job->coinbase[COINBASE_TYPE_YUGE].coinb1_len = 1;
+		job->coinbase[COINBASE_TYPE_YUGE].coinb2_len = 1;
+		job->coinbase[COINBASE_TYPE_YUGE].coinb1_bin[0] = (unsigned char)(0xc0 + i);
+		job->coinbase[COINBASE_TYPE_YUGE].coinb2_bin[0] = (unsigned char)(0xd0 + i);
 		job->subsidy_only_coinbase.coinb1_len = 1;
 		job->subsidy_only_coinbase.coinb2_len = 1;
 		job->subsidy_only_coinbase.coinb1_bin[0] = (unsigned char)(0xe0 + i);
@@ -713,7 +713,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	pow.datum_job_id = datum_protocol_setup_new_job_idx(&jobs[0]);
 	pow.sjob = &jobs[0];
 	memcpy(pow.stratum_job_id, jobs[0].job_id, sizeof(pow.stratum_job_id));
-	pow.coinbase_id = 2;
+	pow.coinbase_id = COINBASE_TYPE_YUGE;
 	pow.blake2b_use_time_offset = true;
 	pow.ntime = UINT64_C(0x1817161514131211);
 	pow.nonce = UINT64_C(0x0807060504030201);
@@ -755,7 +755,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	// Malformed local state must not index beyond the six generated variants.
 	pow.coinbase_id = MAX_COINBASE_TYPES;
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 0);
-	pow.coinbase_id = 2;
+	pow.coinbase_id = COINBASE_TYPE_YUGE;
 	pow.subsidy_only = true;
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 0);
 	pow.coinbase_id = DATUM_COINBASE_ID_EMPTY;
@@ -765,7 +765,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	datum_test(msg[70] == 0xe0 && msg[71] == 0xf0);
 	datum_test(datum_jobs[0].server_has_coinbase_empty);
 	pow.subsidy_only = false;
-	pow.coinbase_id = 2;
+	pow.coinbase_id = COINBASE_TYPE_YUGE;
 	
 	// snprintf returns the untruncated length. Ensure a long address+worker is
 	// capped to the actual bytes in the protocol username field.
