@@ -828,6 +828,95 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	free(jobs);
 }
 
+static void datum_protocol_stxlist_byid_tests(void) {
+	// A 0x50 0x11 request names transaction indices with nothing against
+	// repeats, and the reply is built in the fixed temp_data buffer. The
+	// handler has to refuse a list the reply cannot hold instead of writing
+	// past the end of the buffer.
+	T_DATUM_STRATUM_JOB * const job = calloc(1, sizeof(*job));
+	T_DATUM_TEMPLATE_DATA * const block_template = calloc(1, sizeof(*block_template));
+	const uint32_t txn_size = 100000;
+	const uint32_t txn_count = 64;
+	T_DATUM_TEMPLATE_TXN * const txns = calloc(txn_count, sizeof(*txns));
+	unsigned char * const txn_data = malloc(txn_size);
+	unsigned char * const tail = temp_data + DATUM_PROTOCOL_TEMP_DATA_SIZE - 64;
+	unsigned char request[3 + 2 * 64];
+	unsigned char canary[64];
+	const int saved_out = server_out_buf;
+	const uint32_t saved_header_key = sending_header_key;
+	unsigned char saved_nonce[sizeof(session_nonce_sender)];
+	unsigned char job_index;
+	size_t k;
+	
+	memcpy(saved_nonce, session_nonce_sender, sizeof(saved_nonce));
+	datum_test(job && block_template && txns && txn_data);
+	if (!job || !block_template || !txns || !txn_data) goto cleanup;
+	
+	memset(txn_data, 0x5a, txn_size);
+	for (k = 0; k < txn_count; ++k) {
+		txns[k].size = txn_size;
+		txns[k].txn_data_binary = txn_data;
+	}
+	block_template->txn_count = txn_count;
+	block_template->txns = txns;
+	job->block_template = block_template;
+	snprintf(job->job_id, sizeof(job->job_id), "stxlist");
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	datum_protocol_next_job_idx = 0;
+	job_index = datum_protocol_setup_new_job_idx(job);
+	datum_jobs[job_index].server_sjob = job;
+	memcpy(datum_jobs[job_index].server_job_id, job->job_id,
+		sizeof(datum_jobs[job_index].server_job_id));
+	server_out_buf = 0;
+	memset(canary, 0xc7, sizeof(canary));
+	memcpy(tail, canary, sizeof(canary));
+	
+	// Two distinct transactions fit and are answered.
+	request[0] = job_index;
+	pk_u16le(request, 1, 2);
+	pk_u16le(request, 3, 0);
+	pk_u16le(request, 5, 1);
+	datum_test(datum_protocol_job_validation_stxlist_byid(7, request) == 1);
+	datum_test(temp_data[0] == 0x50 && temp_data[1] == 0x91);
+	datum_test(temp_data[2] == job_index && temp_data[3] == 0x01);
+	datum_test(upk_u16le(temp_data, 4) == 2);
+	datum_test(!memcmp(tail, canary, sizeof(canary)));
+	server_out_buf = 0;
+	
+	// The largest transaction 64 times over would need 6.4 MB. The count
+	// alone passes the txn_count gate; the reply must be refused.
+	pk_u16le(request, 1, 64);
+	for (k = 0; k < 64; ++k) pk_u16le(request, 3 + 2 * k, 0);
+	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 64, request) == 1);
+	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF4);
+	datum_test(!memcmp(tail, canary, sizeof(canary)));
+	server_out_buf = 0;
+	
+	// A list cut short of its count is refused before it is read.
+	pk_u16le(request, 1, 4);
+	temp_data[3] = 0;
+	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 3, request) == 1);
+	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF4);
+	datum_test(datum_protocol_job_validation_stxlist_byid(2, request) == 0);
+	
+	// The bound leaves room for the terminator and the padding.
+	datum_test(datum_protocol_stxlist_reply_fits(0, txn_size));
+	datum_test(datum_protocol_stxlist_reply_fits(DATUM_STXLIST_REPLY_MAX - 3 - txn_size, txn_size));
+	datum_test(!datum_protocol_stxlist_reply_fits(DATUM_STXLIST_REPLY_MAX - 2 - txn_size, txn_size));
+	
+cleanup:
+	datum_protocol_bulk_reset();
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	datum_protocol_next_job_idx = 0;
+	server_out_buf = saved_out;
+	sending_header_key = saved_header_key;
+	memcpy(session_nonce_sender, saved_nonce, sizeof(saved_nonce));
+	free(txn_data);
+	free(txns);
+	free(block_template);
+	free(job);
+}
+
 void datum_protocol_tests(void) {
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
@@ -836,4 +925,5 @@ void datum_protocol_tests(void) {
 	datum_protocol_abw_cache_tests();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
+	datum_protocol_stxlist_byid_tests();
 }
