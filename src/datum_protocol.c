@@ -1192,8 +1192,17 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 			assignment_id, data + 2, NULL, block_hash, &pool_handled);
 		pthread_mutex_unlock(&datum_abw_mutex);
 		if (!block_request) break;
-		if (datum_config.mining_abw_verify_all_shares_on_disclosure &&
-		    !pool_handled) {
+		const bool pool_ignored = datum_config.mining_abw_verify_all_shares_on_disclosure && !pool_handled;
+		if (datum_submitblock_trigger_owned(block_request, block_hash)) {
+			++submitted;
+			datum_blocktemplates_notifynew(block_hash, 0);
+			DLOG_WARN("DATUM server revealed a verified block key for candidate %s",
+				block_hash);
+		} else {
+			free(block_request);
+			DLOG_ERROR("Could not queue a revealed block for local submission");
+		}
+		if (pool_ignored) {
 			ignored_block = true;
 			atomic_store(&datum_abw_health_latched, false);
 			for (int warning = 0; warning < 8; ++warning) {
@@ -1201,15 +1210,6 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 					block_hash);
 			}
 		}
-		if (!datum_submitblock_trigger_owned(block_request, block_hash)) {
-			free(block_request);
-			DLOG_ERROR("Could not queue a revealed block for local submission");
-			continue;
-		}
-		submitted++;
-		datum_blocktemplates_notifynew(block_hash, 0);
-		DLOG_WARN("DATUM server revealed a verified block key for candidate %s",
-			block_hash);
 	}
 	if (!submitted) {
 		DLOG_INFO("DATUM server retired ABW assignment slot %u",
