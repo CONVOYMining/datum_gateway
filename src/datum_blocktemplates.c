@@ -500,7 +500,7 @@ void *datum_gateway_template_thread(void *args) {
 				if (t && !datum_blocktemplates_abw_ready(t,
 					datum_protocol_is_active(),
 					datum_protocol_abw_required())) {
-					DLOG_DEBUG("Retaining current work until a BLAKE2b anti-withholding assignment is active");
+					DLOG_DEBUG("Retaining current work until an anti-withholding assignment is active");
 					t = NULL;
 				}
 				

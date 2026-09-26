@@ -114,10 +114,6 @@ For Arch:
 
     sudo pacman -Syu base-devel cmake pkgconf curl jansson libsodium libmicrohttpd psmisc
 
-For Clear Linux:
-
-    sudo swupd bundle-add c-basic cmake pkgconf devpkg-curl devpkg-jansson devpkg-libsodium devpkg-libmicrohttpd psmisc
-
 For FreeBSD:
 
     sudo pkg install cmake pkgconf curl jansson libsodium libmicrohttpd argp-standalone libepoll-shim
