@@ -34,6 +34,7 @@
  */
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -42,7 +43,124 @@
 #include "datum_conf.h"
 #include "datum_pow.h"
 #include "datum_protocol_internal.h"
+#include "datum_queue.h"
 #include "datum_utils.h"
+
+extern DATUM_QUEUE pow_queue;
+extern atomic_int new_notify_threadsafe;
+extern volatile char new_notify_blockhash[256];
+extern uint64_t datum_protocol_mainloop_tsms;
+extern uint64_t datum_last_accepted_share_tsms;
+extern pthread_mutex_t submitblock_mutex;
+extern int submit_block_triggered;
+extern const char *submitblock_ptr;
+extern bool submitblock_ptr_owned;
+
+static int datum_protocol_test_pow_handler_count;
+
+static int datum_protocol_test_pow_handler(void *item) {
+	(void)item;
+	datum_protocol_test_pow_handler_count++;
+	return 0;
+}
+
+static bool datum_protocol_test_discard_submitblock(void) {
+	bool queued;
+	
+	pthread_mutex_lock(&submitblock_mutex);
+	queued = submit_block_triggered && submitblock_ptr && submitblock_ptr_owned;
+	if (submitblock_ptr_owned) free((void *)submitblock_ptr);
+	submitblock_ptr = NULL;
+	submitblock_ptr_owned = false;
+	submit_block_triggered = 0;
+	pthread_mutex_unlock(&submitblock_mutex);
+	return queued;
+}
+
+static void datum_protocol_abw_activation_state_test(void) {
+	unsigned char xor_key[16];
+	unsigned char notice[37] = {0xA8, DATUM_ABW_DRAFT_REVISION, 0, 0};
+	unsigned char activation[4] = {0xA6, DATUM_ABW_DRAFT_REVISION, 0, 0xFE};
+	T_DATUM_PROTOCOL_HEADER header = {.cmd_len = sizeof(notice)};
+	T_DATUM_TEMPLATE_DATA block_template = {.height = 16};
+	
+	datum_protocol_abw_reset();
+	for (size_t i = 0; i < sizeof(xor_key); ++i) {
+		xor_key[i] = (unsigned char)(i + 1);
+	}
+	datum_test(datum_blake2b_xor_key_hash(notice + 4, xor_key));
+	notice[36] = 0xFE;
+	atomic_store(&new_notify_threadsafe, 0);
+	
+	datum_test(datum_protocol_mining_cmd5(&header, notice));
+	datum_test(!datum_protocol_abw_apply_active(&block_template));
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	header.cmd_len = sizeof(activation);
+	datum_test(datum_protocol_mining_cmd5(&header, activation));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 1);
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	block_template.height++;
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 1);
+	
+	notice[3] = 1;
+	xor_key[0] ^= 1;
+	datum_test(datum_blake2b_xor_key_hash(notice + 4, xor_key));
+	header.cmd_len = sizeof(notice);
+	datum_test(datum_protocol_mining_cmd5(&header, notice));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 1);
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	activation[2] = 1;
+	header.cmd_len = sizeof(activation);
+	datum_test(datum_protocol_mining_cmd5(&header, activation));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 2);
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	notice[2] = DATUM_ABW_ASSIGNMENT_ACTIVE;
+	notice[3] = 2;
+	xor_key[0] ^= 2;
+	datum_test(datum_blake2b_xor_key_hash(notice + 4, xor_key));
+	header.cmd_len = sizeof(notice);
+	datum_test(datum_protocol_mining_cmd5(&header, notice));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 3);
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	atomic_store(&new_notify_threadsafe, 0);
+	datum_protocol_abw_reset();
+}
+
+static void datum_protocol_acceptance_watchdog_tests(void) {
+	const uint64_t saved_mainloop_tsms = datum_protocol_mainloop_tsms;
+	const uint64_t saved_accepted_tsms = datum_last_accepted_share_tsms;
+	const uint64_t saved_accepted_count = datum_accepted_share_count;
+	const uint64_t saved_accepted_diff = datum_accepted_share_diff;
+	const uint64_t saved_rejected_count = datum_rejected_share_count;
+	const uint64_t saved_rejected_diff = datum_rejected_share_diff;
+	unsigned char response[9] = {DATUM_POW_SHARE_RESPONSE_REJECTED};
+	
+	datum_protocol_mainloop_tsms = 1234;
+	datum_last_accepted_share_tsms = 1111;
+	response[7] = 1;
+	datum_test(datum_protocol_share_response(sizeof(response), response));
+	datum_test(datum_last_accepted_share_tsms == 1111);
+	response[0] = DATUM_POW_SHARE_RESPONSE_ACCEPTED_TENTATIVELY;
+	datum_test(datum_protocol_share_response(sizeof(response), response));
+	datum_test(datum_last_accepted_share_tsms == 1234);
+	
+	datum_protocol_mainloop_tsms = saved_mainloop_tsms;
+	datum_last_accepted_share_tsms = saved_accepted_tsms;
+	datum_accepted_share_count = saved_accepted_count;
+	datum_accepted_share_diff = saved_accepted_diff;
+	datum_rejected_share_count = saved_rejected_count;
+	datum_rejected_share_diff = saved_rejected_diff;
+}
 
 static void datum_protocol_config_v3_tests(void) {
 	global_config_t saved_config = datum_config;
@@ -620,7 +738,27 @@ static void datum_protocol_abw_cache_tests(void) {
 	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), subsidy_hash));
 	pow.subsidy_only = false;
 	
-	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal));
+	unsigned char zero_hash[32] = {0};
+	unsigned char timely_hash[32];
+	datum_test(datum_blake2b_apply_xor_mask_le(
+		timely_hash, zero_hash, xor_key,
+		datum_blake2b_abw_clear_bits(pow.target_byte)));
+	pow.subsidy_only = true;
+	pow.nonce++;
+	datum_test(datum_protocol_abw_cache_candidate(
+		&pow, coinbase, sizeof(coinbase), timely_hash));
+	pow.subsidy_only = false;
+	
+	datum_config.mining_abw_verify_all_shares_on_disclosure = true;
+	atomic_store(&new_notify_threadsafe, 0);
+	new_notify_blockhash[0] = '\0';
+	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == -1);
+	datum_test(atomic_load(&new_notify_threadsafe));
+	datum_test(!strcmp((const char *)new_notify_blockhash,
+		"0000000000000000000000000000000000000000000000000000000000000000"));
+	datum_test(datum_protocol_test_discard_submitblock());
+	atomic_store(&new_notify_threadsafe, 0);
+	new_notify_blockhash[0] = '\0';
 	datum_test(datum_protocol_abw_assignment_revealed(4));
 	datum_test(!datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash));
 	reveal[18] = 0;
@@ -628,6 +766,32 @@ static void datum_protocol_abw_cache_tests(void) {
 	reveal[18] = 0xFE;
 	notice[3] ^= 1;
 	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	
+	/* Retention failure degrades ABW recovery without dropping pool delivery. */
+	unsigned char active_notice[sizeof(notice)] = {
+		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 3,
+	};
+	memcpy(active_notice + 3, key_hash, sizeof(key_hash));
+	active_notice[35] = 0xFE;
+	datum_protocol_abw_reset();
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(active_notice), active_notice));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_protocol_abw_saturate_pending_for_tests(4);
+	job.datum_job_idx = 2;
+	job.target_pot_index = 0;
+	memcpy(job.job_id, "retention-test", sizeof("retention-test"));
+	unsigned char header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE] = {0};
+	unsigned char extranonce[12] = {0};
+	datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
+		datum_protocol_test_pow_handler) == 0);
+	datum_protocol_test_pow_handler_count = 0;
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, true,
+		false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+		extranonce, 0xff) == 0);
+	datum_test(datum_queue_process(&pow_queue) == 1);
+	datum_test(datum_protocol_test_pow_handler_count == 1);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	
 	datum_protocol_abw_reset();
 	datum_protocol_replay_clear();
 }
@@ -829,6 +993,8 @@ static void datum_pow_recycled_protocol_job_test(void) {
 }
 
 void datum_protocol_tests(void) {
+	datum_protocol_abw_activation_state_test();
+	datum_protocol_acceptance_watchdog_tests();
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
 	datum_protocol_bulk_tests();

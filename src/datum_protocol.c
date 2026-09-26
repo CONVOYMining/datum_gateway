@@ -695,6 +695,14 @@ void datum_protocol_abw_reset(void) {
 	pthread_mutex_unlock(&datum_abw_mutex);
 }
 
+void datum_protocol_abw_saturate_pending_for_tests(uint8_t assignment_id) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+		datum_abw_pending[i].assignment_id = assignment_id;
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
 bool datum_protocol_abw_assignment_revealed(uint8_t assignment_id) {
 	bool revealed = false;
 	pthread_mutex_lock(&datum_abw_mutex);
@@ -1051,7 +1059,6 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!activated) DLOG_ERROR("Activated ABW slot was not preseeded");
-	if (activated) datum_blocktemplates_notifynew(NULL, 0);
 	return activated ? 1 : 0;
 }
 
@@ -1073,9 +1080,6 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!installed) {
 		DLOG_ERROR("Could not retain anti-withholding assignment");
-	}
-	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
-		datum_blocktemplates_notifynew(NULL, 0);
 	}
 	return installed ? 1 : 0;
 }
@@ -1151,7 +1155,6 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		return 0;
 	}
 	const uint8_t assignment_id = data[1] + 1;
-	bool retired_active;
 	pthread_mutex_lock(&datum_abw_mutex);
 	const T_DATUM_ABW_ASSIGNMENT *known_assignment =
 		&datum_abw_assignments[assignment_id - 1];
@@ -1171,7 +1174,6 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		DLOG_DEBUG("Ignored disclosure for an ABW slot not held by this session");
 		return 1;
 	}
-	retired_active = datum_abw_active_assignment_id == assignment_id;
 	const bool commitment_matched =
 		datum_protocol_abw_mark_assignment_revealed_locked(
 			assignment_id, key_hash);
@@ -1190,8 +1192,17 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 			assignment_id, data + 2, NULL, block_hash, &pool_handled);
 		pthread_mutex_unlock(&datum_abw_mutex);
 		if (!block_request) break;
-		if (datum_config.mining_abw_verify_all_shares_on_disclosure &&
-		    !pool_handled) {
+		const bool pool_ignored = datum_config.mining_abw_verify_all_shares_on_disclosure && !pool_handled;
+		if (datum_submitblock_trigger_owned(block_request, block_hash)) {
+			++submitted;
+			datum_blocktemplates_notifynew(block_hash, 0);
+			DLOG_WARN("DATUM server revealed a verified block key for candidate %s",
+				block_hash);
+		} else {
+			free(block_request);
+			DLOG_ERROR("Could not queue a revealed block for local submission");
+		}
+		if (pool_ignored) {
 			ignored_block = true;
 			atomic_store(&datum_abw_health_latched, false);
 			for (int warning = 0; warning < 8; ++warning) {
@@ -1199,20 +1210,11 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 					block_hash);
 			}
 		}
-		if (!datum_submitblock_trigger_owned(block_request, block_hash)) {
-			free(block_request);
-			DLOG_ERROR("Could not queue a revealed block for local submission");
-			continue;
-		}
-		submitted++;
-		DLOG_WARN("DATUM server revealed a verified block key for candidate %s",
-			block_hash);
 	}
 	if (!submitted) {
 		DLOG_INFO("DATUM server retired ABW assignment slot %u",
 			(unsigned)(assignment_id - 1));
 	}
-	if (retired_active) datum_blocktemplates_notifynew(NULL, 0);
 	return ignored_block ? -1 : 1;
 }
 
@@ -1352,7 +1354,7 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	
 	// process received coinbase
 	if ((datum_coinbaser_v2_response) && (datum_coinbaser_v2_response_value[datum_coinbaser_v2_response_buf_idx] == value)) {
-		i = datum_coinbaser_v2_parse(s, datum_coinbaser_v2_response, datum_coinbaser_v2_response_len[datum_coinbaser_v2_response_buf_idx], false);
+		i = datum_coinbaser_v2_parse(s, datum_coinbaser_v2_response, datum_coinbaser_v2_response_len[datum_coinbaser_v2_response_buf_idx]);
 	}
 	
 	pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
@@ -2670,8 +2672,8 @@ int datum_protocol_pow_submit(
 	}
 	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
 		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
-		DLOG_ERROR("Anti-withholding candidate cache is full");
-		return -1;
+		atomic_store(&datum_abw_health_latched, false);
+		DLOG_ERROR("Could not retain anti-withholding candidate; non-disclosure detection is compromised");
 	}
 	
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
