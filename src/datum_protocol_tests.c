@@ -100,7 +100,8 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_protocol_mining_cmd5(&header, activation));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 1);
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(atomic_load(&new_notify_threadsafe));
+	atomic_store(&new_notify_threadsafe, 0);
 	
 	block_template.height++;
 	datum_test(datum_protocol_abw_apply_active(&block_template));
