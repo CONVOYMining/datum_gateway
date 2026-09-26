@@ -1059,7 +1059,6 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!activated) DLOG_ERROR("Activated ABW slot was not preseeded");
-	if (activated) datum_blocktemplates_notifynew(NULL, 0);
 	return activated ? 1 : 0;
 }
 
@@ -1081,9 +1080,6 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!installed) {
 		DLOG_ERROR("Could not retain anti-withholding assignment");
-	}
-	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
-		datum_blocktemplates_notifynew(NULL, 0);
 	}
 	return installed ? 1 : 0;
 }
@@ -1159,7 +1155,6 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		return 0;
 	}
 	const uint8_t assignment_id = data[1] + 1;
-	bool retired_active;
 	pthread_mutex_lock(&datum_abw_mutex);
 	const T_DATUM_ABW_ASSIGNMENT *known_assignment =
 		&datum_abw_assignments[assignment_id - 1];
@@ -1179,7 +1174,6 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		DLOG_DEBUG("Ignored disclosure for an ABW slot not held by this session");
 		return 1;
 	}
-	retired_active = datum_abw_active_assignment_id == assignment_id;
 	const bool commitment_matched =
 		datum_protocol_abw_mark_assignment_revealed_locked(
 			assignment_id, key_hash);
@@ -1213,6 +1207,7 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 			continue;
 		}
 		submitted++;
+		datum_blocktemplates_notifynew(block_hash, 0);
 		DLOG_WARN("DATUM server revealed a verified block key for candidate %s",
 			block_hash);
 	}
@@ -1220,7 +1215,6 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		DLOG_INFO("DATUM server retired ABW assignment slot %u",
 			(unsigned)(assignment_id - 1));
 	}
-	if (retired_active) datum_blocktemplates_notifynew(NULL, 0);
 	return ignored_block ? -1 : 1;
 }
 
