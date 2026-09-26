@@ -42,7 +42,18 @@
 #include "datum_conf.h"
 #include "datum_pow.h"
 #include "datum_protocol_internal.h"
+#include "datum_queue.h"
 #include "datum_utils.h"
+
+extern DATUM_QUEUE pow_queue;
+
+static int datum_protocol_test_pow_handler_count;
+
+static int datum_protocol_test_pow_handler(void *item) {
+	(void)item;
+	datum_protocol_test_pow_handler_count++;
+	return 0;
+}
 
 static void datum_protocol_config_v3_tests(void) {
 	global_config_t saved_config = datum_config;
@@ -628,6 +639,32 @@ static void datum_protocol_abw_cache_tests(void) {
 	reveal[18] = 0xFE;
 	notice[3] ^= 1;
 	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
+	
+	/* Retention failure degrades ABW recovery without dropping pool delivery. */
+	unsigned char active_notice[sizeof(notice)] = {
+		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 3,
+	};
+	memcpy(active_notice + 3, key_hash, sizeof(key_hash));
+	active_notice[35] = 0xFE;
+	datum_protocol_abw_reset();
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(active_notice), active_notice));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_protocol_abw_saturate_pending_for_tests(4);
+	job.datum_job_idx = 2;
+	job.target_pot_index = 0;
+	memcpy(job.job_id, "retention-test", sizeof("retention-test"));
+	unsigned char header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE] = {0};
+	unsigned char extranonce[12] = {0};
+	datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
+		datum_protocol_test_pow_handler) == 0);
+	datum_protocol_test_pow_handler_count = 0;
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, true,
+		false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+		extranonce, 0xff) == 0);
+	datum_test(datum_queue_process(&pow_queue) == 1);
+	datum_test(datum_protocol_test_pow_handler_count == 1);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	
 	datum_protocol_abw_reset();
 	datum_protocol_replay_clear();
 }

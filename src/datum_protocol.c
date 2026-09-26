@@ -695,6 +695,14 @@ void datum_protocol_abw_reset(void) {
 	pthread_mutex_unlock(&datum_abw_mutex);
 }
 
+void datum_protocol_abw_saturate_pending_for_tests(uint8_t assignment_id) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
+		datum_abw_pending[i].assignment_id = assignment_id;
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
 bool datum_protocol_abw_assignment_revealed(uint8_t assignment_id) {
 	bool revealed = false;
 	pthread_mutex_lock(&datum_abw_mutex);
@@ -2670,8 +2678,8 @@ int datum_protocol_pow_submit(
 	}
 	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
 		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
-		DLOG_ERROR("Anti-withholding candidate cache is full");
-		return -1;
+		atomic_store(&datum_abw_health_latched, false);
+		DLOG_ERROR("Could not retain anti-withholding candidate; non-disclosure detection is compromised");
 	}
 	
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
