@@ -83,7 +83,7 @@ static void datum_coinbaser_value_overflow_tests(void) {
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 2, 0x51, 0x51,
 	};
 	
-	datum_test(datum_coinbaser_v2_parse(&job, response, sizeof(response), false) == 1);
+	datum_test(datum_coinbaser_v2_parse(&job, response, sizeof(response)) == 1);
 	datum_test(job.available_coinbase_outputs_count == 1);
 	datum_test(job.available_coinbase_outputs[0].value_sats == 1);
 }
