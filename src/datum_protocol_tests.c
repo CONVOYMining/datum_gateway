@@ -46,6 +46,8 @@
 #include "datum_utils.h"
 
 extern DATUM_QUEUE pow_queue;
+extern uint64_t datum_protocol_mainloop_tsms;
+extern uint64_t datum_last_accepted_share_tsms;
 
 static int datum_protocol_test_pow_handler_count;
 
@@ -53,6 +55,32 @@ static int datum_protocol_test_pow_handler(void *item) {
 	(void)item;
 	datum_protocol_test_pow_handler_count++;
 	return 0;
+}
+
+static void datum_protocol_acceptance_watchdog_tests(void) {
+	const uint64_t saved_mainloop_tsms = datum_protocol_mainloop_tsms;
+	const uint64_t saved_accepted_tsms = datum_last_accepted_share_tsms;
+	const uint64_t saved_accepted_count = datum_accepted_share_count;
+	const uint64_t saved_accepted_diff = datum_accepted_share_diff;
+	const uint64_t saved_rejected_count = datum_rejected_share_count;
+	const uint64_t saved_rejected_diff = datum_rejected_share_diff;
+	unsigned char response[9] = {DATUM_POW_SHARE_RESPONSE_REJECTED};
+	
+	datum_protocol_mainloop_tsms = 1234;
+	datum_last_accepted_share_tsms = 1111;
+	response[7] = 1;
+	datum_test(datum_protocol_share_response(sizeof(response), response));
+	datum_test(datum_last_accepted_share_tsms == 1111);
+	response[0] = DATUM_POW_SHARE_RESPONSE_ACCEPTED_TENTATIVELY;
+	datum_test(datum_protocol_share_response(sizeof(response), response));
+	datum_test(datum_last_accepted_share_tsms == 1234);
+	
+	datum_protocol_mainloop_tsms = saved_mainloop_tsms;
+	datum_last_accepted_share_tsms = saved_accepted_tsms;
+	datum_accepted_share_count = saved_accepted_count;
+	datum_accepted_share_diff = saved_accepted_diff;
+	datum_rejected_share_count = saved_rejected_count;
+	datum_rejected_share_diff = saved_rejected_diff;
 }
 
 static void datum_protocol_config_v3_tests(void) {
@@ -866,6 +894,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 }
 
 void datum_protocol_tests(void) {
+	datum_protocol_acceptance_watchdog_tests();
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
 	datum_protocol_bulk_tests();
