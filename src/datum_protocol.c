@@ -1053,8 +1053,10 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	const T_DATUM_ABW_ASSIGNMENT *assignment =
 		&datum_abw_assignments[assignment_id - 1];
 	if (assignment->id == assignment_id && !assignment->revealed) {
+		const bool first_abw = !datum_abw_active_assignment_id;
 		datum_abw_active_assignment_id = assignment_id;
 		memcpy(datum_abw_active_key_hash, assignment->key_hash, 32);
+		if (first_abw) datum_blocktemplates_notifynew(NULL, 0);
 		activated = true;
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
@@ -1074,8 +1076,10 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	pthread_mutex_lock(&datum_abw_mutex);
 	installed = datum_protocol_abw_install_assignment_locked(assignment_id, data + 3);
 	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
+		const bool first_abw = !datum_abw_active_assignment_id;
 		datum_abw_active_assignment_id = assignment_id;
 		memcpy(datum_abw_active_key_hash, data + 3, 32);
+		if (first_abw) datum_blocktemplates_notifynew(NULL, 0);
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!installed) {
