@@ -35,6 +35,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -141,9 +142,16 @@ static void datum_utils_tests_pdiff_to_bdiff(void) {
 	datum_test(datum_pdiff_to_bdiff(16) == 15.999755859375L);
 }
 
+static void datum_utils_tests_network_difficulty_blake2b(void) {
+	const bitcoin_difficulty_typ difficulty = calc_network_difficulty_blake2b(UINT32_C(0x1702c4e4));
+	
+	datum_test(fabsl(difficulty / 4.3657653085953146e23L - 1.0L) < 1e-15L);
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
 	datum_utils_tests_secure_strequals();
 	datum_utils_tests_scriptnum();
 	datum_utils_tests_pdiff_to_bdiff();
+	datum_utils_tests_network_difficulty_blake2b();
 }

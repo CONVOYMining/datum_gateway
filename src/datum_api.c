@@ -90,7 +90,7 @@ static void html_leading_zeros(char * const buffer, const size_t buffer_size, co
 }
 
 static void datum_api_format_share_counts(char *buffer, size_t buffer_size, uint64_t count, uint64_t diff) {
-	snprintf(buffer, buffer_size, "%llu  (%llu diff)", (unsigned long long)count, (unsigned long long)diff);
+	snprintf(buffer, buffer_size, "%llu  (%"PRIdiff" diff)", (unsigned long long)count, datum_pdiff_to_diff(diff));
 }
 
 void datum_api_var_STRATUM_SHARES_ACCEPTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
@@ -171,7 +171,7 @@ void datum_api_var_DATUM_MINER_TAG(char *buffer, size_t buffer_size, const T_DAT
 	buffer[i+2] = 0;
 }
 void datum_api_var_DATUM_POOL_DIFF(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%llu", (unsigned long long)datum_config.override_vardiff_min);
+	snprintf(buffer, buffer_size, "%llu", (unsigned long long)datum_pdiff_to_diff(datum_config.override_vardiff_min));
 }
 void datum_api_var_DATUM_POOL_PUBKEY(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	snprintf(buffer, buffer_size, "%s", datum_config.datum_pool_pubkey);
@@ -228,7 +228,8 @@ void datum_api_var_STRATUM_JOB_WITNESS(char *buffer, size_t buffer_size, const T
 	snprintf(buffer, buffer_size, "%s", vardata->sjob->block_template->default_witness_commitment);
 }
 void datum_api_var_STRATUM_JOB_DIFF(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%.3Lf", calc_network_difficulty(vardata->sjob->nbits));
+	snprintf(buffer, buffer_size, "%.3Lf",
+		calc_network_difficulty_blake2b(vardata->sjob->nbits_uint));
 }
 void datum_api_var_STRATUM_JOB_VERSION(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	snprintf(buffer, buffer_size, "%s (%u)", vardata->sjob->version, (unsigned)vardata->sjob->version_uint);
@@ -946,14 +947,14 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>N/A</TD>");
 					}
 					
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIu64"</TD>", m->current_diff);
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIu64" (%"PRIu64")</TD>", m->share_diff_accepted, m->share_count_accepted);
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIdiff"</TD>", datum_pdiff_to_diff(m->current_diff));
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIdiff" (%"PRIu64")</TD>", datum_pdiff_to_diff(m->share_diff_accepted), m->share_count_accepted);
 					
 					hr = 0.0;
 					if (m->share_diff_accepted > 0) {
 						hr = ((double)m->share_diff_rejected / (double)(m->share_diff_accepted + m->share_diff_rejected))*100.0;
 					}
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIu64" (%"PRIu64") %.2f%%</TD>", m->share_diff_rejected, m->share_count_rejected, hr);
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIdiff" (%"PRIu64") %.2f%%</TD>", datum_pdiff_to_diff(m->share_diff_rejected), m->share_count_rejected, hr);
 					
 					astat = m->stats.active_index?0:1; // inverted
 					hr = 0.0;
