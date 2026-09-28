@@ -1423,7 +1423,7 @@ err:
 	if (i + 8 > len) goto err;
 	datum_config.override_vardiff_min = upk_u64le(data, i); i+=8;
 	if (datum_config.override_vardiff_min != roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)) {
-		DLOG_WARN("Server specified a minimum difficulty that is not a power of two! Is your client up to date? Rounding up to a power of two! (%"PRIu64" to %"PRIu64")", datum_config.override_vardiff_min, roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)<<1);
+		DLOG_WARN("Server specified a minimum difficulty that is not a power of two! Is your client up to date? Rounding up to a power of two! (%"PRIdiff" to %"PRIdiff")", datum_pdiff_to_diff(datum_config.override_vardiff_min), datum_pdiff_to_diff(roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)<<1));
 		datum_config.override_vardiff_min = roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)<<1;
 	}
 	
@@ -1456,7 +1456,7 @@ err:
 	DLOG_DEBUG("DATUM Pool Payout Script:    (len %u) %s", (unsigned)datum_config.override_mining_pool_scriptpubkey_len, msg);
 	DLOG_DEBUG("DATUM Pool Coinbase Tag:     \"%s\"",datum_config.override_mining_coinbase_tag_primary);
 	DLOG_DEBUG("DATUM Pool Prime ID:         %16.16"PRIx64, datum_config.prime_id);
-	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIu64,datum_config.override_vardiff_min);
+	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIdiff, datum_pdiff_to_diff(datum_config.override_vardiff_min));
 	DLOG_DEBUG("DATUM Pool ABW:              %s",
 		pool_abw_enabled ? "enabled" : "disabled");
 	
