@@ -145,8 +145,17 @@ static void datum_utils_tests_pdiff_to_bdiff(void) {
 static void datum_utils_tests_network_difficulty_blake2b(void) {
 	const long double difficulty = calc_network_difficulty_blake2b(
 		UINT32_C(0x1702c4e4));
+	char formatted[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
 
 	datum_test(fabsl(difficulty / 4.3657653085953146e23L - 1.0L) < 1e-15L);
+	datum_test(datum_pdiff_to_diff(1) == 4294967296.0L);
+	datum_test(datum_pdiff_to_diff(UINT64_MAX) > (long double)UINT64_MAX);
+	datum_test(datum_format_difficulty(formatted, sizeof(formatted), datum_pdiff_to_diff(1024)) > 0);
+	datum_test(!strcmp(formatted, "4.4T"));
+	datum_test(datum_format_difficulty(formatted, sizeof(formatted), 999950) > 0);
+	datum_test(!strcmp(formatted, "1.0M"));
+	datum_test(datum_format_difficulty(formatted, sizeof(formatted), difficulty) > 0);
+	datum_test(!strcmp(formatted, "436.6Z"));
 }
 
 void datum_utils_tests(void) {

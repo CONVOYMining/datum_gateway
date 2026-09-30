@@ -614,6 +614,22 @@ long double calc_network_difficulty_blake2b(uint32_t nbits) {
 	return ldexpl(1.0L, 280 - 8 * (int)exponent) / mantissa;
 }
 
+int datum_format_difficulty(char * const out, const size_t outsz, bitcoin_difficulty_typ diff) {
+	if (diff < 1000) {
+		return snprintf(out, outsz, "%"PRIdiff, diff);
+	}
+	
+	static const char suffixes[] = "kMGTPEZYRQ";
+	const char *suffix = &suffixes[0];
+	
+	diff /= 1000;
+	while (diff >= 999.95L && suffix[1]) {
+		diff /= 1000;
+		++suffix;
+	}
+	return snprintf(out, outsz, "%.1Lf%c", diff, suffix[0]);
+}
+
 #define SIPHASH_ROTATE(a, b) ((uint64_t)(((a)<<(b))|((a)>>(64-(b)))))
 #define SIPHASH_HALF_ROUND(a,b,c,d,e,f) do { \
 	a += b; \

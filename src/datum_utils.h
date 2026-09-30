@@ -92,6 +92,8 @@ int get_bitcoin_varint_len_bytes(uint64_t n);
 bool strncpy_uachars(char *out, const char *in, size_t maxlen);
 bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
 long double calc_network_difficulty_blake2b(uint32_t nbits);
+#define DATUM_FORMAT_DIFFICULTY_OUT_SZ 8
+int datum_format_difficulty(char *out, size_t out_size, bitcoin_difficulty_typ difficulty);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
