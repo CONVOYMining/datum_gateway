@@ -65,6 +65,8 @@ typedef long double bitcoin_difficulty_typ;
 _Static_assert(LDBL_MANT_DIG >= 23, "long double must have at least 23 bits of precision for compact targets");
 #define PRIdiff ".0Lf"
 
+#define DATUM_MAX_PDIFF (UINT64_C(1) << 63)
+
 static inline long double datum_pdiff_to_bdiff(uint64_t n) {
 	return ((long double)n) * 65535.0L / 65536.0L;
 }
