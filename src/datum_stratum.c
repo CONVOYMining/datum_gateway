@@ -376,10 +376,10 @@ void datum_stratum_v1_socket_thread_client_new(T_DATUM_CLIENT_DATA *c) {
 void datum_stratum_v1_socket_thread_init(T_DATUM_THREAD_DATA *my) {
 	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = (T_DATUM_STRATUM_THREADPOOL_DATA *)my->app_thread_data;
 	
-	pthread_rwlock_rdlock(&stratum_global_job_ptr_lock);
-	sdata->latest_stratum_job_index = global_latest_stratum_job_index;
-	sdata->cur_stratum_job = global_cur_stratum_jobs[global_latest_stratum_job_index];
-	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
+	// No job yet: the first loop picks up the current job like any other job update,
+	// so it is processed (coinbaser readiness, etc) before any client here subscribes
+	sdata->latest_stratum_job_index = -1;
+	sdata->cur_stratum_job = NULL;
 	sdata->new_job = false;
 	sdata->last_sent_job_state = 0;
 	
