@@ -589,15 +589,15 @@ int datum_read_config(const char *conffile) {
 		return 0;
 	}
 	
+	if (datum_config.stratum_v1_vardiff_min < 1) {
+		DLOG_FATAL("Stratum server stratum.vardiff_min must be at least 1 (suggest at least 1024, but more likely 32768)");
+		return 0;
+	}
+	
 	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
 		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
 		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
 		datum_config.stratum_v1_vardiff_min = nv;
-	}
-	
-	if (datum_config.stratum_v1_vardiff_min < 1) {
-		DLOG_FATAL("Stratum server stratum.vardiff_min must be at least 1 (suggest at least 1024, but more likely 32768)");
-		return 0;
 	}
 	
 	if (datum_config.stratum_v1_max_clients > (datum_config.stratum_v1_max_clients_per_thread*datum_config.stratum_v1_max_threads)) {
