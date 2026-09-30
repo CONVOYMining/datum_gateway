@@ -851,8 +851,15 @@ void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick) {
 		
 		// reusing this var...
 		// try to set the difficulty quickly to a value that makes some sense based on how many shares we just saw
-		delta_tsms = roundDownToPowerOfTwo_64((target_ms_share / ms_per_share) * m->current_diff);
-		if (delta_tsms < (m->current_diff << 2)) {
+		const uint64_t diff_factor = target_ms_share / ms_per_share;
+		if (diff_factor > DATUM_MAX_PDIFF / m->current_diff) {
+			delta_tsms = DATUM_MAX_PDIFF;
+		} else {
+			delta_tsms = roundDownToPowerOfTwo_64(diff_factor * m->current_diff);
+		}
+		if (m->current_diff > DATUM_MAX_PDIFF >> 2) {
+			delta_tsms = DATUM_MAX_PDIFF;
+		} else if (delta_tsms < (m->current_diff << 2)) {
 			delta_tsms = (m->current_diff << 2);
 		}
 		
@@ -888,7 +895,7 @@ void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick) {
 	
 	if (ms_per_share < (target_ms_share/2)) {
 		// adjust diff upward a tick
-		m->current_diff = m->current_diff << 1;
+		if (m->current_diff < DATUM_MAX_PDIFF) m->current_diff <<= 1;
 		reset_vardiff_stats(c);
 		return;
 	}
