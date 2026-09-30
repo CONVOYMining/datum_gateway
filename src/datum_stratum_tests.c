@@ -34,16 +34,25 @@
  */
 
 #include <assert.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "datum_conf.h"
 #include "datum_jsonrpc.h"
 #include "datum_pow.h"
 #include "datum_stratum.h"
+#include "datum_stratum_dupes.h"
 #include "datum_utils.h"
 
 void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s);
 int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj);
+bool stratum_job_coinbaser_ready(T_DATUM_STRATUM_THREADPOOL_DATA *sdata, T_DATUM_STRATUM_JOB *job);
+
+extern uint64_t stratum_latest_empty_complete_count;
+extern bool stratum_latest_empty_ready_for_full;
+extern uint64_t stratum_latest_empty_job_index;
+extern uint64_t stratum_latest_empty_sent_count;
 
 static void datum_blake2b_refresh_time_offset_tests(void) {
 	T_DATUM_TEMPLATE_DATA tdata;
@@ -216,6 +225,182 @@ static void datum_blake2b_coinbase_selection_tests(void) {
 	miner.coinbase_selection = MAX_COINBASE_TYPES;
 	datum_test(datum_stratum_coinbase_index(sdata, &miner, false) == 0);
 	free(sdata);
+}
+
+static void datum_stratum_test_coinbaser_locks(void) {
+	// Normally set up when the stratum server starts
+	if (need_coinbaser_rwlocks_init_done) return;
+	for (int i = 0; i < MAX_STRATUM_JOBS; ++i) {
+		pthread_rwlock_init(&need_coinbaser_rwlocks[i], NULL);
+	}
+	need_coinbaser_rwlocks_init_done = true;
+}
+
+static void datum_stratum_coinbaser_ready_tests(void) {
+	T_DATUM_STRATUM_THREADPOOL_DATA * const sdata = calloc(1, sizeof(*sdata));
+	T_DATUM_STRATUM_JOB job = {0};
+	
+	datum_test(sdata != NULL);
+	if (!sdata) return;
+	datum_stratum_test_coinbaser_locks();
+	job.tsms = 1000000;
+	job.need_coinbaser = true;
+	
+	// Still waiting on the coinbaser
+	sdata->loop_tsms = job.tsms + 4000;
+	datum_test(!stratum_job_coinbaser_ready(sdata, &job));
+	datum_test(!sdata->full_coinbase_ready);
+	
+	// Gave up waiting after 5 seconds
+	sdata->loop_tsms = job.tsms + 5001;
+	datum_test(stratum_job_coinbaser_ready(sdata, &job));
+	datum_test(!sdata->full_coinbase_ready);
+	
+	// A coinbaser that is here gets used, even if the job is first looked at after 5 seconds
+	job.need_coinbaser = false;
+	datum_test(stratum_job_coinbaser_ready(sdata, &job));
+	datum_test(sdata->full_coinbase_ready);
+	
+	sdata->full_coinbase_ready = false;
+	sdata->loop_tsms = job.tsms + 1;
+	datum_test(stratum_job_coinbaser_ready(sdata, &job));
+	datum_test(sdata->full_coinbase_ready);
+	
+	free(sdata);
+}
+
+static void datum_stratum_new_thread_job_tests(void) {
+	// T_DATUM_THREAD_DATA holds MAX_CLIENTS_THREAD client buffers (hundreds of MB), but only its own
+	// fields and the first client slot are touched here, and calloc'd memory normally gets backed as used
+	T_DATUM_THREAD_DATA * const thread = calloc(1, sizeof(*thread));
+	T_DATUM_STRATUM_THREADPOOL_DATA * const sdata = calloc(1, sizeof(*sdata));
+	T_DATUM_SOCKET_APP app = {0};
+	T_DATUM_MINER_DATA miner;
+	T_DATUM_TEMPLATE_DATA tdata = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	const global_config_t saved_config = datum_config;
+	const int saved_latest_index = global_latest_stratum_job_index;
+	T_DATUM_STRATUM_JOB * const saved_job = global_cur_stratum_jobs[0];
+	char subscribe[] = "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[]}";
+	
+	datum_test(thread != NULL);
+	datum_test(sdata != NULL);
+	if (!(thread && sdata)) {
+		free(thread);
+		free(sdata);
+		return;
+	}
+	datum_stratum_test_coinbaser_locks();
+	datum_config.stratum_v1_vardiff_min = 1024;
+	datum_config.stratum_v1_max_clients_per_thread = 1;
+	datum_config.stratum_v1_vardiff_target_shares_min = 1;
+	datum_config.stratum_v1_share_stale_seconds = 60;
+	datum_config.bitcoind_work_update_seconds = 40;
+	
+	// The current job already has its coinbaser, and is older than the 5 second fallback
+	tdata.version = 0x20000000;
+	tdata.height = 12345;
+	tdata.bits_uint = 0x1d00ffff;
+	job.block_template = &tdata;
+	job.job_state = JOB_STATE_FULL_NORMAL_WAIT_COINBASER;
+	job.tsms = current_time_millis() - 10000;
+	strcpy(job.job_id, "0000000000c0de");
+	job.target_pot_index = 4;
+	for (int i = 0; i < MAX_COINBASE_TYPES; ++i) {
+		job.coinbase[i].coinb1_len = 20;
+		job.coinbase[i].coinb2_len = 8;
+		memset(job.coinbase[i].coinb1_bin, 0x11 + i, 20);
+		memset(job.coinbase[i].coinb2_bin, 0x22, 8);
+	}
+	global_cur_stratum_jobs[0] = &job;
+	global_latest_stratum_job_index = 0;
+	
+	// A new stratum thread starts, and loops once before its first client subscribes
+	app.max_threads = 1;
+	app.max_clients_thread = 1;
+	thread->app = &app;
+	thread->app_thread_data = sdata;
+	datum_stratum_v1_socket_thread_init(thread);
+	datum_stratum_v1_socket_thread_loop(thread);
+	datum_test(sdata->cur_stratum_job == &job);
+	datum_test(sdata->full_coinbase_ready);
+	
+	T_DATUM_CLIENT_DATA * const client = &thread->client_data[0];
+	client->datum_thread = thread;
+	client->app_client_data = &miner;
+	datum_stratum_v1_socket_thread_client_new(client);
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(client, subscribe) == 0);
+	client->w_buffer[client->out_buf] = 0;
+	
+	// Its first job must use the full coinbase (class 4), not the pool-only one (class 0)
+	const char * const notify = strstr(client->w_buffer, "\"mining.notify\"");
+	datum_test(notify && strstr(notify, "[\"0000000000c0de04\","));
+	
+	T_DATUM_STRATUM_DUPES * const dupes = sdata->dupes;
+	if (dupes) free(dupes->ptr);
+	free(dupes);
+	global_cur_stratum_jobs[0] = saved_job;
+	global_latest_stratum_job_index = saved_latest_index;
+	datum_config = saved_config;
+	free(sdata);
+	free(thread);
+}
+
+static void datum_stratum_new_thread_empty_work_tests(void) {
+	T_DATUM_THREAD_DATA * const thread = calloc(1, sizeof(*thread));
+	T_DATUM_STRATUM_THREADPOOL_DATA * const sdata = calloc(1, sizeof(*sdata));
+	T_DATUM_SOCKET_APP app = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	const global_config_t saved_config = datum_config;
+	const int saved_latest_index = global_latest_stratum_job_index;
+	T_DATUM_STRATUM_JOB * const saved_job = global_cur_stratum_jobs[0];
+	const uint64_t saved_complete_count = stratum_latest_empty_complete_count;
+	const bool saved_ready_for_full = stratum_latest_empty_ready_for_full;
+	const uint64_t saved_empty_job_index = stratum_latest_empty_job_index;
+	const uint64_t saved_sent_count = stratum_latest_empty_sent_count;
+	
+	datum_test(thread != NULL);
+	datum_test(sdata != NULL);
+	if (!(thread && sdata)) {
+		free(thread);
+		free(sdata);
+		return;
+	}
+	datum_config.stratum_v1_max_clients_per_thread = 1;
+	datum_config.stratum_v1_vardiff_target_shares_min = 1;
+	datum_config.stratum_v1_share_stale_seconds = 60;
+	
+	// Empty work for a new block is going out, as set up by update_stratum_job
+	job.job_state = JOB_STATE_EMPTY_PLUS;
+	global_cur_stratum_jobs[0] = &job;
+	global_latest_stratum_job_index = 0;
+	stratum_latest_empty_job_index = 0;
+	stratum_latest_empty_ready_for_full = false;
+	stratum_latest_empty_complete_count = 0;
+	stratum_latest_empty_sent_count = 0;
+	
+	// A thread started now counts towards the threads that have to send it, so it must send
+	// it too, or the full work for the block waits for the template thread's timeout
+	app.max_threads = 1;
+	app.max_clients_thread = 1;
+	thread->app = &app;
+	thread->app_thread_data = sdata;
+	datum_stratum_v1_socket_thread_init(thread);
+	datum_stratum_v1_socket_thread_loop(thread);
+	datum_test(stratum_latest_empty_complete_count == 1);
+	
+	T_DATUM_STRATUM_DUPES * const dupes = sdata->dupes;
+	if (dupes) free(dupes->ptr);
+	free(dupes);
+	stratum_latest_empty_job_index = saved_empty_job_index;
+	stratum_latest_empty_ready_for_full = saved_ready_for_full;
+	stratum_latest_empty_complete_count = saved_complete_count;
+	stratum_latest_empty_sent_count = saved_sent_count;
+	global_cur_stratum_jobs[0] = saved_job;
+	global_latest_stratum_job_index = saved_latest_index;
+	datum_config = saved_config;
+	free(sdata);
+	free(thread);
 }
 
 static void datum_stratum_abw_block_request_tests(void) {
@@ -508,6 +693,9 @@ void datum_stratum_tests(void) {
 	datum_stratum_minimum_difficulty_configure_tests();
 	datum_stratum_string_request_id_tests();
 	datum_blake2b_coinbase_selection_tests();
+	datum_stratum_coinbaser_ready_tests();
+	datum_stratum_new_thread_job_tests();
+	datum_stratum_new_thread_empty_work_tests();
 	datum_blake2b_h_not_zero_tests();
 	datum_blake2b_client_pot_commitment_tests();
 	datum_blake2b_unmasked_block_tests();
