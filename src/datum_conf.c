@@ -36,6 +36,8 @@
 // Custom configurator and help output generator
 
 #include <assert.h>
+#include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -58,6 +60,7 @@ const char *datum_conf_var_type_text[] = {
 	"string",
 	"string_array",
 	"{\"modname\":{\"address\":proportion,...},...}",
+	"difficulty",
 };
 
 const T_DATUM_CONFIG_ITEM datum_config_options[] = {
@@ -93,7 +96,7 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.stratum_v1_max_clients, 				.default_int = 1024 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "trust_proxy",		.description = "Enable support for the PROXY protocol, trusting up to the specified number of levels deep of proxies (-1 to disable entirely)",
 		.required = false, .ptr = &datum_config.stratum_v1_trust_proxy, 	.default_int = -1 },
-	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "vardiff_min",				.description = "Work difficulty floor",
+	{ .var_type = DATUM_CONF_DIFFICULTY, .category = "stratum", 		.name = "vardiff_min",				.description = "Work difficulty floor (integer or quoted decimal with SI suffix)",
 		.required = false, .ptr = &datum_config.stratum_v1_vardiff_min, 				.default_int = 1024 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "vardiff_target_shares_min",.description = "Adjust work difficulty to target this many shares per minute",
 		.required = false, .ptr = &datum_config.stratum_v1_vardiff_target_shares_min, 	.default_int = 8 },
@@ -261,6 +264,11 @@ void datum_config_set_default(const T_DATUM_CONFIG_ITEM *c) {
 			*umods_p = NULL;
 			break;
 		}
+
+		case DATUM_CONF_DIFFICULTY: {
+			*((int *)c->ptr) = c->default_int;
+			break;
+		}
 	}
 }
 
@@ -363,6 +371,72 @@ struct datum_username_mod *datum_username_mods_find(struct datum_username_mod *u
 	return NULL;
 }
 
+static int datum_config_set_difficulty(int * const out, const long double lower, const long double higher) {
+	const long double pdiff = lower / datum_pdiff_to_diff(1);
+	if (pdiff <= 1) {
+		*out = 1;
+	} else {
+		const uint64_t max = roundDownToPowerOfTwo_64(INT_MAX);
+		if (pdiff > max) return -1;
+		const uint64_t minimum = ceill(pdiff);
+		*out = roundDownToPowerOfTwo_64(minimum - 1) << 1;
+	}
+	return (datum_pdiff_to_diff(*out) > higher) ? 2 : 1;
+}
+
+int datum_config_parse_difficulty(int * const out, json_t * const item) {
+	switch (json_typeof(item)) {
+		case JSON_INTEGER: {
+			const json_int_t value = json_integer_value(item);
+			if (value < 1) return -1;
+			if (value <= INT_MAX) {
+				*out = roundDownToPowerOfTwo_64(value);
+				return (*out == value) ? 3 : -1;
+			}
+			return datum_config_set_difficulty(out, value, value);
+		}
+		case JSON_REAL:
+			return datum_config_set_difficulty(out, json_real_value(item), json_real_value(item));
+		case JSON_STRING:
+			break;
+		default:
+			return -1;
+	}
+	
+	const char * const value_str = json_string_value(item);
+	errno = 0;
+	char *end;
+	long double requested = strtold(value_str, &end);
+	if (errno || end == value_str || requested <= 0) return -1;
+	
+	int decimal_places = 0;
+	for (const char *p = value_str; p < end; ++p) {
+		if (*p == '.') {
+			decimal_places = (end - p) - 1;
+		} else if (!isdigit(*p)) {
+			// Don't allow explicit exponents, whitespace, sign, etc
+			return -1;
+		}
+	}
+	
+	long double rounding_unit;
+	if (end[0]) {
+		static const char suffixes[] = "KMGTPEZYRQ";
+		const char * const suffix = strchr(suffixes, toupper(end[0]));
+		if (end[1] || !suffix) return -1;
+		const int decimal_exponent = ((suffix - suffixes) + 1) * 3;
+		requested *= powl(10.0L, decimal_exponent);
+		rounding_unit = powl(10.0L, decimal_exponent - decimal_places);
+	} else {
+		rounding_unit = 1.;
+	}
+	
+	if (!isfinite(requested)) return -1;
+	const long double lower = requested - rounding_unit / 2;
+	const long double higher = requested + rounding_unit / 2;
+	return datum_config_set_difficulty(out, lower, higher);
+}
+
 int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 	switch(c->var_type) {
 		case DATUM_CONF_INT: {
@@ -425,6 +499,25 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 		
 		case DATUM_CONF_USERNAME_MODS: {
 			return datum_config_parse_username_mods(c->ptr, item, true);
+		}
+
+		case DATUM_CONF_DIFFICULTY: {
+			int * const out = c->ptr;
+			const int result = datum_config_parse_difficulty(out, item);
+			if (result < 0) return result;
+			if (result > 1) {
+				char diffstr[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+				datum_format_difficulty(diffstr, sizeof(diffstr), datum_pdiff_to_diff(*out));
+				switch (result) {
+					case 2:
+						DLOG_WARN("%s.%s rounded up to %s", c->category, c->name, diffstr);
+						break;
+					case 3:
+						DLOG_WARN("%s.%s uses legacy integer syntax; use \"%s\" instead", c->category, c->name, diffstr);
+						break;
+				}
+			}
+			return 1;
 		}
 	}
 	
@@ -599,7 +692,7 @@ int datum_read_config(const char *conffile) {
 		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
 		datum_config.stratum_v1_vardiff_min = nv;
 	}
-	
+
 	if (datum_config.stratum_v1_max_clients > (datum_config.stratum_v1_max_clients_per_thread*datum_config.stratum_v1_max_threads)) {
 		DLOG_FATAL("Stratum server configuration error. Max clients too high for thread settings");
 		return 0;
@@ -676,6 +769,13 @@ void datum_gateway_help(const char * const argv0) {
 					printf(", default: \"%s\")\n", opt->default_string[0]);
 					break;
 				}
+
+				case DATUM_CONF_DIFFICULTY: {
+					char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(opt->default_int));
+					printf(", default: \"%s\")\n", difficulty);
+					break;
+				}
 				
 				default: {
 					puts(")");
@@ -735,6 +835,13 @@ void datum_gateway_example_conf(void) {
 				
 				case DATUM_CONF_USERNAME_MODS: {
 					puts("{}");
+					break;
+				}
+
+				case DATUM_CONF_DIFFICULTY: {
+					char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(opt->default_int));
+					printf("\"%s\"", difficulty);
 					break;
 				}
 			}

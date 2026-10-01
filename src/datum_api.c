@@ -1089,6 +1089,13 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 					DLOG_ERROR("%s: %s not implemented", __func__, "DATUM_CONF_USERNAME_MODS");
 					break;
 				}
+				case DATUM_CONF_DIFFICULTY: {
+					val = *((int *)item->ptr);
+					if (!colon_pos) {
+						return datum_format_difficulty(replacement, replacement_max_len, datum_pdiff_to_diff(val));
+					}
+					break;
+				}
 			}
 		} else {
 			DLOG_ERROR("%s: '%.*s' not implemented", __func__, (int)(var_end - var_start_2), var_start_2);
