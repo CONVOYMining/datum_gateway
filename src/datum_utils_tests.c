@@ -148,7 +148,10 @@ static void datum_utils_tests_network_difficulty_blake2b(void) {
 	
 	datum_test(fabsl(difficulty / 4.3657653085953146e23L - 1.0L) < 1e-15L);
 	datum_test(datum_pdiff_to_diff(1) == 4294967296.0L);
+	datum_test(datum_pdiff_to_diff(DATUM_MAX_PDIFF) == ldexpl(1.0L, 95));
 	datum_test(datum_pdiff_to_diff(UINT64_MAX) > (bitcoin_difficulty_typ)UINT64_MAX);
+	datum_test(datum_format_difficulty(formatted, sizeof(formatted), datum_pdiff_to_diff(DATUM_MAX_PDIFF)) > 0);
+	datum_test(!strcmp(formatted, "39.6R"));
 	datum_test(datum_format_difficulty(formatted, sizeof(formatted), datum_pdiff_to_diff(1024)) > 0);
 	datum_test(!strcmp(formatted, "4.4T"));
 	datum_test(datum_format_difficulty(formatted, sizeof(formatted), 999950) > 0);

@@ -43,6 +43,78 @@
 #include "datum_jsonrpc.h"
 #include "datum_utils.h"
 
+static void datum_conf_test_difficulty_(json_t * const input, const int expected_ret, const int expected_pdiff,
+	const char * const expr, const unsigned int line, const char * const func) {
+	assert(input);
+	char err[0x100];
+	int pdiff;
+	const int rv = datum_config_parse_difficulty(&pdiff, input);
+	if (rv != expected_ret) {
+		snprintf(err, sizeof(err), "return value for %s was %d", expr, rv);
+		datum_test_fail_(err, __FILE__, line, func);
+	}
+	if (expected_ret > 0 && pdiff != expected_pdiff) {
+		snprintf(err, sizeof(err), "output value for %s was %d", expr, pdiff);
+		datum_test_fail_(err, __FILE__, line, func);
+	}
+	json_decref(input);
+}
+#define datum_conf_test_difficulty(input, ...) \
+	datum_conf_test_difficulty_(input, __VA_ARGS__, #input, __LINE__, __func__)
+
+static void datum_conf_difficulty_tests(void) {
+	datum_conf_test_difficulty(json_integer(1023), -1, 0);
+	datum_conf_test_difficulty(json_string("1023"), 2, 1);
+	datum_conf_test_difficulty(json_integer(1024), 3, 1024);
+	datum_conf_test_difficulty(json_string("1024"), 2, 1);
+	datum_conf_test_difficulty(json_integer(4398046511104ULL), 1, 1024);
+	datum_conf_test_difficulty(json_string("4398046511104"), 1, 1024);
+	datum_conf_test_difficulty(json_integer(4400000000000ULL), 2, 2048);
+	datum_conf_test_difficulty(json_integer(18014398509481984LL), 1, 1 << 22);
+	datum_conf_test_difficulty(json_integer(18014398509481985LL), 2, 1 << 23);
+	datum_conf_test_difficulty(json_string("18014398509481983"), 2, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481984"), 1, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481985"), 2, 1 << 23);
+	datum_conf_test_difficulty(json_string("00018014398509481984.000"), 1, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481983.999"), 2, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481984.001"), 2, 1 << 23);
+	datum_conf_test_difficulty(json_string("18014398509481984.0000000000000000000000000000000000000000000000000"), 1, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481985.0000000000000000000000000000000000000000000000000"), 2, 1 << 23);
+	datum_conf_test_difficulty(json_string("18.014398509481984P"), 1, 1 << 22);
+	datum_conf_test_difficulty(json_string("18.014398509481985P"), 2, 1 << 23);
+	datum_conf_test_difficulty(json_string("18.014398509481983P"), 2, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481.98k"), 1, 1 << 22);
+	datum_conf_test_difficulty(json_string("18014398509481.99k"), 2, 1 << 23);
+	datum_conf_test_difficulty(json_string("4611686018427387904"), 1, 1 << 30);
+	datum_conf_test_difficulty(json_string("4611686018427387903"), 2, 1 << 30);
+	datum_conf_test_difficulty(json_string("4611686018427387905"), -1, 0);
+	datum_conf_test_difficulty(json_string("4.611686018427387904E"), 1, 1 << 30);
+	datum_conf_test_difficulty(json_string("4.611686018427387905E"), -1, 0);
+	datum_conf_test_difficulty(json_real(4398046511104.0), 1, 1024);
+	datum_conf_test_difficulty(json_real(18014398509481984.0), 1, 1 << 22);
+	datum_conf_test_difficulty(json_real(18014398509481988.0), 2, 1 << 23);
+	datum_conf_test_difficulty(json_real(0.0), -1, 0);
+	datum_conf_test_difficulty(json_real(-1.0), -1, 0);
+	datum_conf_test_difficulty(json_real(1e20), -1, 0);
+	datum_conf_test_difficulty(json_string("4G"), 1, 1);
+	datum_conf_test_difficulty(json_string("4.4T"), 1, 1024);
+	datum_conf_test_difficulty(json_string("4.40T"), 1, 1024);
+	datum_conf_test_difficulty(json_string("4.400T"), 2, 2048);
+	datum_conf_test_difficulty(json_string("4.5T"), 2, 2048);
+	datum_conf_test_difficulty(json_string("2T"), 1, 512);
+	datum_conf_test_difficulty(json_string("1T"), 1, 128);
+	datum_conf_test_difficulty(json_string("1E"), 1, 1 << 27);
+	datum_conf_test_difficulty(json_string("0.0000000000000000044Q"), 1, 1024);
+	datum_conf_test_difficulty(json_string("4.6E"), 1, 1 << 30);
+	datum_conf_test_difficulty(json_string("1.2Z"), -1, 0);
+	datum_conf_test_difficulty(json_string("1Q"), -1, 0);
+	datum_conf_test_difficulty(json_string("4.4X"), -1, 0);
+	datum_conf_test_difficulty(json_string("4.4\xc3\xa9"), -1, 0);
+	datum_conf_test_difficulty(json_string("4e12"), -1, 0);
+	datum_conf_test_difficulty(json_string("4.4e12"), -1, 0);
+	datum_conf_test_difficulty(json_string("0x1p42"), -1, 0);
+}
+
 struct datum_test_username_mods_range {
 	const char *addr;
 	uint16_t max;
@@ -207,5 +279,6 @@ void datum_conf_username_mods_tests() {
 }
 
 void datum_conf_tests(void) {
+	datum_conf_difficulty_tests();
 	datum_conf_username_mods_tests();
 }
