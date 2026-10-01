@@ -1421,11 +1421,21 @@ err:
 	datum_config.override_mining_coinbase_tag_primary[a] = 0;
 	
 	if (i + 8 > len) goto err;
-	datum_config.override_vardiff_min = upk_u64le(data, i); i+=8;
-	if (datum_config.override_vardiff_min != roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)) {
-		DLOG_WARN("Server specified a minimum difficulty that is not a power of two! Is your client up to date? Rounding up to a power of two! (%"PRIu64" to %"PRIu64")", datum_config.override_vardiff_min, roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)<<1);
-		datum_config.override_vardiff_min = roundDownToPowerOfTwo_64(datum_config.override_vardiff_min)<<1;
+	uint64_t server_vardiff_min = upk_u64le(data, i); i+=8;
+	{
+		uint64_t server_vardiff_min_rounded = server_vardiff_min ? roundDownToPowerOfTwo_64(server_vardiff_min) : 1;
+		if (server_vardiff_min != server_vardiff_min_rounded) {
+			if (server_vardiff_min > 0 && server_vardiff_min < DATUM_MAX_PDIFF) {
+				server_vardiff_min_rounded <<= 1;
+			}
+			char requested[DATUM_FORMAT_DIFFICULTY_OUT_SZ], effective[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+			datum_format_difficulty(requested, sizeof(requested), datum_pdiff_to_diff(server_vardiff_min));
+			datum_format_difficulty(effective, sizeof(effective), datum_pdiff_to_diff(server_vardiff_min_rounded));
+			DLOG_WARN("Server specified a minimum difficulty that is not a power of two! Is your client up to date? Adjusting to a supported value! (%s to %s)", requested, effective);
+			server_vardiff_min = server_vardiff_min_rounded;
+		}
 	}
+	datum_config.override_vardiff_min = server_vardiff_min;
 	
 	if (i + 2 > len) goto err;
 	const unsigned char config_flags = data[i];
@@ -1456,7 +1466,12 @@ err:
 	DLOG_DEBUG("DATUM Pool Payout Script:    (len %u) %s", (unsigned)datum_config.override_mining_pool_scriptpubkey_len, msg);
 	DLOG_DEBUG("DATUM Pool Coinbase Tag:     \"%s\"",datum_config.override_mining_coinbase_tag_primary);
 	DLOG_DEBUG("DATUM Pool Prime ID:         %16.16"PRIx64, datum_config.prime_id);
-	DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIu64,datum_config.override_vardiff_min);
+	{
+		const bitcoin_difficulty_typ diff = datum_pdiff_to_diff(datum_config.override_vardiff_min);
+		char diffstr[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+		datum_format_difficulty(diffstr, sizeof(diffstr), diff);
+		DLOG_DEBUG("DATUM Pool Min Diff:         %"PRIdiff" (%s)", diff, diffstr);
+	}
 	DLOG_DEBUG("DATUM Pool ABW:              %s",
 		pool_abw_enabled ? "enabled" : "disabled");
 	

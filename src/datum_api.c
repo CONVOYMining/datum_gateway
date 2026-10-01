@@ -90,7 +90,9 @@ static void html_leading_zeros(char * const buffer, const size_t buffer_size, co
 }
 
 static void datum_api_format_share_counts(char *buffer, size_t buffer_size, uint64_t count, uint64_t diff) {
-	snprintf(buffer, buffer_size, "%llu  (%llu diff)", (unsigned long long)count, (unsigned long long)diff);
+	char diffstr[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+	datum_format_difficulty(diffstr, sizeof(diffstr), datum_pdiff_to_diff(diff));
+	snprintf(buffer, buffer_size, "%llu  (%s diff)", (unsigned long long)count, diffstr);
 }
 
 void datum_api_var_STRATUM_SHARES_ACCEPTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
@@ -171,7 +173,7 @@ void datum_api_var_DATUM_MINER_TAG(char *buffer, size_t buffer_size, const T_DAT
 	buffer[i+2] = 0;
 }
 void datum_api_var_DATUM_POOL_DIFF(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%llu", (unsigned long long)datum_config.override_vardiff_min);
+	datum_format_difficulty(buffer, buffer_size, datum_pdiff_to_diff(datum_config.override_vardiff_min));
 }
 void datum_api_var_DATUM_POOL_PUBKEY(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	snprintf(buffer, buffer_size, "%s", datum_config.datum_pool_pubkey);
@@ -228,7 +230,8 @@ void datum_api_var_STRATUM_JOB_WITNESS(char *buffer, size_t buffer_size, const T
 	snprintf(buffer, buffer_size, "%s", vardata->sjob->block_template->default_witness_commitment);
 }
 void datum_api_var_STRATUM_JOB_DIFF(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%.3Lf", calc_network_difficulty(vardata->sjob->nbits));
+	datum_format_difficulty(buffer, buffer_size,
+		calc_network_difficulty_blake2b(vardata->sjob->nbits_uint));
 }
 void datum_api_var_STRATUM_JOB_VERSION(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
 	snprintf(buffer, buffer_size, "%s (%u)", vardata->sjob->version, (unsigned)vardata->sjob->version_uint);
@@ -902,6 +905,7 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	double hr;
 	unsigned char astat;
 	double thr = 0.0;
+	char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
 	
 	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
 	
@@ -946,14 +950,17 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>N/A</TD>");
 					}
 					
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIu64"</TD>", m->current_diff);
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIu64" (%"PRIu64")</TD>", m->share_diff_accepted, m->share_count_accepted);
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(m->current_diff));
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s</TD>", difficulty);
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(m->share_diff_accepted));
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s (%"PRIu64")</TD>", difficulty, m->share_count_accepted);
 					
 					hr = 0.0;
 					if (m->share_diff_accepted > 0) {
 						hr = ((double)m->share_diff_rejected / (double)(m->share_diff_accepted + m->share_diff_rejected))*100.0;
 					}
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%"PRIu64" (%"PRIu64") %.2f%%</TD>", m->share_diff_rejected, m->share_count_rejected, hr);
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(m->share_diff_rejected));
+					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s (%"PRIu64") %.2f%%</TD>", difficulty, m->share_count_rejected, hr);
 					
 					astat = m->stats.active_index?0:1; // inverted
 					hr = 0.0;
@@ -1080,6 +1087,13 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 				}
 				case DATUM_CONF_USERNAME_MODS: {
 					DLOG_ERROR("%s: %s not implemented", __func__, "DATUM_CONF_USERNAME_MODS");
+					break;
+				}
+				case DATUM_CONF_DIFFICULTY: {
+					val = *((int *)item->ptr);
+					if (!colon_pos) {
+						return datum_format_difficulty(replacement, replacement_max_len, datum_pdiff_to_diff(val));
+					}
 					break;
 				}
 			}

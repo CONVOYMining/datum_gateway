@@ -179,6 +179,7 @@ static void datum_protocol_config_v3_tests(void) {
 	i += 40;
 	payload[i++] = 3;
 	memcpy(payload + i, "tag", 3); i += 3;
+	const size_t vardiff_min = i;
 	pk_u64le(payload, i, 1024); i += 8;
 	const size_t config_flags = i;
 	payload[i++] = 0;
@@ -191,6 +192,16 @@ static void datum_protocol_config_v3_tests(void) {
 	datum_test(datum_config.override_mining_pool_scriptpubkey[0] == 0x51);
 	datum_test(!strcmp(datum_config.override_mining_coinbase_tag_primary, "tag"));
 	datum_test(datum_config.override_vardiff_min == 1024);
+	pk_u64le(payload, vardiff_min, 0);
+	datum_test(datum_protocol_client_configure((int)i, payload));
+	datum_test(datum_config.override_vardiff_min == 1);
+	pk_u64le(payload, vardiff_min, DATUM_MAX_PDIFF);
+	datum_test(datum_protocol_client_configure((int)i, payload));
+	datum_test(datum_config.override_vardiff_min == DATUM_MAX_PDIFF);
+	pk_u64le(payload, vardiff_min, UINT64_MAX);
+	datum_test(datum_protocol_client_configure((int)i, payload));
+	datum_test(datum_config.override_vardiff_min == DATUM_MAX_PDIFF);
+	pk_u64le(payload, vardiff_min, 1024);
 	datum_test(!datum_protocol_is_active());
 	unsigned char notice[36] = {
 		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 0,
