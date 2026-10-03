@@ -2010,57 +2010,62 @@ static void datum_protocol_add_share_diff(uint64_t *total, unsigned char pot) {
 }
 
 // TODO: Ensure all shares are responded to!  Currently this has no bearing on anything, just logging
-int datum_protocol_share_response(int len, unsigned char *data) {
+int datum_protocol_share_response(const int len, unsigned char * const data) {
 	if (len < 9) {
-		DLOG_DEBUG("Invalid share response received!");
+		DLOG_ERROR("Invalid share response received!");
 		return 0;
 	}
-	const bool exact_abw_reference = len == 44 && data[9] == 0x06 &&
-		data[10] < DATUM_ABW_ASSIGNMENT_SLOTS && data[43] == 0xFE;
-	if (data[0] == DATUM_POW_SHARE_RESPONSE_REJECTED) {
-		DLOG_DEBUG("DATUM server rejected our share!  Reason code: %d / TargetPOT: %2.2x / Job ID: %d / Nonce: %8.8x",
-		           (int)upk_u16le(data, 1),
-		           data[7], (int)data[8], upk_u32le(data, 3));
-		
-		datum_rejected_share_count++;
-		if (data[7] != 0xFF) {
-			datum_protocol_add_share_diff(&datum_rejected_share_diff, data[7]);
-		} else {
-			datum_rejected_share_diff += datum_config.override_vardiff_min;
+	const uint8_t share_response_code = data[0];
+	const uint32_t nonce = upk_u32le(data, 3);
+	const uint8_t target_pot = data[7];
+	const uint8_t job_id = data[8];
+	const bool exact_abw_reference = len == 44 && data[9] == 0x06 && data[10] < DATUM_ABW_ASSIGNMENT_SLOTS && data[43] == 0xFE;
+	switch (share_response_code) {
+		case DATUM_POW_SHARE_RESPONSE_ACCEPTED:
+		case DATUM_POW_SHARE_RESPONSE_ACCEPTED_TENTATIVELY: {
+			DLOG_DEBUG("Share accepted: NONCE: %8.8"PRIx32" / TargetPOT: %2.2x / Job ID: %u",
+			           nonce,
+			           target_pot,
+			           job_id);
+			
+			++datum_accepted_share_count;
+			datum_protocol_add_share_diff(&datum_accepted_share_diff, target_pot);
+			datum_last_accepted_share_tsms = datum_protocol_mainloop_tsms;
+			
+			break;
 		}
-		if (exact_abw_reference) {
-			datum_protocol_replay_mark_responded_exact(data[10] + 1, data + 11);
-			if (!datum_config.mining_abw_verify_all_shares_on_disclosure) {
-				datum_protocol_abw_forget_exact(data[10] + 1, data + 11);
+		case DATUM_POW_SHARE_RESPONSE_REJECTED: {
+			const unsigned int reject_reason = upk_u16le(data, 1);
+			const enum datum_loglevel loglevel = (reject_reason == DATUM_REJECT_STALE_BLOCK) ? DLOG_LEVEL_DEBUG : DLOG_LEVEL_ERROR;
+			DLOG(loglevel, "DATUM server rejected our share!  Reason code: %u / TargetPOT: %2.2x / Job ID: %u / Nonce: %8.8x",
+			           reject_reason,
+			           target_pot,
+			           job_id,
+			           nonce);
+			
+			++datum_rejected_share_count;
+			if (target_pot != 0xFF) {
+				datum_protocol_add_share_diff(&datum_rejected_share_diff, target_pot);
+			} else {
+				datum_rejected_share_diff += datum_config.override_vardiff_min;
 			}
-		} else {
-			datum_protocol_replay_mark_responded_legacy(
-				upk_u32le(data, 3), data[7], data[8]);
+			
+			break;
 		}
-		
-		return 1;
+		default:
+			DLOG_WARN("Unknown share response %2.2x.  Your client may need to be upgraded!", share_response_code);
+			return 1;
 	}
 	
-	if ((data[0] != DATUM_POW_SHARE_RESPONSE_ACCEPTED) && (data[0] != DATUM_POW_SHARE_RESPONSE_ACCEPTED_TENTATIVELY)) {
-		DLOG_DEBUG("Unknown share response %2.2x.  Your client may need to be upgraded!", data[0]);
-		return 1;
-	}
-	
-	// share accepted
-	DLOG_DEBUG("Share accepted: NONCE: %8.8lx / TargetPOT: %2.2x / Job ID: %d", (unsigned long)upk_u32le(data, 3),
-	           data[7], (int)data[8]);
-	
-	datum_accepted_share_count++;
-	datum_protocol_add_share_diff(&datum_accepted_share_diff, data[7]);
-	datum_last_accepted_share_tsms = datum_protocol_mainloop_tsms;
 	if (exact_abw_reference) {
-		datum_protocol_replay_mark_responded_exact(data[10] + 1, data + 11);
-		if (data[0] == DATUM_POW_SHARE_RESPONSE_ACCEPTED &&
-		    !datum_config.mining_abw_verify_all_shares_on_disclosure)
-			datum_protocol_abw_forget_exact(data[10] + 1, data + 11);
+		const uint8_t abw_assignment_id = data[10] + 1;
+		const unsigned char * const raw_pow_hash = &data[11];
+		datum_protocol_replay_mark_responded_exact(abw_assignment_id, raw_pow_hash);
+		if (share_response_code != DATUM_POW_SHARE_RESPONSE_ACCEPTED_TENTATIVELY && !datum_config.mining_abw_verify_all_shares_on_disclosure) {
+			datum_protocol_abw_forget_exact(abw_assignment_id, raw_pow_hash);
+		}
 	} else {
-		datum_protocol_replay_mark_responded_legacy(
-			upk_u32le(data, 3), data[7], data[8]);
+		datum_protocol_replay_mark_responded_legacy(nonce, target_pot, job_id);
 	}
 	
 	return 1;
