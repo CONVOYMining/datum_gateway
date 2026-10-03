@@ -57,9 +57,10 @@ extern const char *submitblock_ptr;
 extern bool submitblock_ptr_owned;
 
 static int datum_protocol_test_pow_handler_count;
+static T_DATUM_PROTOCOL_POW datum_protocol_test_last_pow;
 
 static int datum_protocol_test_pow_handler(void *item) {
-	(void)item;
+	datum_protocol_test_last_pow = *(T_DATUM_PROTOCOL_POW *)item;
 	datum_protocol_test_pow_handler_count++;
 	return 0;
 }
@@ -696,6 +697,7 @@ static void datum_protocol_abw_cache_tests(void) {
 	job.nbits_uint = block_template.bits_uint;
 	job.target_pot_index = 4;
 	job.blake2b_time_on_wire = 1000;
+	pow.time_on_wire = datum_stratum_job_time_on_wire(&job, false);
 	pow.sjob = &job;
 	pow.datum_job_id = 2;
 	pow.abw_assignment_id = 4;
@@ -746,6 +748,7 @@ static void datum_protocol_abw_cache_tests(void) {
 		datum_blake2b_abw_clear_bits(pow.target_byte)));
 	pow.subsidy_only = true;
 	pow.nonce++;
+	pow.time_on_wire = datum_stratum_job_time_on_wire(&job, true);
 	datum_test(datum_protocol_abw_cache_candidate(
 		&pow, coinbase, sizeof(coinbase), timely_hash));
 	pow.subsidy_only = false;
@@ -757,6 +760,16 @@ static void datum_protocol_abw_cache_tests(void) {
 	datum_test(atomic_load(&new_notify_threadsafe));
 	datum_test(!strcmp((const char *)new_notify_blockhash,
 		"0000000000000000000000000000000000000000000000000000000000000000"));
+	// Recovered quickdiff blocks must retain the submitted wire timestamp.
+	pthread_mutex_lock(&submitblock_mutex);
+	json_error_t request_error;
+	json_t *request = submitblock_ptr ? json_loads(submitblock_ptr, 0, &request_error) : NULL;
+	datum_test(request != NULL);
+	const char *block_hex = json_string_value(json_array_get(json_object_get(request, "params"), 0));
+	datum_test(block_hex && strlen(block_hex) >= DATUM_BLAKE2B_BLOCK_HEADER_SIZE * 2);
+	if (block_hex) datum_test(!strncmp(block_hex + 68 * 2, "e9030000", 8));
+	json_decref(request);
+	pthread_mutex_unlock(&submitblock_mutex);
 	datum_test(datum_protocol_test_discard_submitblock());
 	atomic_store(&new_notify_threadsafe, 0);
 	new_notify_blockhash[0] = '\0';
@@ -791,6 +804,16 @@ static void datum_protocol_abw_cache_tests(void) {
 		extranonce, 0xff) == 0);
 	datum_test(datum_queue_process(&pow_queue) == 1);
 	datum_test(datum_protocol_test_pow_handler_count == 1);
+	datum_test(datum_protocol_test_last_pow.time_on_wire == 1000);
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, true,
+		true, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+		extranonce, 0xff) == 0);
+	datum_test(datum_queue_process(&pow_queue) == 1);
+	datum_test(datum_protocol_test_pow_handler_count == 2);
+	datum_test(datum_protocol_test_last_pow.time_on_wire == 1001);
+	datum_test(datum_protocol_test_last_pow.quickdiff);
+	datum_test(datum_protocol_test_last_pow.sjob == &job);
+	datum_test(job.blake2b_time_on_wire == 1000);
 	datum_test(datum_queue_free(&pow_queue) == 0);
 	
 	datum_protocol_abw_reset();

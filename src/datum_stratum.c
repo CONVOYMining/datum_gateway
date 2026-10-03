@@ -42,6 +42,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 #include <errno.h>
 #include <jansson.h>
 #include <inttypes.h>
@@ -797,6 +798,34 @@ void reset_vardiff_stats(T_DATUM_CLIENT_DATA *c) {
 	m->share_snap_tsms = m->sdata->loop_tsms;
 }
 
+uint64_t datum_stratum_connection_vardiff_min(const T_DATUM_MINER_DATA * const miner) {
+	if (miner && miner->extension_minimum_difficulty &&
+	    miner->extension_minimum_difficulty_value >
+	    (uint64_t)datum_config.stratum_v1_vardiff_min) {
+		return miner->extension_minimum_difficulty_value;
+	}
+	return datum_config.stratum_v1_vardiff_min;
+}
+
+uint8_t datum_stratum_upstream_pot(const T_DATUM_STRATUM_JOB * const job,
+	const uint64_t local_diff) {
+	uint64_t committed_diff = local_diff;
+	if (job && job->is_datum_job &&
+	    committed_diff < datum_config.override_vardiff_min) {
+		committed_diff = datum_config.override_vardiff_min;
+	}
+	return floorPoT(committed_diff);
+}
+
+bool datum_stratum_share_meets_upstream_minimum(const uint8_t committed_pot,
+	const unsigned char * const share_hash) {
+	unsigned char target[32];
+
+       if (!share_hash ||
+	    !datum_blake2b_share_target(target, committed_pot)) return false;
+	return compare_hashes(share_hash, target) <= 0;
+}
+
 void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick) {
 	// Should be called at/around a share being accepted?
 	// before processing a mining notify? (for downward
@@ -805,6 +834,7 @@ void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick) {
 	uint64_t delta_tsms;
 	uint64_t ms_per_share;
 	uint64_t target_ms_share;
+	const uint64_t connection_min_diff = datum_stratum_connection_vardiff_min(m);
 	
 	// if we already have a diff change pending, don't do calcs again
 	if (m->current_diff != m->last_sent_diff) return;
@@ -825,8 +855,8 @@ void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick) {
 			if (m->current_diff < m->forced_high_min_diff) {
 				m->current_diff = m->forced_high_min_diff;
 			}
-			if (m->current_diff < datum_config.stratum_v1_vardiff_min) {
-				m->current_diff = datum_config.stratum_v1_vardiff_min;
+			if (m->current_diff < connection_min_diff) {
+				m->current_diff = connection_min_diff;
 			}
 			reset_vardiff_stats(c);
 		}
@@ -876,8 +906,8 @@ void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick) {
 		if (m->current_diff < m->forced_high_min_diff) {
 			m->current_diff = m->forced_high_min_diff;
 		}
-		if (m->current_diff < datum_config.stratum_v1_vardiff_min) {
-			m->current_diff = datum_config.stratum_v1_vardiff_min;
+		if (m->current_diff < connection_min_diff) {
+			m->current_diff = connection_min_diff;
 		}
 		reset_vardiff_stats(c);
 		return;
@@ -1126,18 +1156,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	memset(&full_cb_txn[cb->coinb1_len], 0, 12);
 	memcpy(&full_cb_txn[cb->coinb1_len+12], cb->coinb2_bin, cb->coinb2_len);
 	
-	// if we did a quickdiff work, we need to change our extra data just a little so it's unique.
-	// if we don't do this, we're forcing the miner to redo work its already done, which is wasteful
-	// and the miner would potentially see these as rejected duplicate shares.
-	//
-	// we only need to tweak the binary version here.
-	// this is saved for the block submission and all below, also, so is safe
-	
 	// we also need to apply our target diff byte, which could be different depending on if quickdiff or not
 	// we must encode the current diff directly into the PoW.  This allows remote DATUM servers to accept
 	// our variable difficulty work (subject to the DATUM server provided global minimum)
 	
-	full_cb_txn[job->target_pot_index] = floorPoT(job_diff);
+	const uint8_t committed_pot = quickdiff ? m->quickdiff_pot :
+		m->stratum_job_pots[g_job_index];
+	full_cb_txn[job->target_pot_index] = committed_pot;
 	
 	// time offset
 	ntime = json_array_get(params_obj, 3);
@@ -1179,7 +1204,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		(size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len;
 	const unsigned char target_pot = full_cb_txn[job->target_pot_index];
 	if (!datum_stratum_job_blake2b_commitment_from_txn(job, full_cb_txn,
-		full_cb_txn_size, target_pot, empty_work, blake2b_commitment)) {
+		full_cb_txn_size, target_pot, empty_work, quickdiff, blake2b_commitment)) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
@@ -1241,7 +1266,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		
 		i = assembleBlockAndSubmit(block_header, full_cb_txn,
 			full_cb_txn_size, job, m->sdata, new_notify_blockhash,
-			empty_work, extranonce_bin);
+			empty_work, quickdiff, extranonce_bin);
 		if (i) {
 			datum_blocktemplates_notifynew(new_notify_blockhash, job->height + 1);
 		}
@@ -1261,7 +1286,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// For a header-v2 job the node does not read the wire time as nTime: it
 	// adds the hasher's time-offset bytes back when the offset flag is set.
 	// Bound what the node will read, which also bounds hasher time rolling.
-	check_time = datum_blake2b_share_ntime(job->blake2b_time_on_wire, ntime8, job->blake2b_flags);
+	check_time = datum_blake2b_share_ntime(datum_stratum_job_time_on_wire(job, quickdiff), ntime8, job->blake2b_flags);
 	if (check_time < job->block_template->mintime) {
 		send_rejected_time_too_old(c, id);
 		stratum_note_share(m, false, job_diff);
@@ -1298,7 +1323,9 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// work accepted
-	if (job->is_datum_job && !was_block && datum_protocol_pow_submit(c, job,
+	if (job->is_datum_job && !was_block &&
+	    datum_stratum_share_meets_upstream_minimum(committed_pot, share_hash) &&
+	    datum_protocol_pow_submit(c, job,
 		username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
 		full_cb_txn_size, share_hash, cb, extranonce_bin,
 		coinbase_index) != 0) {
@@ -1335,6 +1362,9 @@ int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	char sa[1024];
 	int i;
 	bool new_mdiff = false;
+	bool has_mdiff_value = false;
+	bool valid_mdiff = false;
+	uint64_t requested_mdiff = 0;
 	
 	if (!json_is_array(params_obj)) {
 		return -1;
@@ -1362,13 +1392,36 @@ int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 			}
 		}
 	}
+
+	if (new_mdiff && json_is_object(p2)) {
+		json_t * const mdiff = json_object_get(p2, "minimum-difficulty.value");
+		has_mdiff_value = mdiff != NULL;
+		if (mdiff && json_is_number(mdiff)) {
+			const double d = json_number_value(mdiff);
+			if (isfinite(d) && d >= 1.0 &&
+			    d <= (double)(UINT64_C(1) << 63)) {
+				requested_mdiff = (uint64_t)d;
+				valid_mdiff = requested_mdiff == d &&
+					roundDownToPowerOfTwo_64(requested_mdiff) == requested_mdiff;
+			}
+		}
+	}
 	
 	char idbuf[160];
 	stratum_rpc_id_text(c, id, idbuf, sizeof(idbuf));
 	i = snprintf(sa, sizeof(sa), "{\"error\":null,\"id\":%s,\"result\":{", idbuf);
 	if (new_mdiff) {
-		// we don't currently support miner specified minimum difficulty.
-		i+= snprintf(&sa[i], sizeof(sa)-i, "\"minimum-difficulty\":false");
+		if (valid_mdiff) {
+			T_DATUM_MINER_DATA * const m = c->app_client_data;
+			m->extension_minimum_difficulty = true;
+			m->extension_minimum_difficulty_value = requested_mdiff;
+			i+= snprintf(&sa[i], sizeof(sa)-i, "\"minimum-difficulty\":true");
+		} else if (has_mdiff_value) {
+			i+= snprintf(&sa[i], sizeof(sa)-i,
+				"\"minimum-difficulty\":\"invalid power-of-two difficulty\"");
+		} else {
+			i+= snprintf(&sa[i], sizeof(sa)-i, "\"minimum-difficulty\":false");
+		}
 	}
 	i+= snprintf(&sa[i], sizeof(sa)-i, "}}\n");
 	
@@ -1472,18 +1525,14 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		quickdiff = false;
 	}
 	
+	// Do not wrap the committed timestamp when making quickdiff work unique.
+	if (quickdiff && j->blake2b_time_on_wire == UINT32_MAX) return -1;
+
 	// we always set difficulty before the first notify on the connection, so last_sent_diff should always be set here
 	// compute the target for this job for the client
 	if (!quickdiff) {
 		// check for a vardiff change. call with "no_quick" set to true to prevent recursion or double notifies
 		stratum_update_vardiff(c, true);
-	}
-	
-	if (j->is_datum_job) {
-		// check if our client meets of exceeds the minimum datum diff
-		if (m->current_diff < datum_config.override_vardiff_min) {
-			m->current_diff = datum_config.override_vardiff_min;
-		}
 	}
 	
 	// if we have an updated difficulty to send, send it before we send the notify
@@ -1497,14 +1546,17 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	if (!quickdiff) {
 		datum_blake2b_share_target(m->stratum_job_targets[j->global_index], floorPoT(m->last_sent_diff));
 		m->stratum_job_diffs[j->global_index] = m->last_sent_diff;
+		m->stratum_job_pots[j->global_index] = datum_stratum_upstream_pot(j, m->last_sent_diff);
 		m->quickdiff_active = false;
 	} else {
 		m->quickdiff_active = true;
 		m->quickdiff_value = m->last_sent_diff;
 		datum_blake2b_share_target(m->quickdiff_target, floorPoT(m->quickdiff_value));
+		m->quickdiff_pot = datum_stratum_upstream_pot(j, m->quickdiff_value);
 	}
-	tdiff = floorPoT(m->last_sent_diff);
-	share_nbits = datum_blake2b_share_nbits(tdiff);
+	tdiff = quickdiff ? m->quickdiff_pot : m->stratum_job_pots[j->global_index];
+	const uint8_t local_pot = floorPoT(m->last_sent_diff);
+	share_nbits = datum_blake2b_share_nbits(local_pot);
 	if (!share_nbits) return -1;
 	
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
@@ -1526,7 +1578,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// this may look silly, but the send buffer doesn't get emptied until this thread's loop runs. so might as well just utilize it
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
-	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, blake2b_commitment, blake2bcoinb1)) {
+	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, quickdiff, blake2b_commitment, blake2bcoinb1)) {
 		c->out_buf = notify_out_buf_start;
 		return -1;
 	}
@@ -1560,7 +1612,7 @@ int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c) {
 	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	
 	if (!m->current_diff) {
-		m->current_diff = datum_config.stratum_v1_vardiff_min;
+		m->current_diff = datum_stratum_connection_vardiff_min(m);
 	}
 	
 	char stratum_difficulty[64];
@@ -1600,7 +1652,7 @@ int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	}
 	
 	// set default diff
-	m->current_diff = datum_config.stratum_v1_vardiff_min;
+	m->current_diff = datum_stratum_connection_vardiff_min(m);
 	
 	// Sv1 is blind to the generation transaction now, so go as large as we want
 	// TODO: We may want to shrink based on block free space in the future
@@ -1619,8 +1671,8 @@ int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	
 	if ((datum_config.stratum_v1_fingerprint_miners) && (m->useragent[0])) {
 		datum_stratum_fingerprint_by_UA(m);
-		if (m->current_diff < datum_config.stratum_v1_vardiff_min) {
-			m->current_diff = datum_config.stratum_v1_vardiff_min;
+		if (m->current_diff < datum_stratum_connection_vardiff_min(m)) {
+			m->current_diff = datum_stratum_connection_vardiff_min(m);
 		}
 	}
 	
@@ -1886,13 +1938,14 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 	}
 }
 
-bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, unsigned char *commitment) {
+bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, bool quickdiff, unsigned char *commitment) {
 	unsigned char cb_hash[32];
 	unsigned char merkle[32];
 	const T_DATUM_TEMPLATE_DATA *td;
 	
 	if (!s || !s->block_template) return false;
 	if (!cb_txn || !commitment || !cb_len) return false;
+	if (quickdiff && s->blake2b_time_on_wire == UINT32_MAX) return false;
 	td = s->block_template;
 	double_sha256(cb_hash, cb_txn, cb_len);
 	if (subsidy_only) {
@@ -1904,14 +1957,14 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 		if (!td->abw_assignment_id) return false;
 		return datum_blake2b_header_commitment_from_key_hash(
 			commitment, td->version, td->previousblockhash_bin,
-			(uint32_t)td->height, merkle, s->blake2b_time_on_wire,
+			(uint32_t)td->height, merkle, datum_stratum_job_time_on_wire(s, quickdiff),
 			td->bits_uint, subsidy_only ? 1 : td->txn_count + 1,
 			s->blake2b_flags, datum_blake2b_abw_clear_bits(target_pot),
 			td->xor_key_hash, (const unsigned char[32]){0});
 	}
 	return datum_blake2b_header_commitment(
 		commitment, td->version, td->previousblockhash_bin,
-		(uint32_t)td->height, merkle, s->blake2b_time_on_wire, td->bits_uint,
+		(uint32_t)td->height, merkle, datum_stratum_job_time_on_wire(s, quickdiff), td->bits_uint,
 		subsidy_only ? 1 : td->txn_count + 1, s->blake2b_flags, 0,
 		(const unsigned char[16]){0}, (const unsigned char[32]){0});
 }
@@ -1923,7 +1976,7 @@ bool datum_stratum_share_is_unmasked_block(
 		compare_hashes(share_hash, job->block_target) <= 0;
 }
 
-bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1) {
+bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, bool quickdiff, unsigned char *commitment, unsigned char *coinb1) {
 	unsigned char cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
 	size_t cb_len;
 	
@@ -1938,7 +1991,7 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_
 		cb_txn[s->target_pot_index] = pot;
 	}
 	if (!datum_stratum_job_blake2b_commitment_from_txn(
-		s, cb_txn, cb_len, pot, subsidy_only, commitment)) return false;
+		s, cb_txn, cb_len, pot, subsidy_only, quickdiff, commitment)) return false;
 	if (coinb1) datum_blake2b_coinb1(coinb1, commitment);
 	return true;
 }
@@ -2223,7 +2276,7 @@ bool datum_stratum_abw_finalize_block_request(char *request, size_t request_size
 	return true;
 }
 
-int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce) {
+int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, bool quickdiff, const unsigned char *extranonce) {
 	// TODO: Also submit directly to bitcoin P2P
 	char *submitblock_req = NULL;
 	char *ptr = NULL;
@@ -2274,7 +2327,7 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 	}
 	memset(en, 0, sizeof(en));
 	if (extranonce) memcpy(en, extranonce, 12);
-	datum_blake2b_serialize_block_header(v2hdr, job->version_uint, job->prevhash_bin, merkle, job->blake2b_time_on_wire, job->nbits_uint, block_header + 32, block_header + 40, en, txcount, job->blake2b_flags, 0, (const unsigned char[16]){0}, (uint32_t)job->height, (const unsigned char[32]){0});
+	datum_blake2b_serialize_block_header(v2hdr, job->version_uint, job->prevhash_bin, merkle, datum_stratum_job_time_on_wire(job, quickdiff), job->nbits_uint, block_header + 32, block_header + 40, en, txcount, job->blake2b_flags, 0, (const unsigned char[16]){0}, (uint32_t)job->height, (const unsigned char[32]){0});
 	for(i=0;i<DATUM_BLAKE2B_BLOCK_HEADER_SIZE;i++) {
 		ptr += sprintf(ptr, "%2.2x", v2hdr[i]);
 	}

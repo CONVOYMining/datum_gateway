@@ -846,7 +846,7 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	pk_u64le(ntime8, 0, pow->ntime);
 	datum_blake2b_serialize_block_header(block_header,
 		pow->sjob->version_uint, pow->sjob->prevhash_bin, merkle,
-		pow->sjob->blake2b_time_on_wire, pow->sjob->nbits_uint,
+		pow->time_on_wire, pow->sjob->nbits_uint,
 		nonce8, ntime8, pow->extranonce,
 		(uint16_t)(pow->subsidy_only ? 1 : source->txn_count + 1),
 		pow->sjob->blake2b_flags,
@@ -2667,7 +2667,7 @@ int datum_protocol_pow_submit(
 	memcpy(pow.raw_pow_hash, raw_pow_hash, sizeof(pow.raw_pow_hash));
 	pow.ntime = upk_u64le(block_header, 40);
 	pow.nonce = upk_u64le(block_header, 32);
-	pow.time_on_wire = job->blake2b_time_on_wire;
+	pow.time_on_wire = datum_stratum_job_time_on_wire(job, quickdiff);
 	pow.version = job->version_uint;
 	if (pow.abw_assignment_id &&
 	    datum_protocol_abw_assignment_revealed(pow.abw_assignment_id)) {

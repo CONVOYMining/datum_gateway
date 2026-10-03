@@ -6,7 +6,8 @@
 		"notify_fallback": true
 	},
 	"stratum": {
-		"listen_port": 23334
+		"listen_port": 23334,
+		"vardiff_min": 4096
 	},
 	"mining": {
 		"pool_address": "put your own Bitcoin invoice address here",

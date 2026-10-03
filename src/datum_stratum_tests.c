@@ -106,12 +106,12 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	job.target_pot_index = 4;
 	tdata.txn_count = 1;
 	
-	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 0xFF, c_ff, ff));
-	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 14, c_pot, pot));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 0xFF, false, c_ff, ff));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 14, false, c_pot, pot));
 	datum_test(memcmp(c_ff, c_pot, 32) != 0);
 	datum_test(memcmp(ff, pot, 39) != 0);
-	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[2], false, 14, c_variant, NULL));
-	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.subsidy_only_coinbase, true, 14, c_subsidy, NULL));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[2], false, 14, false, c_variant, NULL));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.subsidy_only_coinbase, true, 14, false, c_subsidy, NULL));
 	datum_test(memcmp(c_variant, c_pot, 32) != 0);
 	datum_test(memcmp(c_subsidy, c_pot, 32) != 0);
 	
@@ -121,7 +121,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	memcpy(cb_txn + job.coinbase[0].coinb1_len + 12, job.coinbase[0].coinb2_bin, job.coinbase[0].coinb2_len);
 	cb_txn[job.target_pot_index] = 14;
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
-		&job, cb_txn, cb_len, 14, false, c_from_txn));
+		&job, cb_txn, cb_len, 14, false, false, c_from_txn));
 	datum_test(!memcmp(c_from_txn, c_pot, 32));
 	
 	cb_len = (size_t)job.subsidy_only_coinbase.coinb1_len + 12 +
@@ -134,7 +134,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 		job.subsidy_only_coinbase.coinb2_len);
 	cb_txn[job.target_pot_index] = 14;
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
-		&job, cb_txn, cb_len, 14, true, c_from_txn));
+		&job, cb_txn, cb_len, 14, true, false, c_from_txn));
 	datum_test(!memcmp(c_from_txn, c_subsidy, 32));
 	
 	// Work without an assignment commits to the null XOR key.
@@ -142,13 +142,107 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	tdata.abw_assignment_id = 0;
 	job.is_datum_job = false;
 	datum_test(datum_stratum_job_blake2b_commitment(
-		&job, &job.coinbase[0], false, 14, c_local, NULL));
+		&job, &job.coinbase[0], false, 14, false, c_local, NULL));
 	datum_test(memcmp(c_local, c_pot, sizeof(c_local)) != 0);
 	
 	// Pooled work can also operate without ABW.
 	job.is_datum_job = true;
 	datum_test(datum_stratum_job_blake2b_commitment(
-		&job, &job.coinbase[0], false, 14, c_local, NULL));
+		&job, &job.coinbase[0], false, 14, false, c_local, NULL));
+}
+
+static void datum_blake2b_quickdiff_tests(void) {
+	T_DATUM_TEMPLATE_DATA td = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_MINER_DATA miner = {0};
+	T_DATUM_CLIENT_DATA client = {0};
+	T_DATUM_THREAD_DATA *thread = calloc(1, sizeof(*thread));
+	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = calloc(1, sizeof(*sdata));
+	const uint64_t saved_pool_min = datum_config.override_vardiff_min;
+	unsigned char normal[32], quick[32], rebuilt[32], root[32];
+	unsigned char normal_work[80], quick_work[80], normal_hash[32], quick_hash[32];
+	unsigned char cb_txn[40] = {0};
+	const unsigned char zero[16] = {0};
+	char normal_coinb1[79];
+	json_error_t error;
+
+	datum_test(thread && sdata);
+	if (!thread || !sdata) { free(thread); free(sdata); return; }
+	client.datum_thread = thread;
+	client.app_client_data = &miner;
+	thread->app_thread_data = sdata;
+	miner.sdata = sdata;
+	sdata->cur_stratum_job = &job;
+	job.block_template = &td;
+	job.is_datum_job = true;
+	job.blake2b_time_on_wire = 1000;
+	job.coinbase[0].coinb1_len = 20;
+	job.coinbase[0].coinb2_len = 8;
+	job.target_pot_index = 4;
+	td.version = 0x20000000;
+	td.bits_uint = 0x1d00ffff;
+	td.height = 42;
+	td.abw_assignment_id = 1;
+	datum_test(datum_blake2b_xor_key_hash(td.xor_key_hash, zero));
+	datum_config.override_vardiff_min = 131072;
+
+	// Both local difficulties are below the pool floor: the committed PoT
+	// stays 17, so changing the advertised share target alone is not enough.
+	for (unsigned abw = 0; abw < 2; ++abw) {
+		for (unsigned rolling = 0; rolling < 2; ++rolling) {
+			td.abw_enabled = abw;
+			job.blake2b_flags = rolling ? DATUM_BLAKE2B_USE_TIME_OFFSET : 0;
+			miner.current_diff = miner.last_sent_diff = 1024;
+			client.out_buf = 0;
+			datum_test(send_mining_notify(&client, false, false, false) == 0);
+			json_t *message = json_loadb(client.w_buffer, client.out_buf, 0, &error);
+			datum_test(message != NULL);
+			const char *coinb1 = json_string_value(json_array_get(json_object_get(message, "params"), 2));
+			datum_test(coinb1 && strlen(coinb1) == 78);
+			if (coinb1) memcpy(normal_coinb1, coinb1, sizeof(normal_coinb1));
+			json_decref(message);
+			miner.current_diff = miner.last_sent_diff = 4096;
+			client.out_buf = 0;
+			datum_test(send_mining_notify(&client, true, true, false) == 0);
+			message = json_loadb(client.w_buffer, client.out_buf, 0, &error);
+			datum_test(message != NULL);
+			coinb1 = json_string_value(json_array_get(json_object_get(message, "params"), 2));
+			datum_test(coinb1 && strcmp(coinb1, normal_coinb1));
+			datum_test(miner.quickdiff_pot == 17 && miner.stratum_job_pots[0] == 17);
+			datum_test(job.blake2b_time_on_wire == 1000);
+
+			datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 17, false, normal, NULL));
+			datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 17, true, quick, NULL));
+			cb_txn[4] = 17;
+			datum_test(datum_stratum_job_blake2b_commitment_from_txn(&job, cb_txn, sizeof(cb_txn), 17, false, true, rebuilt));
+			datum_test(!memcmp(quick, rebuilt, 32));
+			// The notify contains the same commitment used to validate shares.
+			unsigned char encoded[39];
+			datum_blake2b_coinb1(encoded, rebuilt);
+			if (coinb1) for (size_t i = 0; i < sizeof(encoded); ++i)
+				datum_test(hex2bin_uchar(coinb1 + i * 2) == encoded[i]);
+			json_decref(message);
+			datum_test(datum_blake2b_work_root(root, normal, zero));
+			datum_blake2b_build_work_header(normal_work, job.prevhash_bin, zero, zero, root);
+			datum_test(datum_blake2b_work_root(root, quick, zero));
+			datum_blake2b_build_work_header(quick_work, job.prevhash_bin, zero, zero, root);
+			datum_test(datum_blake2b_pow_hash_le(normal_hash, normal_work, zero, 0));
+			datum_test(datum_blake2b_pow_hash_le(quick_hash, quick_work, zero, 0));
+			datum_test(memcmp(normal_hash, quick_hash, 32) != 0);
+			datum_test(datum_blake2b_share_ntime(datum_stratum_job_time_on_wire(&job, true), zero, job.blake2b_flags) == 1001);
+			// A late normal share must still reconstruct the original work.
+			datum_test(datum_stratum_job_blake2b_commitment_from_txn(&job, cb_txn, sizeof(cb_txn), 17, false, false, rebuilt));
+			datum_test(!memcmp(normal, rebuilt, 32));
+		}
+	}
+	job.blake2b_time_on_wire = UINT32_MAX;
+	client.out_buf = 0;
+	datum_test(send_mining_notify(&client, true, true, false) == -1);
+	datum_test(client.out_buf == 0);
+	datum_test(!datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 17, true, quick, NULL));
+	datum_config.override_vardiff_min = saved_pool_min;
+	free(thread);
+	free(sdata);
 }
 
 static void datum_blake2b_unmasked_block_tests(void) {
@@ -347,16 +441,86 @@ static void datum_stratum_string_request_id_tests(void) {
 static void datum_stratum_minimum_difficulty_configure_tests(void) {
 	T_DATUM_CLIENT_DATA client = {0};
 	T_DATUM_MINER_DATA miner = {0};
-	char configure[] =
+	char configure_missing[] =
 		"{\"id\":20,\"method\":\"mining.configure\","
 		"\"params\":[[\"minimum-difficulty\"],{}]}";
-	static const char expected[] =
+	char configure_valid[] =
+		"{\"id\":21,\"method\":\"mining.configure\","
+		"\"params\":[[\"minimum-difficulty\"],"
+		"{\"minimum-difficulty.value\":4096}]}";
+	char configure_invalid[] =
+		"{\"id\":22,\"method\":\"mining.configure\","
+		"\"params\":[[\"minimum-difficulty\"],"
+		"{\"minimum-difficulty.value\":5000}]}";
+	char configure_raise[] =
+		"{\"id\":23,\"method\":\"mining.configure\","
+		"\"params\":[[\"minimum-difficulty\"],"
+		"{\"minimum-difficulty.value\":131072}]}";
+	static const char expected_missing[] =
 		"{\"error\":null,\"id\":20,\"result\":{\"minimum-difficulty\":false}}\n";
+	static const char expected_valid[] =
+		"{\"error\":null,\"id\":21,\"result\":{\"minimum-difficulty\":true}}\n";
+	static const char expected_invalid[] =
+		"{\"error\":null,\"id\":22,\"result\":{\"minimum-difficulty\":"
+		"\"invalid power-of-two difficulty\"}}\n";
+	static const char expected_raise[] =
+		"{\"error\":null,\"id\":23,\"result\":{\"minimum-difficulty\":true}}\n";
 	
 	client.app_client_data = &miner;
-	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, configure) == 0);
-	datum_test(client.out_buf == (int)strlen(expected));
-	datum_test(!memcmp(client.w_buffer, expected, strlen(expected)));
+	const int old_local_min = datum_config.stratum_v1_vardiff_min;
+	datum_config.stratum_v1_vardiff_min = 65536;
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, configure_missing) == 0);
+	datum_test(client.out_buf == (int)strlen(expected_missing));
+	datum_test(!memcmp(client.w_buffer, expected_missing, strlen(expected_missing)));
+	client.out_buf = 0;
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, configure_valid) == 0);
+	datum_test(client.out_buf == (int)strlen(expected_valid));
+	datum_test(!memcmp(client.w_buffer, expected_valid, strlen(expected_valid)));
+	datum_test(miner.extension_minimum_difficulty);
+	datum_test(miner.extension_minimum_difficulty_value == 4096);
+	datum_test(datum_stratum_connection_vardiff_min(&miner) == 65536);
+	client.out_buf = 0;
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, configure_invalid) == 0);
+	datum_test(client.out_buf == (int)strlen(expected_invalid));
+	datum_test(!memcmp(client.w_buffer, expected_invalid, strlen(expected_invalid)));
+	datum_test(miner.extension_minimum_difficulty_value == 4096);
+	client.out_buf = 0;
+	datum_test(datum_stratum_v1_socket_thread_client_cmd(&client, configure_raise) == 0);
+	datum_test(client.out_buf == (int)strlen(expected_raise));
+	datum_test(!memcmp(client.w_buffer, expected_raise, strlen(expected_raise)));
+	datum_test(datum_stratum_connection_vardiff_min(&miner) == 131072);
+	datum_config.stratum_v1_vardiff_min = old_local_min;
+}
+
+static void datum_stratum_split_local_upstream_difficulty_tests(void) {
+	T_DATUM_STRATUM_JOB datum_job = { .is_datum_job = true };
+	T_DATUM_STRATUM_JOB solo_job = { .is_datum_job = false };
+	unsigned char pool_target[32];
+	unsigned char insufficient_hash[32];
+	const int old_local_min = datum_config.stratum_v1_vardiff_min;
+	const uint64_t old_pool_min = datum_config.override_vardiff_min;
+
+	datum_config.stratum_v1_vardiff_min = 4096;
+	datum_config.override_vardiff_min = 131072;
+	datum_test(datum_stratum_connection_vardiff_min(NULL) == 4096);
+	datum_test(datum_stratum_upstream_pot(&datum_job, 4096) == 17);
+	datum_test(datum_stratum_upstream_pot(&solo_job, 4096) == 12);
+	datum_test(datum_stratum_upstream_pot(&datum_job, 262144) == 18);
+	datum_test(datum_blake2b_share_target(pool_target, 17));
+	datum_test(datum_stratum_share_meets_upstream_minimum(17, pool_target));
+	memcpy(insufficient_hash, pool_target, sizeof(insufficient_hash));
+	insufficient_hash[31]++;
+	datum_test(!datum_stratum_share_meets_upstream_minimum(17, insufficient_hash));
+	// A raised live pool floor must not invalidate an older commitment.
+	datum_test(datum_stratum_share_meets_upstream_minimum(16, pool_target));
+	unsigned char committed_target[32];
+	datum_test(datum_blake2b_share_target(committed_target, 18));
+	/* A PoT-17 hash must not be forwarded for work committed to PoT 18. */
+	datum_test(!datum_stratum_share_meets_upstream_minimum(18, pool_target));
+	datum_test(datum_stratum_share_meets_upstream_minimum(18, committed_target));
+
+	datum_config.stratum_v1_vardiff_min = old_local_min;
+	datum_config.override_vardiff_min = old_pool_min;
 }
 
 
@@ -506,10 +670,12 @@ void datum_stratum_mod_username_tests() {
 void datum_stratum_tests(void) {
 	datum_stratum_mod_username_tests();
 	datum_stratum_minimum_difficulty_configure_tests();
+	datum_stratum_split_local_upstream_difficulty_tests();
 	datum_stratum_string_request_id_tests();
 	datum_blake2b_coinbase_selection_tests();
 	datum_blake2b_h_not_zero_tests();
 	datum_blake2b_client_pot_commitment_tests();
+	datum_blake2b_quickdiff_tests();
 	datum_blake2b_unmasked_block_tests();
 	datum_stratum_abw_block_request_tests();
 	datum_blake2b_refresh_time_offset_tests();

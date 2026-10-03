@@ -264,6 +264,18 @@ blocknotify=wget -q -O /dev/null http://datum-gateway-host-ip:7152/NOTIFY
  - Work must include the work target and meet/exceed that target
  - Any additional requirements by pool documentation
 
+### Local difficulty below the pool minimum
+
+`stratum.vardiff_min` controls the local difficulty floor and is independent
+of the minimum announced by DATUM Prime. A miner may also request a per-connection
+floor with the Stratum `minimum-difficulty` extension; the requested value must
+be an integer power of two.
+
+When a local connection uses a lower difficulty, the Gateway accepts those
+shares for local statistics but does not send them to Prime. Work sent to the
+miner commits to at least Prime's PoT minimum, so a share from the lower-difficulty
+connection that actually meets Prime's target can still be submitted upstream.
+
 ## Notes/Known Issues/Limitations
 
 - By default, if the connection with the pool is lost and fails to reconnect, the Gateway will disconnect all stratum clients. This way miners can use their built-in failover and switch to non-DATUM mining, or an alternate/backup Gateway.
