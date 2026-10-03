@@ -2012,7 +2012,7 @@ static void datum_protocol_add_share_diff(uint64_t *total, unsigned char pot) {
 // TODO: Ensure all shares are responded to!  Currently this has no bearing on anything, just logging
 int datum_protocol_share_response(const int len, unsigned char * const data) {
 	if (len < 9) {
-		DLOG_DEBUG("Invalid share response received!");
+		DLOG_ERROR("Invalid share response received!");
 		return 0;
 	}
 	const uint8_t share_response_code = data[0];
@@ -2036,7 +2036,8 @@ int datum_protocol_share_response(const int len, unsigned char * const data) {
 		}
 		case DATUM_POW_SHARE_RESPONSE_REJECTED: {
 			const unsigned int reject_reason = upk_u16le(data, 1);
-			DLOG_DEBUG("DATUM server rejected our share!  Reason code: %u / TargetPOT: %2.2x / Job ID: %u / Nonce: %8.8x",
+			const enum datum_loglevel loglevel = (reject_reason == DATUM_REJECT_STALE_BLOCK) ? DLOG_LEVEL_DEBUG : DLOG_LEVEL_ERROR;
+			DLOG(loglevel, "DATUM server rejected our share!  Reason code: %u / TargetPOT: %2.2x / Job ID: %u / Nonce: %8.8x",
 			           reject_reason,
 			           target_pot,
 			           job_id,
@@ -2052,7 +2053,7 @@ int datum_protocol_share_response(const int len, unsigned char * const data) {
 			break;
 		}
 		default:
-			DLOG_DEBUG("Unknown share response %2.2x.  Your client may need to be upgraded!", share_response_code);
+			DLOG_WARN("Unknown share response %2.2x.  Your client may need to be upgraded!", share_response_code);
 			return 1;
 	}
 	
