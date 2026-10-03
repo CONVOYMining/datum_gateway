@@ -43,21 +43,23 @@
 // NOTE: With huge debug logging, this CAN potentially overrun and fail
 #define DLOG_MSG_BUF_SIZE (1024*1024*8)
 
+enum datum_loglevel {
+	DLOG_LEVEL_ALL = 0,
+	DLOG_LEVEL_DEBUG = 1,
+	DLOG_LEVEL_INFO = 2,
+	DLOG_LEVEL_WARN = 3,
+	DLOG_LEVEL_ERROR = 4,
+	DLOG_LEVEL_FATAL = 5,
+};
+
 typedef struct {
-	int level;
+	enum datum_loglevel level;
 	uint64_t tsms;
 	char calling_function[48];
 	char *msg;
 } DLOG_MSG;
 
-#define DLOG_LEVEL_ALL 0
-#define DLOG_LEVEL_DEBUG 1
-#define DLOG_LEVEL_INFO 2
-#define DLOG_LEVEL_WARN 3
-#define DLOG_LEVEL_ERROR 4
-#define DLOG_LEVEL_FATAL 5
-
-int datum_logger_queue_msg(const char *func, int level, const char *format, ...) __attribute__((format(printf, 3, 4)));
+int datum_logger_queue_msg(const char *func, enum datum_loglevel level, const char *format, ...) __attribute__((format(printf, 3, 4)));
 
 // Generic for dynamic log level messages
 #define DLOG(level, format, ...) datum_logger_queue_msg(__func__, level, format __VA_OPT__(,) __VA_ARGS__)
