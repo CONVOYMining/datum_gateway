@@ -2002,12 +2002,8 @@ void update_stratum_job(T_DATUM_TEMPLATE_DATA *block_template, bool new_block, i
 	s->version_uint = block_template->version;
 	strncpy(s->nbits, block_template->bits, sizeof(s->nbits) - 1);
 	
-	// TODO: Should we use local time, and just verify is valid for the block?
-	// Perhaps as an option.
-	// The template's time is 100% safe, so we'll use that for now.
 	memset(ntime8, 0, sizeof(ntime8));
 	s->blake2b_flags = datum_config.mining_allow_hasher_time_rolling ? DATUM_BLAKE2B_USE_TIME_OFFSET : 0;
-	pk_u32le(ntime8, 4, (uint32_t)block_template->curtime);
 	for(i=0;i<8;i++) {
 		uchar_to_hex(&s->ntime[i << 1], ntime8[i]);
 	}
