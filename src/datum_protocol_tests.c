@@ -62,6 +62,95 @@ extern bool submitblock_ptr_owned;
 
 static int datum_protocol_test_pow_handler_count;
 
+static uint8_t datum_protocol_test_header_control(const T_DATUM_PROTOCOL_HEADER *header) {
+	return ((uint8_t)header->is_signed) |
+	       ((uint8_t)header->is_encrypted_pubkey << 1) |
+	       ((uint8_t)header->is_encrypted_channel << 2) |
+	       ((header->proto_cmd & 0x1f) << 3);
+}
+
+static void datum_protocol_hello_framing_offer_tests(void) {
+	const DATUM_ENC_KEYS saved_local = local_datum_keys;
+	const DATUM_ENC_KEYS saved_session = session_datum_keys;
+	const DATUM_ENC_KEYS saved_pool = pool_keys;
+	const int saved_out = server_out_buf;
+	const uint32_t saved_sending_header_key = sending_header_key;
+	const uint32_t saved_receiving_header_key = receiving_header_key;
+	const bool saved_framing_v2 = datum_framing_v2;
+	unsigned char saved_sender_nonce[crypto_box_NONCEBYTES];
+	unsigned char saved_receiver_nonce[crypto_box_NONCEBYTES];
+	unsigned char *saved_output = NULL;
+	memcpy(saved_sender_nonce, session_nonce_sender, sizeof(saved_sender_nonce));
+	memcpy(saved_receiver_nonce, session_nonce_receiver, sizeof(saved_receiver_nonce));
+	if (saved_out > 0) {
+		saved_output = malloc((size_t)saved_out);
+		datum_test(saved_output != NULL);
+		if (!saved_output) return;
+		memcpy(saved_output, server_send_buffer, (size_t)saved_out);
+	}
+	
+	datum_test(sodium_init() >= 0);
+	datum_test(!datum_encrypt_generate_keys(&local_datum_keys));
+	datum_test(!datum_encrypt_generate_keys(&pool_keys));
+	server_out_buf = 0;
+	sending_header_key = UINT32_C(0xDC871829);
+	receiving_header_key = 0;
+	datum_framing_v2 = false;
+	datum_test(datum_protocol_send_hello(-1) > 0);
+	
+	T_DATUM_PROTOCOL_HEADER header = {0};
+	const uint32_t raw = upk_u32le(server_send_buffer, 0) ^ UINT32_C(0xDC871829);
+	header.cmd_len = raw & 0x003fffffUL;
+	header.is_signed = raw & 0x01000000UL;
+	header.is_encrypted_pubkey = raw & 0x02000000UL;
+	header.is_encrypted_channel = raw & 0x04000000UL;
+	header.proto_cmd = (raw >> 27) & 0x1f;
+	datum_test(header.proto_cmd == 1);
+	datum_test(header.is_signed);
+	datum_test(header.is_encrypted_pubkey);
+	datum_test(!header.is_encrypted_channel);
+	datum_test((size_t)server_out_buf == T_DATUM_PROTOCOL_HEADER_WIRE_BYTES + header.cmd_len);
+	unsigned char clear[1024];
+	datum_test(!crypto_box_seal_open(clear,
+		&server_send_buffer[T_DATUM_PROTOCOL_HEADER_WIRE_BYTES],
+		header.cmd_len,
+		pool_keys.pk_x25519, pool_keys.sk_x25519));
+	const size_t clear_size = header.cmd_len - crypto_box_SEALBYTES;
+	datum_test(clear_size > 128 + crypto_sign_BYTES);
+	const size_t message_size = clear_size - crypto_sign_BYTES;
+	datum_test(!crypto_sign_verify_detached(&clear[message_size], clear, message_size, local_datum_keys.pk_ed25519));
+	const unsigned char *ua_end = memchr(&clear[128], 0, message_size - 128);
+	datum_test(ua_end != NULL);
+	if (ua_end) {
+		const unsigned char *p = &ua_end[1];
+		const size_t remaining = (size_t)(&clear[message_size] - p);
+		datum_test(remaining >= 10);
+		if (remaining >= 10) {
+			datum_test(p[0] == 0xFE);
+			p = &p[1];
+			p = &p[4];
+			datum_test(!memcmp(p, "DRS\x01", 4));
+			p = &p[4];
+			datum_test((*p & DATUM_DRS_FRAMING_V2_FLAG) != 0);
+		}
+	}
+	datum_test(!datum_framing_v2);
+	
+	local_datum_keys = saved_local;
+	session_datum_keys = saved_session;
+	pool_keys = saved_pool;
+	server_out_buf = saved_out;
+	if (saved_output) {
+		memcpy(server_send_buffer, saved_output, (size_t)saved_out);
+		free(saved_output);
+	}
+	sending_header_key = saved_sending_header_key;
+	receiving_header_key = saved_receiving_header_key;
+	memcpy(session_nonce_sender, saved_sender_nonce, sizeof(saved_sender_nonce));
+	memcpy(session_nonce_receiver, saved_receiver_nonce, sizeof(saved_receiver_nonce));
+	datum_framing_v2 = saved_framing_v2;
+}
+
 static int datum_protocol_test_receive_sealed(const unsigned char *clear, size_t len, const DATUM_ENC_KEYS *signer) {
 	unsigned char signed_data[1024];
 	unsigned char wire[sizeof(signed_data) + crypto_box_SEALBYTES];
@@ -87,14 +176,16 @@ static void datum_protocol_handshake_bounds_tests(void) {
 	const DATUM_ENC_KEYS saved_pool = pool_keys;
 	const DATUM_ENC_PRECOMP saved_precomp = session_precomp;
 	const uint64_t saved_latest = latest_server_msg_tsms;
+	const bool saved_framing_v2 = datum_framing_v2;
 	DATUM_ENC_KEYS remote = {0};
-	unsigned char clear[194] = {0};
+	unsigned char clear[256] = {0};
 	
 	datum_test(sodium_init() >= 0);
 	datum_test(!datum_encrypt_generate_keys(&local_datum_keys));
 	datum_test(!datum_encrypt_generate_keys(&session_datum_keys));
 	datum_test(!datum_encrypt_generate_keys(&pool_keys));
 	datum_test(!datum_encrypt_generate_keys(&remote));
+	datum_framing_v2 = false;
 	memcpy(clear, local_datum_keys.pk_ed25519, crypto_sign_PUBLICKEYBYTES);
 	memcpy(clear + 32, local_datum_keys.pk_x25519, crypto_box_PUBLICKEYBYTES);
 	memcpy(clear + 64, session_datum_keys.pk_ed25519, crypto_sign_PUBLICKEYBYTES);
@@ -107,10 +198,12 @@ static void datum_protocol_handshake_bounds_tests(void) {
 	datum_test(datum_state == 1);
 	datum_test(datum_protocol_test_receive_sealed(clear, 192, &pool_keys) == 1);
 	datum_test(datum_state == 2);
+	datum_test(!datum_framing_v2);
 	datum_state = 1;
 	clear[192] = 'X';
 	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) == 1);
 	datum_test(datum_state == 2);
+	datum_test(!datum_framing_v2);
 	datum_state = 1;
 	const DATUM_ENC_KEYS remote_before_failure = session_remote_datum_keys;
 	const DATUM_ENC_PRECOMP precomp_before_failure = session_precomp;
@@ -123,10 +216,28 @@ static void datum_protocol_handshake_bounds_tests(void) {
 	memcpy(clear + 160, remote.pk_x25519, crypto_box_PUBLICKEYBYTES);
 	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) == 1);
 	datum_test(datum_state == 2);
+	datum_test(!datum_framing_v2);
 	datum_test(session_precomp.local == &session_datum_keys);
 	datum_test(session_precomp.remote == &session_remote_datum_keys);
 	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) < 0);
 	datum_test(datum_state == 2);
+	datum_state = 1;
+	clear[193] = DATUM_DRS_FRAMING_V2_FLAG;
+	datum_test(datum_protocol_test_receive_sealed(clear, 194, &pool_keys) == 1);
+	datum_test(datum_state == 2);
+	datum_test(datum_framing_v2);
+	datum_state = 1;
+	datum_framing_v2 = false;
+	clear[194] = 0xa5;
+	datum_test(datum_protocol_test_receive_sealed(clear, 195, &pool_keys) == 1);
+	datum_test(datum_state == 2);
+	datum_test(datum_framing_v2);
+	datum_state = 1;
+	datum_framing_v2 = false;
+	clear[193] = 0;
+	datum_test(datum_protocol_test_receive_sealed(clear, 195, &pool_keys) == 1);
+	datum_test(datum_state == 2);
+	datum_test(!datum_framing_v2);
 	
 	sodium_memzero(&remote, sizeof(remote));
 	local_datum_keys = saved_local;
@@ -136,11 +247,13 @@ static void datum_protocol_handshake_bounds_tests(void) {
 	session_precomp = saved_precomp;
 	latest_server_msg_tsms = saved_latest;
 	datum_state = saved_state;
+	datum_framing_v2 = saved_framing_v2;
 }
 
 static void datum_protocol_log_bounds_tests(void) {
 	const unsigned char saved_state = datum_state;
 	const DATUM_ENC_PRECOMP saved_precomp = session_precomp;
+	const bool saved_framing_v2 = datum_framing_v2;
 	unsigned char saved_nonce[crypto_box_NONCEBYTES];
 	memcpy(saved_nonce, session_nonce_receiver, sizeof(saved_nonce));
 	
@@ -152,14 +265,14 @@ static void datum_protocol_log_bounds_tests(void) {
 	datum_test(!datum_encrypt_generate_keys(&sender));
 	datum_test(!crypto_box_beforenm(session_precomp.precomp_remote, sender.pk_x25519, receiver.sk_x25519));
 	datum_test(!crypto_box_beforenm(sender_precomp, receiver.pk_x25519, sender.sk_x25519));
+	datum_framing_v2 = false;
 	unsigned char log_nonce[crypto_box_NONCEBYTES] = {0};
 	unsigned char log_ciphertext[crypto_box_MACBYTES + 1];
 	unsigned char log_decrypted[sizeof(log_ciphertext)];
 	const unsigned char log_message[] = {'X'};
 	bool found_unterminated_ciphertext = false;
 	for (unsigned int attempt = 0; attempt < 10000; ++attempt) {
-		datum_test(!crypto_box_easy_afternm(log_ciphertext, log_message,
-			sizeof(log_message), log_nonce, sender_precomp));
+		datum_test(!crypto_box_easy_afternm(log_ciphertext, log_message, sizeof(log_message), log_nonce, sender_precomp));
 		memcpy(log_decrypted, log_ciphertext, sizeof(log_decrypted));
 		datum_test(!crypto_box_open_easy_afternm(log_decrypted,
 			log_decrypted, sizeof(log_decrypted), log_nonce,
@@ -194,6 +307,162 @@ static void datum_protocol_log_bounds_tests(void) {
 	session_precomp = saved_precomp;
 	memcpy(session_nonce_receiver, saved_nonce, sizeof(saved_nonce));
 	datum_state = saved_state;
+	datum_framing_v2 = saved_framing_v2;
+}
+
+static void datum_protocol_receive_mode_tests(void) {
+	const unsigned char saved_state = datum_state;
+	const DATUM_ENC_PRECOMP saved_precomp = session_precomp;
+	const DATUM_ENC_KEYS saved_remote = session_remote_datum_keys;
+	const uint64_t saved_latest = latest_server_msg_tsms;
+	const uint64_t saved_clock = datum_protocol_mainloop_tsms;
+	const uint64_t saved_count = datum_accepted_share_count;
+	const bool saved_framing_v2 = datum_framing_v2;
+	unsigned char saved_nonce[crypto_box_NONCEBYTES];
+	memcpy(saved_nonce, session_nonce_receiver, sizeof(saved_nonce));
+	
+	DATUM_ENC_KEYS receiver = {0}, sender = {0};
+	unsigned char sender_precomp[crypto_box_BEFORENMBYTES];
+	unsigned char nonce[crypto_box_NONCEBYTES] = {0};
+	const unsigned char ping[] = {0x42};
+	unsigned char wire[sizeof(ping) + crypto_box_MACBYTES];
+	const unsigned char ack[] = {
+		0x8f, 0x50, 0, 0, 0x78, 0x56, 0x34, 0x12, 0, 0,
+	};
+	
+	datum_test(sodium_init() >= 0);
+	datum_test(!datum_encrypt_generate_keys(&receiver));
+	datum_test(!datum_encrypt_generate_keys(&sender));
+	datum_test(!crypto_box_beforenm(session_precomp.precomp_remote, sender.pk_x25519, receiver.sk_x25519));
+	datum_test(!crypto_box_beforenm(sender_precomp, receiver.pk_x25519, sender.sk_x25519));
+	datum_test(!crypto_box_easy_afternm(wire, ping, sizeof(ping), nonce, sender_precomp));
+	
+	datum_state = 3;
+	datum_framing_v2 = false;
+	datum_accepted_share_count = 0;
+	latest_server_msg_tsms = 17;
+	datum_protocol_mainloop_tsms = 42;
+	memset(session_nonce_receiver, 0, sizeof(session_nonce_receiver));
+	for (unsigned int both = 0; both <= 1; ++both) {
+		T_DATUM_PROTOCOL_HEADER header = {
+			.cmd_len = sizeof(ack),
+			.is_encrypted_pubkey = both,
+			.is_encrypted_channel = both,
+			.proto_cmd = 5,
+		};
+		unsigned char payload[sizeof(ack)];
+		memcpy(payload, ack, sizeof(payload));
+		datum_test(datum_protocol_server_msg(&header, payload) < 0);
+		datum_test(datum_accepted_share_count == 0);
+		datum_test(latest_server_msg_tsms == 17);
+	}
+	
+	T_DATUM_PROTOCOL_HEADER channel = {
+		.cmd_len = sizeof(wire),
+		.is_encrypted_channel = true,
+		.proto_cmd = 1,
+	};
+	for (unsigned int state = 2; state <= 3; ++state) {
+		unsigned char payload[sizeof(wire)];
+		T_DATUM_PROTOCOL_HEADER header = channel;
+		memcpy(payload, wire, sizeof(payload));
+		memset(session_nonce_receiver, 0, sizeof(session_nonce_receiver));
+		datum_state = state;
+		latest_server_msg_tsms = 17;
+		datum_test(datum_protocol_server_msg(&header, payload) == 1);
+		datum_test(latest_server_msg_tsms == 42);
+	}
+	for (unsigned int state = 0; state <= 3; ++state) {
+		if (state == 2 || state == 3) continue;
+		unsigned char payload[sizeof(wire)];
+		T_DATUM_PROTOCOL_HEADER header = channel;
+		memcpy(payload, wire, sizeof(payload));
+		memset(session_nonce_receiver, 0, sizeof(session_nonce_receiver));
+		datum_state = state;
+		latest_server_msg_tsms = 17;
+		datum_test(datum_protocol_server_msg(&header, payload) < 0);
+		datum_test(latest_server_msg_tsms == 17);
+	}
+	
+	T_DATUM_PROTOCOL_HEADER rejected = channel;
+	datum_state = 3;
+	latest_server_msg_tsms = 17;
+	rejected.proto_cmd = 2;
+	datum_test(datum_protocol_server_msg(&rejected, wire) < 0);
+	datum_test(datum_protocol_server_msg(NULL, wire) < 0);
+	datum_test(datum_protocol_server_msg(&channel, NULL) < 0);
+	
+	T_DATUM_PROTOCOL_HEADER v2_header = {
+		.cmd_len = 1 + sizeof(ping) + crypto_box_MACBYTES,
+		.is_encrypted_channel = true,
+		.proto_cmd = 1,
+	};
+	unsigned char v2_clear[1 + sizeof(ping)];
+	unsigned char v2_wire[sizeof(v2_clear) + crypto_box_MACBYTES + 1];
+	v2_clear[0] = datum_protocol_test_header_control(&v2_header);
+	memcpy(&v2_clear[1], ping, sizeof(ping));
+	datum_test(!crypto_box_easy_afternm(v2_wire, v2_clear, sizeof(v2_clear), nonce, sender_precomp));
+	v2_wire[sizeof(v2_wire) - 1] = 0;
+	datum_framing_v2 = true;
+	
+	T_DATUM_PROTOCOL_HEADER mutations[6];
+	for (size_t n = 0; n < sizeof(mutations) / sizeof(mutations[0]); ++n) {
+		mutations[n] = v2_header;
+	}
+	mutations[0].is_signed = true;
+	mutations[1].is_encrypted_pubkey = true;
+	mutations[2].is_encrypted_channel = false;
+	mutations[3].proto_cmd = 7;
+	mutations[4].cmd_len--;
+	mutations[5].cmd_len++;
+	for (size_t n = 0; n < sizeof(mutations) / sizeof(mutations[0]); ++n) {
+		unsigned char payload[sizeof(v2_wire)];
+		memcpy(payload, v2_wire, sizeof(payload));
+		memset(session_nonce_receiver, 0, sizeof(session_nonce_receiver));
+		datum_state = 3;
+		latest_server_msg_tsms = 17;
+		datum_test(datum_protocol_server_msg(&mutations[n], payload) < 0);
+		datum_test(latest_server_msg_tsms == 17);
+	}
+	
+	unsigned char v2_payload[sizeof(v2_wire)];
+	memcpy(v2_payload, v2_wire, sizeof(v2_payload));
+	memset(session_nonce_receiver, 0, sizeof(session_nonce_receiver));
+	latest_server_msg_tsms = 17;
+	datum_test(datum_protocol_server_msg(&v2_header, v2_payload) == 1);
+	datum_test(v2_header.cmd_len == sizeof(ping));
+	datum_test(latest_server_msg_tsms == 42);
+	
+	T_DATUM_PROTOCOL_HEADER signed_header = {
+		.cmd_len = 1 + sizeof(ping) + crypto_sign_BYTES + crypto_box_MACBYTES,
+		.is_signed = true,
+		.is_encrypted_channel = true,
+		.proto_cmd = 1,
+	};
+	unsigned char signed_clear[1 + sizeof(ping) + crypto_sign_BYTES];
+	unsigned char signed_wire[sizeof(signed_clear) + crypto_box_MACBYTES];
+	signed_clear[0] = datum_protocol_test_header_control(&signed_header);
+	memcpy(&signed_clear[1], ping, sizeof(ping));
+	datum_test(!crypto_sign_detached(&signed_clear[1 + sizeof(ping)], NULL, ping, sizeof(ping), sender.sk_ed25519));
+	datum_test(!crypto_box_easy_afternm(signed_wire, signed_clear, sizeof(signed_clear), nonce, sender_precomp));
+	memcpy(session_remote_datum_keys.pk_ed25519, sender.pk_ed25519, crypto_sign_PUBLICKEYBYTES);
+	memset(session_nonce_receiver, 0, sizeof(session_nonce_receiver));
+	latest_server_msg_tsms = 17;
+	datum_test(datum_protocol_server_msg(&signed_header, signed_wire) == 1);
+	datum_test(signed_header.cmd_len == sizeof(ping));
+	datum_test(latest_server_msg_tsms == 42);
+	
+	sodium_memzero(sender_precomp, sizeof(sender_precomp));
+	sodium_memzero(&receiver, sizeof(receiver));
+	sodium_memzero(&sender, sizeof(sender));
+	session_precomp = saved_precomp;
+	session_remote_datum_keys = saved_remote;
+	memcpy(session_nonce_receiver, saved_nonce, sizeof(saved_nonce));
+	datum_state = saved_state;
+	latest_server_msg_tsms = saved_latest;
+	datum_protocol_mainloop_tsms = saved_clock;
+	datum_accepted_share_count = saved_count;
+	datum_framing_v2 = saved_framing_v2;
 }
 
 static int datum_protocol_test_pow_handler(void *item) {
@@ -395,11 +664,18 @@ static int datum_protocol_test_decrypt_frame(const unsigned char *wire,
 		nonce, session_precomp.precomp_remote)) return -1;
 	*offset += header->cmd_len;
 	datum_increment_session_nonce(nonce);
-	return header->cmd_len - crypto_box_MACBYTES;
+	int clear_len = header->cmd_len - crypto_box_MACBYTES;
+	if (datum_framing_v2) {
+		if (clear_len < 1 || clear[0] != datum_protocol_test_header_control(header)) return -1;
+		memmove(clear, &clear[1], (size_t)clear_len - 1);
+		clear_len--;
+	}
+	return clear_len;
 }
 
 static void datum_protocol_bulk_tests(void) {
 	const bool saved_enabled = atomic_load(&datum_protocol_bulk_enabled);
+	const bool saved_framing_v2 = datum_framing_v2;
 	const int saved_out = server_out_buf;
 	const uint32_t saved_header_key = sending_header_key;
 	unsigned char saved_nonce[sizeof(session_nonce_sender)];
@@ -413,8 +689,10 @@ static void datum_protocol_bulk_tests(void) {
 	
 	datum_protocol_bulk_reset();
 	atomic_store(&datum_protocol_bulk_enabled, true);
+	datum_framing_v2 = true;
 	server_out_buf = 0;
-	const size_t payload_size = DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 1024;
+	const size_t payload_size = DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - crypto_box_MACBYTES - 1;
+	const size_t v2_payload_size = payload_size - 1;
 	unsigned char *payload = malloc(payload_size);
 	int sockets[2] = {-1, -1};
 	const int socket_result = socketpair(AF_UNIX, SOCK_STREAM, 0, sockets);
@@ -426,6 +704,19 @@ static void datum_protocol_bulk_tests(void) {
 	for (size_t i = 0; i < payload_size; ++i) {
 		payload[i] = (unsigned char)(i * 131U + 17U);
 	}
+	const uint32_t boundary_header_key = sending_header_key;
+	datum_test(datum_protocol_mining_cmd(payload, (int)v2_payload_size) == 0);
+	T_DATUM_PROTOCOL_HEADER boundary_header = {0};
+	uint32_t boundary_receiver_key = boundary_header_key;
+	datum_header_upk(&boundary_header, server_send_buffer, 0, &boundary_receiver_key);
+	datum_test(boundary_header.cmd_len == DATUM_PROTOCOL_MAX_CMD_DATA_SIZE - 1);
+	datum_test(datum_protocol_mining_cmd(payload, (int)payload_size) == -1);
+	server_out_buf = 0;
+	datum_framing_v2 = false;
+	datum_test(datum_protocol_mining_cmd(payload, (int)payload_size) == 0);
+	datum_test(datum_protocol_mining_cmd(payload, (int)payload_size + 1) == -1);
+	server_out_buf = 0;
+	datum_framing_v2 = true;
 	datum_test(datum_protocol_bulk_cmd(payload, (int)payload_size) == 0);
 	datum_test(datum_protocol_bulk_cmd_for_session(
 		payload, (int)payload_size,
@@ -434,11 +725,10 @@ static void datum_protocol_bulk_tests(void) {
 	uint32_t receiver_header_key = sending_header_key;
 	unsigned char receiver_nonce[crypto_box_NONCEBYTES];
 	memcpy(receiver_nonce, session_nonce_sender, sizeof(receiver_nonce));
-	unsigned char wire[2 * (T_DATUM_PROTOCOL_HEADER_WIRE_BYTES +
+	unsigned char wire[2 * (T_DATUM_PROTOCOL_HEADER_WIRE_BYTES + 1 +
 		DATUM_BULK_FRAGMENT_HEADER_SIZE + DATUM_BULK_FRAGMENT_DATA_SIZE +
 		crypto_box_MACBYTES)];
-	unsigned char clear[DATUM_BULK_FRAGMENT_HEADER_SIZE +
-		DATUM_BULK_FRAGMENT_DATA_SIZE];
+	unsigned char clear[1 + DATUM_BULK_FRAGMENT_HEADER_SIZE + DATUM_BULK_FRAGMENT_DATA_SIZE];
 	const unsigned char share[] = {0x27, 'S', 'H', 'A', 'R', 'E'};
 	const unsigned char block[] = {0x27, 'B', 'L', 'O', 'C', 'K'};
 	bool share_sent = false;
@@ -560,6 +850,7 @@ cleanup:
 	free(payload);
 	datum_protocol_bulk_reset();
 	atomic_store(&datum_protocol_bulk_enabled, saved_enabled);
+	datum_framing_v2 = saved_framing_v2;
 	server_out_buf = saved_out;
 	if (saved_output) {
 		memcpy(server_send_buffer, saved_output, (size_t)saved_out);
@@ -976,6 +1267,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	T_DATUM_PROTOCOL_POW pow = {0};
 	const bool saved_pass_full_users = datum_config.datum_pool_pass_full_users;
 	const bool saved_pass_workers = datum_config.datum_pool_pass_workers;
+	const bool saved_framing_v2 = datum_framing_v2;
 	char saved_pool_address[sizeof(datum_config.mining_pool_address)];
 	
 	if (!jobs || !templates) {
@@ -987,6 +1279,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	memcpy(saved_pool_address, datum_config.mining_pool_address, sizeof(saved_pool_address));
 	datum_config.datum_pool_pass_full_users = false;
 	datum_config.datum_pool_pass_workers = false;
+	datum_framing_v2 = false;
 	strcpy(datum_config.mining_pool_address, "pool");
 	memset(datum_jobs, 0, sizeof(datum_jobs));
 	datum_protocol_next_job_idx = 0;
@@ -1025,10 +1318,20 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	
 	// A pool without ABW omits section 0x05 and uses the null XOR key.
 	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 140);
+	datum_test(upk_u32le(msg, 9) == (uint32_t)pow.nonce);
 	datum_test(msg[39] == 0x03 && msg[40] == DATUM_POW_BLAKE2B);
 	datum_test(msg[57] == 0x04 && upk_u32le(msg, 58) == pow.time_on_wire);
 	datum_test(msg[62] == 0x01 && msg[63] == 0xa0);
 	datum_test(msg[131] == 0x02 && msg[137] == 0xc0 && msg[138] == 0xd0);
+	pow.raw_pow_hash[0] = 0x11;
+	pow.raw_pow_hash[1] = 0x22;
+	pow.raw_pow_hash[2] = 0x33;
+	pow.raw_pow_hash[3] = 0x44;
+	datum_framing_v2 = true;
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) > 0);
+	datum_test(!memcmp(&msg[9], (const unsigned char[]){0x44, 0x33, 0x22, 0x11}, 4));
+	datum_test(upk_u64le(msg, 49) == pow.nonce);
+	datum_framing_v2 = false;
 	memset(datum_jobs, 0, sizeof(datum_jobs));
 	datum_protocol_next_job_idx = 0;
 	pow.datum_job_id = datum_protocol_setup_new_job_idx(&jobs[0]);
@@ -1125,11 +1428,14 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	memcpy(datum_config.mining_pool_address, saved_pool_address, sizeof(saved_pool_address));
 	datum_config.datum_pool_pass_full_users = saved_pass_full_users;
 	datum_config.datum_pool_pass_workers = saved_pass_workers;
+	datum_framing_v2 = saved_framing_v2;
 	free(templates);
 	free(jobs);
 }
 
 void datum_protocol_tests(void) {
+	datum_protocol_hello_framing_offer_tests();
+	datum_protocol_receive_mode_tests();
 	datum_protocol_handshake_bounds_tests();
 	datum_protocol_log_bounds_tests();
 	datum_protocol_abw_activation_state_test();

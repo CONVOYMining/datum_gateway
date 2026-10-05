@@ -168,6 +168,7 @@ static unsigned char datum_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0};
 static unsigned char datum_requested_resume_token[DATUM_RESUME_TOKEN_SIZE] = {0};
 static bool datum_has_resume_token = false;
 static bool datum_requested_resume = false;
+atomic_bool datum_framing_v2 = false;
 static bool datum_connection_configured = false;
 static atomic_bool datum_pool_abw_enabled = true;
 
@@ -222,12 +223,17 @@ uint32_t datum_header_xor_feedback(const uint32_t i) {
 }
 
 static
+uint8_t datum_header_control(const T_DATUM_PROTOCOL_HEADER * const h) {
+	return ((uint8_t)h->is_signed) |
+	       ((uint8_t)h->is_encrypted_pubkey << 1) |
+	       ((uint8_t)h->is_encrypted_channel << 2) |
+	       ((h->proto_cmd & 0x1f) << 3);
+}
+
+static
 void datum_header_pk(uint8_t * const dst, const size_t offset, const T_DATUM_PROTOCOL_HEADER * const h, uint32_t * const xor_key) {
 	uint32_t raw = (h->cmd_len & 0x3fffffUL) |
-	               ((uint32_t)h->is_signed << 24) |
-	               ((uint32_t)h->is_encrypted_pubkey << 25) |
-	               ((uint32_t)h->is_encrypted_channel << 26) |
-	               ((uint32_t)(h->proto_cmd & 0x1f) << 27);
+	               ((uint32_t)datum_header_control(h) << 24);
 	raw ^= *xor_key;
 	*xor_key = datum_header_xor_feedback(*xor_key);
 	
@@ -328,25 +334,24 @@ int datum_protocol_flush_socket(int sockfd) {
 static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
 	int len, bool require_empty_buffer, uint64_t expected_session_generation) {
 	T_DATUM_PROTOCOL_HEADER h;
-	if (!data || len < 0 || (size_t)len + crypto_box_MACBYTES >=
-	    DATUM_PROTOCOL_MAX_CMD_DATA_SIZE) return -1;
+	if (!data || len < 0 || (size_t)len + crypto_box_MACBYTES >= DATUM_PROTOCOL_MAX_CMD_DATA_SIZE) return -1;
 	
 	memset(&h, 0, sizeof(T_DATUM_PROTOCOL_HEADER));
 	
 	h.is_encrypted_channel = true;
 	h.proto_cmd = proto_cmd;
-	h.cmd_len = len;
-	h.cmd_len += crypto_box_MACBYTES;
-	const size_t frame_size = T_DATUM_PROTOCOL_HEADER_WIRE_BYTES +
-		(size_t)len + crypto_box_MACBYTES;
-	if (frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) return -1;
 	
 	// Sends of encrypted data must remain ordered. A bulk fragment is admitted
 	// only to an empty primary buffer, bounding the delay inherited by a mining
 	// frame that arrives just after it.
 	pthread_mutex_lock(&datum_protocol_sender_stage1_lock);
 	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
-	if ((expected_session_generation && expected_session_generation !=
+	const bool framing_v2 = datum_framing_v2;
+	const size_t control_size = framing_v2 ? 1 : 0;
+	const size_t command_size = (size_t)len + control_size + crypto_box_MACBYTES;
+	const size_t frame_size = T_DATUM_PROTOCOL_HEADER_WIRE_BYTES + command_size;
+	if (command_size >= DATUM_PROTOCOL_MAX_CMD_DATA_SIZE ||
+	    (expected_session_generation && expected_session_generation !=
 	     atomic_load(&datum_session_generation)) ||
 	    (require_empty_buffer && server_out_buf != 0) ||
 	    (size_t)server_out_buf + frame_size >= DATUM_PROTOCOL_BUFFER_SIZE) {
@@ -354,17 +359,31 @@ static int datum_protocol_encrypted_cmd(uint8_t proto_cmd, const void *data,
 		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 		return -1;
 	}
+	h.cmd_len = (uint32_t)command_size;
 	
 	unsigned char *encrypted = server_send_buffer + server_out_buf +
 		T_DATUM_PROTOCOL_HEADER_WIRE_BYTES;
-	crypto_box_easy_afternm(encrypted, data, len, session_nonce_sender,
-		session_precomp.precomp_remote);
+	int crypto_result;
+	if (framing_v2) {
+		// Detached mode lets us prepend the control octet and encrypt the
+		// contiguous cleartext in place, without allocating on every share.
+		unsigned char *clear = &encrypted[crypto_box_MACBYTES];
+		clear[0] = datum_header_control(&h);
+		memcpy(&clear[1], data, (size_t)len);
+		crypto_result = crypto_box_detached_afternm(clear, encrypted, clear, (size_t)len + 1, session_nonce_sender, session_precomp.precomp_remote);
+	} else {
+		crypto_result = crypto_box_easy_afternm(encrypted, data, (size_t)len, session_nonce_sender, session_precomp.precomp_remote);
+	}
+	if (crypto_result) {
+		pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
+		pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
+		return -1;
+	}
 	//DLOG_DEBUG("mining cmd 5--- len %d, send header key %8.8x, raw %8.8lx", h.cmd_len, sending_header_key, (unsigned long)upk_u32le(h, 0));
 	datum_header_pk(server_send_buffer, server_out_buf, &h,
 		&sending_header_key);
 	datum_increment_session_nonce(session_nonce_sender);
-	server_out_buf += T_DATUM_PROTOCOL_HEADER_WIRE_BYTES;
-	server_out_buf += len + crypto_box_MACBYTES;
+	server_out_buf += (int)frame_size;
 	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 	pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 	
@@ -2391,7 +2410,8 @@ int datum_protocol_send_hello(int sockfd) {
 	
 	memcpy(&hello_msg[i], "DRS\x01", 4); i += 4;
 	datum_requested_resume = datum_has_resume_token;
-	hello_msg[i++] = datum_requested_resume ? 1 : 0;
+	const uint8_t drs_flags = DATUM_DRS_FRAMING_V2_FLAG | (datum_requested_resume ? DATUM_DRS_RESUME_TOKEN_FLAG : 0);
+	hello_msg[i++] = drs_flags;
 	if (datum_requested_resume) {
 		memcpy(&hello_msg[i], datum_resume_token, DATUM_RESUME_TOKEN_SIZE);
 		memcpy(datum_requested_resume_token, datum_resume_token,
@@ -2544,9 +2564,15 @@ int datum_protocol_handshake_response(T_DATUM_PROTOCOL_HEADER *h, unsigned char 
 	memcpy(remote.pk_x25519, &data[i], crypto_box_PUBLICKEYBYTES); i+=crypto_box_PUBLICKEYBYTES;
 	if (!datum_encrypt_prep_precomp(&remote, &session_datum_keys, &precomp)) return -1;
 	
-	// Server MOTD
+	// Server MOTD and authenticated DRS feature selection
 	size_t motd_len = h->cmd_len - (size_t)i;
 	const unsigned char *motd_end = memchr(&data[i], 0, motd_len);
+	bool framing_v2 = false;
+	if (motd_end) {
+		const unsigned char *selection = &motd_end[1];
+		const size_t selection_len = (size_t)(&data[h->cmd_len] - selection);
+		if (selection_len >= 1 && (selection[0] & DATUM_DRS_FRAMING_V2_FLAG)) framing_v2 = true;
+	}
 	if (motd_end) motd_len = (size_t)(motd_end - &data[i]);
 	if (motd_len >= sizeof(motd)) motd_len = sizeof(motd) - 1;
 	memcpy(motd, &data[i], motd_len);
@@ -2556,6 +2582,7 @@ int datum_protocol_handshake_response(T_DATUM_PROTOCOL_HEADER *h, unsigned char 
 	session_precomp = precomp;
 	session_precomp.remote = &session_remote_datum_keys;
 	sodium_memzero(&precomp, sizeof(precomp));
+	datum_framing_v2 = framing_v2;
 	datum_state = 2; //we're handshaked with encryption setup!
 	
 	DLOG_DEBUG("Handshake response received.");
@@ -2568,23 +2595,41 @@ int datum_protocol_server_msg(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data) {
 	int i;
 	//DLOG_DEBUG("Server msg: %d bytes cmd %d", h->cmd_len, h->proto_cmd);
 	
-	if ((h->is_encrypted_pubkey) && (!h->is_encrypted_channel)) {
-		// this is a sealed message to our session pubkey
-		// decrypt the message
+	if (!h || !data) return -1;
+	if (datum_state == 1) {
+		if (h->proto_cmd != 2 || !h->is_signed || !h->is_encrypted_pubkey || h->is_encrypted_channel) return -1;
 		i = datum_protocol_decrypt_sealed(h, data);
 		if (i < 0) {
 			DLOG_ERROR("Could not decrypt sealed message from DATUM server!");
 			return -1;
 		}
-	}
-	
-	if ((!h->is_encrypted_pubkey) && (h->is_encrypted_channel)) {
-		// this is a message encrypted for our session
-		i = datum_protocol_decrypt_standard(h, data);
-		if (i < 0) {
-			DLOG_ERROR("Could not decrypt standard message from DATUM server!");
-			return -1;
+	} else if (datum_state == 2 || datum_state == 3) {
+		if (datum_framing_v2) {
+			// Framing v2 mirrors the outer control octet inside the channel
+			// payload so both endpoints decode the same message type.
+			const uint8_t outer_control = datum_header_control(h);
+			i = datum_protocol_decrypt_standard(h, data);
+			if (i < 0) {
+				DLOG_ERROR("Could not decrypt standard message from DATUM server!");
+				return -1;
+			}
+			if (!h->cmd_len || data[0] != outer_control) {
+				DLOG_ERROR("DATUM server framing v2 control mismatch");
+				return -1;
+			}
+			memmove(data, &data[1], h->cmd_len - 1);
+			h->cmd_len--;
+			if (h->proto_cmd == 2 || !h->is_encrypted_channel || h->is_encrypted_pubkey) return -1;
+		} else {
+			if (h->proto_cmd == 2 || !h->is_encrypted_channel || h->is_encrypted_pubkey) return -1;
+			i = datum_protocol_decrypt_standard(h, data);
+			if (i < 0) {
+				DLOG_ERROR("Could not decrypt standard message from DATUM server!");
+				return -1;
+			}
 		}
+	} else {
+		return -1;
 	}
 	
 	// message is decrypted by now
@@ -2748,7 +2793,16 @@ static int datum_protocol_pow_build_message_mode(
 	i++;
 	msg[i++] = pow->target_byte; // PoT target byte 3
 	pk_u32le(msg, i, (uint32_t)pow->ntime); i += 4; // ntime 4
-	pk_u32le(msg, i, (uint32_t)pow->nonce); i += 4; // nonce 8
+	if (datum_framing_v2) {
+		// Section 0x03 carries the authoritative nonce. Reuse this redundant
+		// word as an advisory share-reconstruction hint for upgraded servers.
+		// The wire carries the native BLAKE2b digest tail, independent of this
+		// implementation's reversed integer representation.
+		for(int n=0;n<4;n++) msg[i + n] = pow->raw_pow_hash[3 - n];
+	} else {
+		pk_u32le(msg, i, (uint32_t)pow->nonce);
+	}
+	i += 4; // legacy nonce or raw PoW hash hint 8
 	pk_u32le(msg, i, pow->version); i += 4; // version 12
 	// extranonce size... DO NOT CHANGE. Server support for other sizes is not likely any time soon.
 	msg[i++] = 12; // 16
@@ -3006,6 +3060,7 @@ void *datum_protocol_client(void *args) {
 	protocol_state = 0;
 	server_out_buf = 0;
 	server_in_buf = 0;
+	datum_framing_v2 = false;
 	pthread_mutex_unlock(&datum_protocol_send_buffer_lock);
 	pthread_mutex_unlock(&datum_protocol_sender_stage1_lock);
 	datum_protocol_bulk_reset();

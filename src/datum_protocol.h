@@ -60,6 +60,11 @@
 #define DATUM_PROTOCOL_BUFFER_SIZE (DATUM_PROTOCOL_MAX_CMD_DATA_SIZE*3)
 #define DATUM_PROTOCOL_MAX_USERNAME_LEN 384
 
+// DRS version 1 HELLO flags. Unknown higher bits remain forward compatible;
+// an incompatible trailer layout requires a new DRS version.
+#define DATUM_DRS_RESUME_TOKEN_FLAG 0x01
+#define DATUM_DRS_FRAMING_V2_FLAG 0x02
+
 // Protocol command 6 carries sequential DBF1 fragments. Only one small
 // fragment is admitted after the primary send queue drains.
 #define DATUM_BULK_FRAGMENT_HEADER_SIZE 16
@@ -204,6 +209,7 @@ extern uint64_t datum_rejected_share_diff;
 #define DATUM_REJECT_MISSING_POOL_TAG 28
 #define DATUM_REJECT_DUPLICATE_WORK 29
 #define DATUM_REJECT_OTHER 30
+#define DATUM_REJECT_RECONSTRUCTION_MISMATCH 31
 
 #define DATUM_POW_SHARE_RESPONSE_ACCEPTED 0x50
 #define DATUM_POW_SHARE_RESPONSE_ACCEPTED_TENTATIVELY 0x55
