@@ -49,14 +49,83 @@
 extern DATUM_QUEUE pow_queue;
 extern atomic_int new_notify_threadsafe;
 extern volatile char new_notify_blockhash[256];
+extern DATUM_ENC_KEYS local_datum_keys, session_datum_keys;
+extern DATUM_ENC_KEYS session_remote_datum_keys, pool_keys;
 extern uint64_t datum_protocol_mainloop_tsms;
 extern uint64_t datum_last_accepted_share_tsms;
+extern uint64_t latest_server_msg_tsms;
 extern pthread_mutex_t submitblock_mutex;
 extern int submit_block_triggered;
 extern const char *submitblock_ptr;
 extern bool submitblock_ptr_owned;
 
 static int datum_protocol_test_pow_handler_count;
+
+static int datum_protocol_test_receive_sealed(const unsigned char *clear, size_t len, const DATUM_ENC_KEYS *signer) {
+	unsigned char signed_data[1024];
+	unsigned char wire[sizeof(signed_data) + crypto_box_SEALBYTES];
+	if (len + crypto_sign_BYTES > sizeof(signed_data)) return -1;
+	memcpy(signed_data, clear, len);
+	if (crypto_sign_detached(signed_data + len, NULL, signed_data, len, signer->sk_ed25519)) return -1;
+	len += crypto_sign_BYTES;
+	if (crypto_box_seal(wire, signed_data, len, session_datum_keys.pk_x25519)) return -1;
+	T_DATUM_PROTOCOL_HEADER header = {
+		.cmd_len = len + crypto_box_SEALBYTES,
+		.is_signed = true,
+		.is_encrypted_pubkey = true,
+		.proto_cmd = 2,
+	};
+	return datum_protocol_server_msg(&header, wire);
+}
+
+static void datum_protocol_handshake_bounds_tests(void) {
+	const unsigned char saved_state = datum_state;
+	const DATUM_ENC_KEYS saved_local = local_datum_keys;
+	const DATUM_ENC_KEYS saved_session = session_datum_keys;
+	const DATUM_ENC_KEYS saved_remote = session_remote_datum_keys;
+	const DATUM_ENC_KEYS saved_pool = pool_keys;
+	const DATUM_ENC_PRECOMP saved_precomp = session_precomp;
+	const uint64_t saved_latest = latest_server_msg_tsms;
+	DATUM_ENC_KEYS remote = {0};
+	unsigned char clear[194] = {0};
+	
+	datum_test(sodium_init() >= 0);
+	datum_test(!datum_encrypt_generate_keys(&local_datum_keys));
+	datum_test(!datum_encrypt_generate_keys(&session_datum_keys));
+	datum_test(!datum_encrypt_generate_keys(&pool_keys));
+	datum_test(!datum_encrypt_generate_keys(&remote));
+	memcpy(clear, local_datum_keys.pk_ed25519, crypto_sign_PUBLICKEYBYTES);
+	memcpy(clear + 32, local_datum_keys.pk_x25519, crypto_box_PUBLICKEYBYTES);
+	memcpy(clear + 64, session_datum_keys.pk_ed25519, crypto_sign_PUBLICKEYBYTES);
+	memcpy(clear + 96, session_datum_keys.pk_x25519, crypto_box_PUBLICKEYBYTES);
+	memcpy(clear + 128, remote.pk_ed25519, crypto_sign_PUBLICKEYBYTES);
+	memcpy(clear + 160, remote.pk_x25519, crypto_box_PUBLICKEYBYTES);
+	
+	datum_state = 1;
+	datum_test(datum_protocol_test_receive_sealed(clear, 191, &pool_keys) < 0);
+	datum_test(datum_state == 1);
+	datum_test(datum_protocol_test_receive_sealed(clear, 192, &pool_keys) == 1);
+	datum_test(datum_state == 2);
+	datum_state = 1;
+	clear[192] = 'X';
+	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) == 1);
+	datum_test(datum_state == 2);
+	datum_state = 1;
+	clear[192] = 0;
+	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) == 1);
+	datum_test(datum_state == 2);
+	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) < 0);
+	datum_test(datum_state == 2);
+	
+	sodium_memzero(&remote, sizeof(remote));
+	local_datum_keys = saved_local;
+	session_datum_keys = saved_session;
+	session_remote_datum_keys = saved_remote;
+	pool_keys = saved_pool;
+	session_precomp = saved_precomp;
+	latest_server_msg_tsms = saved_latest;
+	datum_state = saved_state;
+}
 
 static int datum_protocol_test_pow_handler(void *item) {
 	(void)item;
@@ -992,6 +1061,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 }
 
 void datum_protocol_tests(void) {
+	datum_protocol_handshake_bounds_tests();
 	datum_protocol_abw_activation_state_test();
 	datum_protocol_acceptance_watchdog_tests();
 	datum_protocol_config_v3_tests();

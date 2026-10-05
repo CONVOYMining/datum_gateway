@@ -2503,7 +2503,8 @@ int datum_protocol_handshake_response(T_DATUM_PROTOCOL_HEADER *h, unsigned char 
 	int i;
 	char motd[512];
 	
-	if (!h->is_signed) {
+	const size_t key_bytes = 3 * (crypto_sign_PUBLICKEYBYTES + crypto_box_PUBLICKEYBYTES);
+	if (datum_state != 1 || !h->is_signed || h->cmd_len < key_bytes) {
 		// handshake must have passed a sig check
 		return -1;
 	}
@@ -2538,8 +2539,12 @@ int datum_protocol_handshake_response(T_DATUM_PROTOCOL_HEADER *h, unsigned char 
 	memcpy(session_remote_datum_keys.pk_x25519, &data[i], crypto_box_PUBLICKEYBYTES); i+=crypto_box_PUBLICKEYBYTES;
 	
 	// Server MOTD
-	strncpy(motd, (char *)&data[i], 511);
-	motd[511] = 0;
+	size_t motd_len = h->cmd_len - (size_t)i;
+	const unsigned char *motd_end = memchr(&data[i], 0, motd_len);
+	if (motd_end) motd_len = (size_t)(motd_end - &data[i]);
+	if (motd_len >= sizeof(motd)) motd_len = sizeof(motd) - 1;
+	memcpy(motd, &data[i], motd_len);
+	motd[motd_len] = 0;
 	
 	session_remote_datum_keys.is_remote = true;
 	
