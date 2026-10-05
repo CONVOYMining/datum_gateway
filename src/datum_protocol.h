@@ -143,6 +143,10 @@ bool datum_protocol_abw_required(void);
 void datum_increment_session_nonce(void *s);
 int datum_protocol_fetch_coinbaser(uint64_t value);
 int datum_protocol_coinbaser_fetch(void *s);
+// Asks the pool for a template's split without waiting for the answer, so the request
+// is in flight while the gateway blasts empty work. It needs only what the request
+// carries: the coinbase value and the previous block hash.
+int datum_protocol_coinbaser_prefetch(uint64_t value, const unsigned char *prevhash_bin);
 int datum_protocol_migration_request(int len, const unsigned char *data);
 bool datum_protocol_take_connect_endpoint(
 	char *host,

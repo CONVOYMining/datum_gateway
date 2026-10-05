@@ -524,6 +524,14 @@ void *datum_gateway_template_thread(void *args) {
 							DLOG_DEBUG("Urgent work update triggered");
 						}
 						
+						// Ask the pool for this template's split now, not after the blast
+						// below: the request carries only the coinbase value and the
+						// previous block hash, both of which this template has, and the
+						// answer is then in hand when the job that waits for it is made.
+						// Every miner works on a coinbase that pays the pool alone until
+						// then, and a block found on one pays the window nothing.
+						datum_protocol_coinbaser_prefetch(t->coinbasevalue, t->previousblockhash_bin);
+						
 						// sleep for a milisecond
 						// this will let other threads churn for a moment.  we wont get all the empty jobs blasted out in a milisecond anyway
 						usleep(1000);

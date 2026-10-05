@@ -1230,6 +1230,19 @@ unsigned char datum_coinbaser_v2_response_buf_idx = 0;
 uint64_t datum_coinbaser_v2_response_value[2] = { 0, 0 };
 int datum_coinbaser_v2_response_len[2] = { 0, 0 };
 
+// The request in flight, and the previous block hash each stored response answered.
+// The pool dictates a split for one previous block and one coinbase value and its
+// answer carries neither back, so the request's own previous block hash is what tells
+// an answer for this tip from one for an earlier tip; a split dictated for another
+// previous block has every share on it refused. `fresh` marks an answer no job has
+// taken yet, so a job still asks for a split of its own rather than reusing one the
+// window has moved under. All of it is held under datum_protocol_coinbaser_fetch_mutex.
+static unsigned char datum_coinbaser_request_prevhash[32] = { 0 };
+static uint64_t datum_coinbaser_request_value = 0;
+static bool datum_coinbaser_request_pending = false;
+static unsigned char datum_coinbaser_v2_response_prevhash[2][32] = { 0 };
+static bool datum_coinbaser_v2_response_fresh = false;
+
 static int datum_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *timeout) {
 #ifndef HAVE_PTHREAD_MUTEX_TIMEDLOCK
 	int rc;
@@ -1290,6 +1303,17 @@ int datum_protocol_coinbaser_fetch_response(int len, unsigned char *data) {
 	memcpy(datum_coinbaser_v2_response, &data[12], x);
 	datum_coinbaser_v2_response_value[datum_coinbaser_v2_response_buf_idx] = v;
 	datum_coinbaser_v2_response_len[datum_coinbaser_v2_response_buf_idx] = x;
+	if (datum_coinbaser_request_pending && v == datum_coinbaser_request_value) {
+		memcpy(datum_coinbaser_v2_response_prevhash[datum_coinbaser_v2_response_buf_idx],
+		       datum_coinbaser_request_prevhash, 32);
+		datum_coinbaser_v2_response_fresh = true;
+		datum_coinbaser_request_pending = false;
+	} else {
+		// Not the answer to the request in flight: an answer to one the next tip
+		// replaced, which names a previous block of its own that this cannot be
+		// given. No job takes it, so none mines a split dictated for another block.
+		datum_coinbaser_v2_response_fresh = false;
+	}
 	
 	pthread_cond_signal(&datum_protocol_coinbaser_fetch_cond); // Signal the condition variable
 	pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
@@ -1297,29 +1321,19 @@ int datum_protocol_coinbaser_fetch_response(int len, unsigned char *data) {
 	return 1;
 }
 
-int datum_protocol_coinbaser_fetch(void *sptr) {
-	// Called by the coinbaser thread to request a coinbase split
-	// The coinbaser thread expects this to actually result in a processed coinbase split, so we need to churn
-	// here until that's ready or times out.
-	T_DATUM_STRATUM_JOB *s = (T_DATUM_STRATUM_JOB *)sptr;
-	uint64_t value = s->coinbase_value;
+// Sends the Fetch Coinbaser command for `value` on `prevhash_bin` and records it as the
+// request in flight. The caller holds datum_protocol_coinbaser_fetch_mutex. Returns 1
+// when the command was handed to the session, 0 when there is no session to take it.
+static int datum_protocol_coinbaser_send_request(uint64_t value, const unsigned char *prevhash_bin) {
 	unsigned char msg[128 + crypto_box_MACBYTES];
 	int i = 0, j;
-	int rc;
-	struct timespec ts;
-	
-	s->available_coinbase_outputs_count = 0;
-	
-	if (value < 31250000) { // mainnet epoch V
-		return 0;
-	}
 	
 	msg[0] = 0x10; i++; // Fetch Coinbaser subcmd
 	pk_u64le(msg, 1, value); i += 8;  // value we have available with this job
 	
 	// the job's previous block hash.  this ensures that the remote end knows which block this payout is related to
 	// in the event of a chain split.
-	memcpy(&msg[i], s->prevhash_bin, 32); i+=32;
+	memcpy(&msg[i], prevhash_bin, 32); i+=32;
 	msg[i] = 0xFE; i++;
 	
 	// pad
@@ -1336,30 +1350,119 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	if (datum_protocol_mining_cmd_for_session(
 		msg, i, session_generation) != 0) return 0;
 	
-	// spin here for up to 5 seconds while awaiting a coinbaser response from the DATUM server
+	memcpy(datum_coinbaser_request_prevhash, prevhash_bin, 32);
+	datum_coinbaser_request_value = value;
+	datum_coinbaser_request_pending = true;
+	return 1;
+}
+
+// Whether an answer no job has taken yet is the answer to a request for this value on
+// this previous block. The caller holds datum_protocol_coinbaser_fetch_mutex.
+static bool datum_protocol_coinbaser_have_answer(uint64_t value, const unsigned char *prevhash_bin) {
+	const int idx = datum_coinbaser_v2_response_buf_idx;
+	return datum_coinbaser_v2_response_fresh &&
+	       datum_coinbaser_v2_response &&
+	       datum_coinbaser_v2_response_value[idx] == value &&
+	       !memcmp(datum_coinbaser_v2_response_prevhash[idx], prevhash_bin, 32);
+}
+
+// Whether the request in flight is for this value on this previous block. The caller
+// holds datum_protocol_coinbaser_fetch_mutex.
+static bool datum_protocol_coinbaser_asked(uint64_t value, const unsigned char *prevhash_bin) {
+	return datum_coinbaser_request_pending &&
+	       datum_coinbaser_request_value == value &&
+	       !memcmp(datum_coinbaser_request_prevhash, prevhash_bin, 32);
+}
+
+int datum_protocol_coinbaser_prefetch(uint64_t value, const unsigned char *prevhash_bin) {
+	// Called by the template thread the moment a template is parsed, so the pool is
+	// answering while the gateway blasts empty work. Until the answer is in hand every
+	// miner is on a coinbase that pays the pool alone, which the pool records as owed,
+	// so the request is sent before the job that waits for it exists rather than after.
+	struct timespec ts;
+	int rc, sent = 0;
+	
+	if (value < 31250000) { // mainnet epoch V, as datum_protocol_coinbaser_fetch
+		return 0;
+	}
+	
+	// Whether there is a session to ask through is the sender's test, the same one
+	// datum_protocol_coinbaser_fetch leaves to it, so a prefetch is sent exactly when
+	// a fetch would have sent one.
+	
+	// The template thread waits on nothing: a lock held by a fetch in progress means
+	// that fetch is already asking, and the next template is only moments away.
 	clock_gettime(CLOCK_REALTIME, &ts);
-	ts.tv_sec += 5; // Set timeout to 5 seconds
+	ts.tv_nsec += 50000000; // 50 ms
+	if (ts.tv_nsec >= 1000000000) {
+		ts.tv_sec++;
+		ts.tv_nsec -= 1000000000;
+	}
+	rc = datum_mutex_timedlock(&datum_protocol_coinbaser_fetch_mutex, &ts);
+	if (rc != 0) {
+		DLOG_DEBUG("Could not lock the coinbaser mutex to prefetch a split");
+		return 0;
+	}
+	
+	if (!datum_protocol_coinbaser_have_answer(value, prevhash_bin) &&
+	    !datum_protocol_coinbaser_asked(value, prevhash_bin)) {
+		sent = datum_protocol_coinbaser_send_request(value, prevhash_bin);
+	}
+	
+	pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
+	return sent;
+}
+
+int datum_protocol_coinbaser_fetch(void *sptr) {
+	// Called by the coinbaser thread to request a coinbase split
+	// The coinbaser thread expects this to actually result in a processed coinbase split, so we need to churn
+	// here until that's ready or times out.
+	T_DATUM_STRATUM_JOB *s = (T_DATUM_STRATUM_JOB *)sptr;
+	uint64_t value = s->coinbase_value;
+	int i = 0;
+	int rc;
+	struct timespec ts;
+	
+	s->available_coinbase_outputs_count = 0;
+	
+	if (value < 31250000) { // mainnet epoch V
+		return 0;
+	}
 	
 	pthread_mutex_lock(&datum_protocol_coinbaser_fetch_mutex);
 	
-	rc = pthread_cond_timedwait(&datum_protocol_coinbaser_fetch_cond, &datum_protocol_coinbaser_fetch_mutex, &ts);
-	if (rc == ETIMEDOUT) {
-		pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
-		DLOG_DEBUG("Timeout waiting for coinbaser response from DATUM server");
-		return 0;
+	// The prefetch for this template usually leaves the answer here, so this job takes
+	// it without a round trip. Otherwise the request is either already in flight from
+	// that prefetch, or sent here as before.
+	if (!datum_protocol_coinbaser_have_answer(value, s->prevhash_bin)) {
+		if (!datum_protocol_coinbaser_asked(value, s->prevhash_bin) &&
+		    !datum_protocol_coinbaser_send_request(value, s->prevhash_bin)) {
+			pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
+			return 0;
+		}
+		
+		// spin here for up to 5 seconds while awaiting a coinbaser response from the DATUM server
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_sec += 5; // Set timeout to 5 seconds
+		
+		while (!datum_protocol_coinbaser_have_answer(value, s->prevhash_bin)) {
+			rc = pthread_cond_timedwait(&datum_protocol_coinbaser_fetch_cond, &datum_protocol_coinbaser_fetch_mutex, &ts);
+			if (rc == ETIMEDOUT) {
+				pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
+				DLOG_DEBUG("Timeout waiting for coinbaser response from DATUM server");
+				return 0;
+			}
+			if (rc != 0) {
+				DLOG_DEBUG("Error waiting for coinbaser response from DATUM server");
+				pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
+				return 0;
+			}
+		}
 	}
-	
-	if (rc != 0) {
-		DLOG_DEBUG("Error waiting for coinbaser response from DATUM server");
-		pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
-		return 0;
-	}
-	i = 0;
 	
 	// process received coinbase
-	if ((datum_coinbaser_v2_response) && (datum_coinbaser_v2_response_value[datum_coinbaser_v2_response_buf_idx] == value)) {
-		i = datum_coinbaser_v2_parse(s, datum_coinbaser_v2_response, datum_coinbaser_v2_response_len[datum_coinbaser_v2_response_buf_idx]);
-	}
+	i = datum_coinbaser_v2_parse(s, datum_coinbaser_v2_response, datum_coinbaser_v2_response_len[datum_coinbaser_v2_response_buf_idx]);
+	datum_coinbaser_v2_response_fresh = false;
 	
 	pthread_mutex_unlock(&datum_protocol_coinbaser_fetch_mutex);
 	return i;

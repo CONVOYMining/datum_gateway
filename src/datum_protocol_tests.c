@@ -993,9 +993,98 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	free(jobs);
 }
 
+static void datum_protocol_coinbaser_answer_tests(void) {
+	// A split the pool dictated is taken by the job it was dictated for, once: the pool
+	// binds it to one coinbase value and one previous block and refuses every share on a
+	// split dictated for another, so the gateway holds the previous block its request
+	// named and hands the answer only to a job on that block. Taking it clears it, so a
+	// later job asks for a split of its own rather than one the window has moved under.
+	const int saved_client_active = atomic_load(&datum_protocol_client_active);
+	const unsigned char saved_state = datum_state;
+	const int saved_out = server_out_buf;
+	
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(T_DATUM_STRATUM_JOB));
+	datum_test(job != NULL);
+	if (!job) return;
+	job->coinbase_value = 312500000;
+	memset(job->prevhash_bin, 0x22, sizeof(job->prevhash_bin));
+	
+	// One output of 1000 sats to a 22-byte P2WPKH script, under coinbaser id 40.
+	unsigned char blob[32];
+	size_t b = 0;
+	blob[b++] = 40;
+	pk_u64le(blob, b, 1000); b += 8;
+	blob[b++] = 22;
+	blob[b++] = 0x00;
+	blob[b++] = 0x14;
+	memset(&blob[b], 0xab, 20); b += 20;
+	
+	unsigned char msg[64] = {0};
+	pk_u64le(msg, 0, job->coinbase_value);
+	pk_u32le(msg, 8, (uint32_t)b);
+	memcpy(&msg[12], blob, b);
+	const int msglen = 12 + (int)b;
+	
+	datum_state = 3;
+	atomic_store(&datum_protocol_client_active, 3);
+	server_out_buf = 0;
+	
+	// The template thread asks for this tip's split before any job needs it.
+	datum_test(datum_protocol_coinbaser_prefetch(job->coinbase_value, job->prevhash_bin) == 1);
+	datum_test(server_out_buf > 0);
+	// Asking again for the same tip does not send a second request.
+	const int sent_once = server_out_buf;
+	datum_test(datum_protocol_coinbaser_prefetch(job->coinbase_value, job->prevhash_bin) == 0);
+	datum_test(server_out_buf == sent_once);
+	
+	// The pool answers, and the job takes the answer without a round trip of its own.
+	datum_test(datum_protocol_coinbaser_fetch_response(msglen, msg) == 1);
+	datum_test(datum_protocol_coinbaser_fetch(job) == 1);
+	datum_test(job->available_coinbase_outputs_count == 1);
+	datum_test(job->datum_coinbaser_id == 40);
+	datum_test(job->available_coinbase_outputs[0].value_sats == 1000);
+	
+	// With no session to ask through, a fetch that finds no answer of its own returns
+	// empty rather than reusing one, which is how the cases below are told apart.
+	atomic_store(&datum_protocol_client_active, 0);
+	datum_test(datum_protocol_coinbaser_fetch(job) == 0);
+	datum_test(job->available_coinbase_outputs_count == 0);
+	
+	// An answer is not taken by a job on another previous block.
+	atomic_store(&datum_protocol_client_active, 3);
+	datum_test(datum_protocol_coinbaser_prefetch(job->coinbase_value, job->prevhash_bin) == 1);
+	datum_test(datum_protocol_coinbaser_fetch_response(msglen, msg) == 1);
+	atomic_store(&datum_protocol_client_active, 0);
+	memset(job->prevhash_bin, 0x11, sizeof(job->prevhash_bin));
+	datum_test(datum_protocol_coinbaser_fetch(job) == 0);
+	datum_test(job->available_coinbase_outputs_count == 0);
+	
+	// An answer whose value is not the one asked for answers a request a later tip
+	// replaced, and names a previous block this one cannot be given, so nobody takes it.
+	// A tip and a value of their own, so no answer from above is lying about unclaimed.
+	memset(job->prevhash_bin, 0x33, sizeof(job->prevhash_bin));
+	job->coinbase_value = 400000000;
+	atomic_store(&datum_protocol_client_active, 3);
+	datum_test(datum_protocol_coinbaser_prefetch(job->coinbase_value, job->prevhash_bin) == 1);
+	unsigned char stale[64];
+	memcpy(stale, msg, sizeof(stale));
+	pk_u64le(stale, 0, job->coinbase_value + 1);
+	datum_test(datum_protocol_coinbaser_fetch_response(msglen, stale) == 1);
+	atomic_store(&datum_protocol_client_active, 0);
+	job->coinbase_value += 1;
+	datum_test(datum_protocol_coinbaser_fetch(job) == 0);
+	datum_test(job->available_coinbase_outputs_count == 0);
+	
+	free(job);
+	server_out_buf = saved_out;
+	atomic_store(&datum_protocol_client_active, saved_client_active);
+	datum_state = saved_state;
+}
+
 void datum_protocol_tests(void) {
 	datum_protocol_abw_activation_state_test();
 	datum_protocol_acceptance_watchdog_tests();
+	datum_protocol_coinbaser_answer_tests();
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
 	datum_protocol_bulk_tests();
