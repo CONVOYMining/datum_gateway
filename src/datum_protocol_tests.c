@@ -51,6 +51,7 @@ extern atomic_int new_notify_threadsafe;
 extern volatile char new_notify_blockhash[256];
 extern DATUM_ENC_KEYS local_datum_keys, session_datum_keys;
 extern DATUM_ENC_KEYS session_remote_datum_keys, pool_keys;
+extern unsigned char session_nonce_receiver[crypto_box_NONCEBYTES];
 extern uint64_t datum_protocol_mainloop_tsms;
 extern uint64_t datum_last_accepted_share_tsms;
 extern uint64_t latest_server_msg_tsms;
@@ -134,6 +135,64 @@ static void datum_protocol_handshake_bounds_tests(void) {
 	pool_keys = saved_pool;
 	session_precomp = saved_precomp;
 	latest_server_msg_tsms = saved_latest;
+	datum_state = saved_state;
+}
+
+static void datum_protocol_log_bounds_tests(void) {
+	const unsigned char saved_state = datum_state;
+	const DATUM_ENC_PRECOMP saved_precomp = session_precomp;
+	unsigned char saved_nonce[crypto_box_NONCEBYTES];
+	memcpy(saved_nonce, session_nonce_receiver, sizeof(saved_nonce));
+	
+	DATUM_ENC_KEYS receiver = {0}, sender = {0};
+	unsigned char sender_precomp[crypto_box_BEFORENMBYTES];
+	
+	datum_test(sodium_init() >= 0);
+	datum_test(!datum_encrypt_generate_keys(&receiver));
+	datum_test(!datum_encrypt_generate_keys(&sender));
+	datum_test(!crypto_box_beforenm(session_precomp.precomp_remote, sender.pk_x25519, receiver.sk_x25519));
+	datum_test(!crypto_box_beforenm(sender_precomp, receiver.pk_x25519, sender.sk_x25519));
+	unsigned char log_nonce[crypto_box_NONCEBYTES] = {0};
+	unsigned char log_ciphertext[crypto_box_MACBYTES + 1];
+	unsigned char log_decrypted[sizeof(log_ciphertext)];
+	const unsigned char log_message[] = {'X'};
+	bool found_unterminated_ciphertext = false;
+	for (unsigned int attempt = 0; attempt < 10000; ++attempt) {
+		datum_test(!crypto_box_easy_afternm(log_ciphertext, log_message,
+			sizeof(log_message), log_nonce, sender_precomp));
+		memcpy(log_decrypted, log_ciphertext, sizeof(log_decrypted));
+		datum_test(!crypto_box_open_easy_afternm(log_decrypted,
+			log_decrypted, sizeof(log_decrypted), log_nonce,
+			session_precomp.precomp_remote));
+		if (!memchr(log_decrypted, 0, sizeof(log_decrypted))) {
+			found_unterminated_ciphertext = true;
+			break;
+		}
+		datum_increment_session_nonce(log_nonce);
+	}
+	datum_test(found_unterminated_ciphertext);
+	if (found_unterminated_ciphertext) {
+		unsigned char *log_wire = malloc(sizeof(log_ciphertext));
+		datum_test(log_wire != NULL);
+		if (log_wire) {
+			memcpy(log_wire, log_ciphertext, sizeof(log_ciphertext));
+			memcpy(session_nonce_receiver, log_nonce, sizeof(log_nonce));
+			T_DATUM_PROTOCOL_HEADER log_header = {
+				.cmd_len = sizeof(log_ciphertext),
+				.is_encrypted_channel = true,
+				.proto_cmd = 7,
+			};
+			datum_state = 3;
+				datum_test(datum_protocol_server_msg(&log_header, log_wire) == 1);
+			free(log_wire);
+		}
+	}
+	
+	sodium_memzero(sender_precomp, sizeof(sender_precomp));
+	sodium_memzero(&receiver, sizeof(receiver));
+	sodium_memzero(&sender, sizeof(sender));
+	session_precomp = saved_precomp;
+	memcpy(session_nonce_receiver, saved_nonce, sizeof(saved_nonce));
 	datum_state = saved_state;
 }
 
@@ -1072,6 +1131,7 @@ static void datum_pow_recycled_protocol_job_test(void) {
 
 void datum_protocol_tests(void) {
 	datum_protocol_handshake_bounds_tests();
+	datum_protocol_log_bounds_tests();
 	datum_protocol_abw_activation_state_test();
 	datum_protocol_acceptance_watchdog_tests();
 	datum_protocol_config_v3_tests();

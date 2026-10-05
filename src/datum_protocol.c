@@ -2630,7 +2630,7 @@ int datum_protocol_server_msg(T_DATUM_PROTOCOL_HEADER *h, unsigned char *data) {
 		case 7: {
 			// display INFO in log
 			if (h->cmd_len) {
-				DLOG_INFO("DATUM Server message: %s", (char *)data);
+				DLOG_INFO("DATUM Server message: %.*s", (int)h->cmd_len, (char *)data);
 			}
 			return 1;
 		}
