@@ -111,9 +111,19 @@ static void datum_protocol_handshake_bounds_tests(void) {
 	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) == 1);
 	datum_test(datum_state == 2);
 	datum_state = 1;
+	const DATUM_ENC_KEYS remote_before_failure = session_remote_datum_keys;
+	const DATUM_ENC_PRECOMP precomp_before_failure = session_precomp;
 	clear[192] = 0;
+	memset(clear + 160, 0, crypto_box_PUBLICKEYBYTES);
+	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) < 0);
+	datum_test(datum_state == 1);
+	datum_test(!memcmp(&session_remote_datum_keys, &remote_before_failure, sizeof(session_remote_datum_keys)));
+	datum_test(!memcmp(&session_precomp, &precomp_before_failure, sizeof(session_precomp)));
+	memcpy(clear + 160, remote.pk_x25519, crypto_box_PUBLICKEYBYTES);
 	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) == 1);
 	datum_test(datum_state == 2);
+	datum_test(session_precomp.local == &session_datum_keys);
+	datum_test(session_precomp.remote == &session_remote_datum_keys);
 	datum_test(datum_protocol_test_receive_sealed(clear, 193, &pool_keys) < 0);
 	datum_test(datum_state == 2);
 	

@@ -267,13 +267,17 @@ int datum_pubkey_to_struct(const char *input, DATUM_ENC_KEYS *key) {
 }
 
 // Prepare session encryption precomputation
-void datum_encrypt_prep_precomp(DATUM_ENC_KEYS *remote, DATUM_ENC_KEYS *local, DATUM_ENC_PRECOMP *precomp) {
+static
+bool datum_encrypt_prep_precomp(DATUM_ENC_KEYS *remote, DATUM_ENC_KEYS *local, DATUM_ENC_PRECOMP *precomp) {
 	precomp->local = local;
 	precomp->remote = remote;
 	
 	if (crypto_box_beforenm(precomp->precomp_remote, remote->pk_x25519, local->sk_x25519) != 0) {
+		sodium_memzero(precomp, sizeof(*precomp));
 		DLOG_ERROR("Could not precompute encryption keys.");
+		return false;
 	}
+	return true;
 }
 
 // Buffer data to the server.  Raw, already encrypted and part of the protocol.
@@ -2534,9 +2538,11 @@ int datum_protocol_handshake_response(T_DATUM_PROTOCOL_HEADER *h, unsigned char 
 	}
 	i+=crypto_box_PUBLICKEYBYTES;
 	
-	// ok, let's save the pool's session keys
-	memcpy(session_remote_datum_keys.pk_ed25519, &data[i], crypto_sign_PUBLICKEYBYTES); i+=crypto_sign_PUBLICKEYBYTES;
-	memcpy(session_remote_datum_keys.pk_x25519, &data[i], crypto_box_PUBLICKEYBYTES); i+=crypto_box_PUBLICKEYBYTES;
+	DATUM_ENC_KEYS remote = { .is_remote = true, };
+	DATUM_ENC_PRECOMP precomp = {0};
+	memcpy(remote.pk_ed25519, &data[i], crypto_sign_PUBLICKEYBYTES); i+=crypto_sign_PUBLICKEYBYTES;
+	memcpy(remote.pk_x25519, &data[i], crypto_box_PUBLICKEYBYTES); i+=crypto_box_PUBLICKEYBYTES;
+	if (!datum_encrypt_prep_precomp(&remote, &session_datum_keys, &precomp)) return -1;
 	
 	// Server MOTD
 	size_t motd_len = h->cmd_len - (size_t)i;
@@ -2546,9 +2552,10 @@ int datum_protocol_handshake_response(T_DATUM_PROTOCOL_HEADER *h, unsigned char 
 	memcpy(motd, &data[i], motd_len);
 	motd[motd_len] = 0;
 	
-	session_remote_datum_keys.is_remote = true;
-	
-	datum_encrypt_prep_precomp(&session_remote_datum_keys, &session_datum_keys, &session_precomp);
+	session_remote_datum_keys = remote;
+	session_precomp = precomp;
+	session_precomp.remote = &session_remote_datum_keys;
+	sodium_memzero(&precomp, sizeof(precomp));
 	datum_state = 2; //we're handshaked with encryption setup!
 	
 	DLOG_DEBUG("Handshake response received.");
