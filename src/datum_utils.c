@@ -630,6 +630,17 @@ int datum_format_difficulty(char * const out, const size_t outsz, bitcoin_diffic
 	return snprintf(out, outsz, "%.1Lf%c", diff, suffix[0]);
 }
 
+bool buf_datum_format_difficulty(struct buf * const buf, const bitcoin_difficulty_typ diff) {
+	char * const appendbuf = buf_preappend(buf, DATUM_FORMAT_DIFFICULTY_OUT_SZ);
+	if (!appendbuf) return false;
+	const int rv = datum_format_difficulty(appendbuf, DATUM_FORMAT_DIFFICULTY_OUT_SZ, diff);
+	if (rv < 0 || rv >= DATUM_FORMAT_DIFFICULTY_OUT_SZ) {
+		return buf_strcat(buf, "(err)");
+	}
+	buf->len += rv;
+	return true;
+}
+
 #define SIPHASH_ROTATE(a, b) ((uint64_t)(((a)<<(b))|((a)>>(64-(b)))))
 #define SIPHASH_HALF_ROUND(a,b,c,d,e,f) do { \
 	a += b; \

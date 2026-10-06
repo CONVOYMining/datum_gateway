@@ -44,6 +44,8 @@
 #include <float.h>
 #include "datum_logger.h"
 
+struct buf;
+
 void datum_utils_init(void);
 
 extern unsigned int datum_test_failed;
@@ -96,6 +98,7 @@ bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
 bitcoin_difficulty_typ calc_network_difficulty_blake2b(uint32_t nbits);
 #define DATUM_FORMAT_DIFFICULTY_OUT_SZ 8
 int datum_format_difficulty(char *out, size_t out_size, bitcoin_difficulty_typ difficulty);
+bool buf_datum_format_difficulty(struct buf *, bitcoin_difficulty_typ diff);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
