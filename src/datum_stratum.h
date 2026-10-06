@@ -103,11 +103,12 @@
 ////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////
 
+// The coinbase transaction in binary: coinb1, 12 extranonce bytes, then
+// coinb2. The extranonce bytes are zero, since the hasher's extranonce is in
+// the v2 header. The coinbaser builds coinb1 and coinb2 in ascii hex in a
+// T_DATUM_COINBASE_HEX it allocates per call.
 typedef struct {
-	char coinb1[STRATUM_COINBASE1_MAX_LEN];
-	char coinb2[STRATUM_COINBASE2_MAX_LEN];
-	unsigned char coinb1_bin[STRATUM_COINBASE1_MAX_LEN>>1];
-	unsigned char coinb2_bin[STRATUM_COINBASE2_MAX_LEN>>1];
+	unsigned char txn[MAX_COINBASE_TXN_SIZE_BYTES];
 	
 	int coinb1_len;
 	int coinb2_len;

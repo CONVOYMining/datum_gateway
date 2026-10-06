@@ -2916,8 +2916,8 @@ static int datum_protocol_pow_build_message_mode(
 		&sjob->coinbase[pow->coinbase_id];
 	merkle_bytes = (size_t)sjob->merklebranch_count * 32;
 	if ((send_context && sjob->merklebranch_count > 24) ||
-	    cb->coinb1_len < 0 || cb->coinb1_len > (int)sizeof(cb->coinb1_bin) ||
-	    cb->coinb2_len < 0 || cb->coinb2_len > (int)sizeof(cb->coinb2_bin) ||
+	    cb->coinb1_len < 0 || cb->coinb2_len < 0 ||
+	    (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len > sizeof(cb->txn) ||
 	    (size_t)i + 1 + (send_context ? 69 + merkle_bytes : 0) +
 		(send_coinbase ? 6 + (size_t)cb->coinb1_len +
 			(size_t)cb->coinb2_len : 0) > msg_size) {
@@ -2949,9 +2949,9 @@ static int datum_protocol_pow_build_message_mode(
 		msg[i++] = pow->subsidy_only ? DATUM_COINBASE_ID_EMPTY : pow->coinbase_id;
 		pk_u16le(msg, i, cb->coinb1_len); i += 2;
 		pk_u16le(msg, i, cb->coinb2_len); i += 2;
-		memcpy(&msg[i], cb->coinb1_bin, cb->coinb1_len);
+		memcpy(&msg[i], cb->txn, cb->coinb1_len);
 		i += cb->coinb1_len;
-		memcpy(&msg[i], cb->coinb2_bin, cb->coinb2_len);
+		memcpy(&msg[i], &cb->txn[cb->coinb1_len + 12], cb->coinb2_len);
 		i += cb->coinb2_len;
 	}
 	msg[i++] = 0xFE; // cap message

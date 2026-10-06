@@ -1306,12 +1306,12 @@ static void datum_pow_recycled_protocol_job_test(void) {
 		job->nbits_bin[0] = (unsigned char)(0xb0 + i);
 		job->coinbase[2].coinb1_len = 1;
 		job->coinbase[2].coinb2_len = 1;
-		job->coinbase[2].coinb1_bin[0] = (unsigned char)(0xc0 + i);
-		job->coinbase[2].coinb2_bin[0] = (unsigned char)(0xd0 + i);
+		job->coinbase[2].txn[0] = (unsigned char)(0xc0 + i);
+		job->coinbase[2].txn[1 + 12] = (unsigned char)(0xd0 + i);
 		job->subsidy_only_coinbase.coinb1_len = 1;
 		job->subsidy_only_coinbase.coinb2_len = 1;
-		job->subsidy_only_coinbase.coinb1_bin[0] = (unsigned char)(0xe0 + i);
-		job->subsidy_only_coinbase.coinb2_bin[0] = (unsigned char)(0xf0 + i);
+		job->subsidy_only_coinbase.txn[0] = (unsigned char)(0xe0 + i);
+		job->subsidy_only_coinbase.txn[1 + 12] = (unsigned char)(0xf0 + i);
 		snprintf(job->job_id, sizeof(job->job_id), "job-%02zu", i);
 	}
 	

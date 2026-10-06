@@ -96,13 +96,14 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	job.blake2b_time_on_wire = 1000;
 	job.coinbase[0].coinb1_len = 20;
 	job.coinbase[0].coinb2_len = 8;
-	memset(job.coinbase[0].coinb1_bin, 0x11, 20);
-	memset(job.coinbase[0].coinb2_bin, 0x22, 8);
-	job.coinbase[0].coinb1_bin[4] = 0xFF;
+	/* coinb1 at 0, 12 zero extranonce bytes, coinb2 at 32 */
+	memset(job.coinbase[0].txn, 0x11, 20);
+	memset(job.coinbase[0].txn + 32, 0x22, 8);
+	job.coinbase[0].txn[4] = 0xFF;
 	job.coinbase[2] = job.coinbase[0];
-	job.coinbase[2].coinb2_bin[0] ^= 0x55;
+	job.coinbase[2].txn[32] ^= 0x55;
 	job.subsidy_only_coinbase = job.coinbase[0];
-	job.subsidy_only_coinbase.coinb2_bin[0] ^= 0xaa;
+	job.subsidy_only_coinbase.txn[32] ^= 0xaa;
 	job.target_pot_index = 4;
 	tdata.txn_count = 1;
 	
@@ -116,9 +117,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	datum_test(memcmp(c_subsidy, c_pot, 32) != 0);
 	
 	cb_len = (size_t)job.coinbase[0].coinb1_len + 12 + (size_t)job.coinbase[0].coinb2_len;
-	memcpy(cb_txn, job.coinbase[0].coinb1_bin, job.coinbase[0].coinb1_len);
-	memset(cb_txn + job.coinbase[0].coinb1_len, 0, 12);
-	memcpy(cb_txn + job.coinbase[0].coinb1_len + 12, job.coinbase[0].coinb2_bin, job.coinbase[0].coinb2_len);
+	memcpy(cb_txn, job.coinbase[0].txn, cb_len);
 	cb_txn[job.target_pot_index] = 14;
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
 		&job, cb_txn, cb_len, 14, false, c_from_txn));
@@ -126,12 +125,7 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 	
 	cb_len = (size_t)job.subsidy_only_coinbase.coinb1_len + 12 +
 		(size_t)job.subsidy_only_coinbase.coinb2_len;
-	memcpy(cb_txn, job.subsidy_only_coinbase.coinb1_bin,
-		job.subsidy_only_coinbase.coinb1_len);
-	memset(cb_txn + job.subsidy_only_coinbase.coinb1_len, 0, 12);
-	memcpy(cb_txn + job.subsidy_only_coinbase.coinb1_len + 12,
-		job.subsidy_only_coinbase.coinb2_bin,
-		job.subsidy_only_coinbase.coinb2_len);
+	memcpy(cb_txn, job.subsidy_only_coinbase.txn, cb_len);
 	cb_txn[job.target_pot_index] = 14;
 	datum_test(datum_stratum_job_blake2b_commitment_from_txn(
 		&job, cb_txn, cb_len, 14, true, c_from_txn));
@@ -182,7 +176,7 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	job.block_template = &tdata;
 	job.target_pot_index = 0;
 	job.coinbase[0].coinb1_len = 1;
-	job.coinbase[0].coinb1_bin[0] = 0xff;
+	job.coinbase[0].txn[0] = 0xff;
 	tdata.abw_enabled = true;
 	tdata.abw_assignment_id = 1;
 	datum_test(datum_blake2b_xor_key_hash(tdata.xor_key_hash,

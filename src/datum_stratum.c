@@ -1128,10 +1128,9 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	
-	memcpy(&full_cb_txn[0], cb->coinb1_bin, cb->coinb1_len);
-	// Hasher extranonce lives in the v2 header, not the Bitcoin coinbase.
-	memset(&full_cb_txn[cb->coinb1_len], 0, 12);
-	memcpy(&full_cb_txn[cb->coinb1_len+12], cb->coinb2_bin, cb->coinb2_len);
+	// The job's coinbase transaction, whose extranonce bytes are zero: the
+	// hasher's extranonce is in the v2 header.
+	memcpy(&full_cb_txn[0], cb->txn, (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len);
 	
 	// if we did a quickdiff work, we need to change our extra data just a little so it's unique.
 	// if we don't do this, we're forcing the miner to redo work its already done, which is wasteful
@@ -1893,15 +1892,13 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 	}
 }
 
-bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, unsigned char *commitment) {
-	unsigned char cb_hash[32];
+// The commitment for a coinbase whose txid is cb_hash.
+static bool datum_stratum_job_blake2b_commitment_from_hash(const T_DATUM_STRATUM_JOB *s, unsigned char *cb_hash, unsigned char target_pot, bool subsidy_only, unsigned char *commitment) {
 	unsigned char merkle[32];
 	const T_DATUM_TEMPLATE_DATA *td;
 	
-	if (!s || !s->block_template) return false;
-	if (!cb_txn || !commitment || !cb_len) return false;
+	if (!s || !s->block_template || !commitment) return false;
 	td = s->block_template;
-	double_sha256(cb_hash, cb_txn, cb_len);
 	if (subsidy_only) {
 		memcpy(merkle, cb_hash, sizeof(merkle));
 	} else {
@@ -1923,6 +1920,14 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 		(const unsigned char[16]){0}, (const unsigned char[32]){0});
 }
 
+bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s, const unsigned char *cb_txn, size_t cb_len, unsigned char target_pot, bool subsidy_only, unsigned char *commitment) {
+	unsigned char cb_hash[32];
+	
+	if (!cb_txn || !cb_len) return false;
+	double_sha256(cb_hash, cb_txn, cb_len);
+	return datum_stratum_job_blake2b_commitment_from_hash(s, cb_hash, target_pot, subsidy_only, commitment);
+}
+
 bool datum_stratum_share_is_unmasked_block(
 	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash) {
 	return job && job->block_template && share_hash &&
@@ -1931,21 +1936,20 @@ bool datum_stratum_share_is_unmasked_block(
 }
 
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1) {
-	unsigned char cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
+	unsigned char cb_hash[32];
 	size_t cb_len;
 	
 	if (!s || !cb || !commitment) return false;
-	if (cb->coinb1_len < 1) return false;
+	if (cb->coinb1_len < 1 || cb->coinb2_len < 0) return false;
 	cb_len = (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len;
-	if (cb_len > sizeof(cb_txn)) return false;
-	memcpy(cb_txn, cb->coinb1_bin, cb->coinb1_len);
-	memset(cb_txn + cb->coinb1_len, 0, 12);
-	memcpy(cb_txn + cb->coinb1_len + 12, cb->coinb2_bin, cb->coinb2_len);
-	if (s->target_pot_index >= 0 && s->target_pot_index < cb->coinb1_len) {
-		cb_txn[s->target_pot_index] = pot;
-	}
-	if (!datum_stratum_job_blake2b_commitment_from_txn(
-		s, cb_txn, cb_len, pot, subsidy_only, commitment)) return false;
+	if (cb_len > sizeof(cb->txn)) return false;
+	// The job's coinbase with pot at target_pot_index, hashed in place. An
+	// index outside coinb1 leaves the coinbase unchanged.
+	double_sha256_with_byte(cb_hash, cb->txn, cb_len,
+		(s->target_pot_index >= 0 && s->target_pot_index < cb->coinb1_len) ?
+			(size_t)s->target_pot_index : cb_len, pot);
+	if (!datum_stratum_job_blake2b_commitment_from_hash(
+		s, cb_hash, pot, subsidy_only, commitment)) return false;
 	if (coinb1) datum_blake2b_coinb1(coinb1, commitment);
 	return true;
 }

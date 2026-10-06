@@ -186,6 +186,26 @@ bool double_sha256(void *out, const void *in, size_t length) {
 	return 1;
 }
 
+// double_sha256 of in with the byte at index replaced by byte, without copying
+// in. An index not below length hashes in unchanged.
+bool double_sha256_with_byte(void *out, const void *in, size_t length, size_t index, unsigned char byte) {
+	crypto_hash_sha256_state st;
+	const unsigned char * const p = in;
+	unsigned char dg1[32];
+	
+	crypto_hash_sha256_init(&st);
+	if (index < length) {
+		crypto_hash_sha256_update(&st, p, index);
+		crypto_hash_sha256_update(&st, &byte, 1);
+		crypto_hash_sha256_update(&st, p + index + 1, length - index - 1);
+	} else {
+		crypto_hash_sha256_update(&st, p, length);
+	}
+	crypto_hash_sha256_final(&st, dg1);
+	my_sha256(out, dg1, 32);
+	return 1;
+}
+
 long double get_approx_achieved_diff(const unsigned char *bytes) {
 	if (bytes == NULL) {
 		// Handle null pointer
