@@ -851,3 +851,35 @@ const char *dynamic_hash_unit(double * const inout_hashrate){
 		return "Th/s";
 	}
 }
+
+int buf_printf(struct buf * const buf, const char * const format, ...) {
+	if (buf->err) return -1;
+	
+	if (!buf->s) {
+		if (!buf_reserve(buf, 0x80)) return -1;
+	}
+	
+	const size_t available = buf->allocsz - buf->len;
+	
+	va_list ap;
+	va_start(ap, format);
+	int n = vsnprintf(&buf->s[buf->len], available, format, ap);
+	va_end(ap);
+	
+	if (n >= 0 && (size_t)n >= available) {
+		const size_t required = (size_t)n + 1;
+		void * const appendbuf = buf_preappend(buf, required);
+		if (!appendbuf) return -1;
+		
+		va_start(ap, format);
+		n = vsnprintf(appendbuf, required, format, ap);
+		va_end(ap);
+	}
+	
+	if (n < 0) {
+		buf->err = true;
+		return -1;
+	}
+	buf->len += (size_t)n;
+	return n;
+}

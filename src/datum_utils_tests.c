@@ -37,6 +37,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -160,10 +161,26 @@ static void datum_utils_tests_network_difficulty_blake2b(void) {
 	datum_test(!strcmp(formatted, "436.6Z"));
 }
 
+static void datum_utils_tests_buf(void) {
+	struct buf buf = BUF_INIT;
+	char input[257];
+	
+	memset(input, 'x', sizeof(input) - 1);
+	input[sizeof(input) - 1] = '\0';
+	datum_test(buf_append(&buf, input, 0));
+	datum_test(buf_printf(&buf, "%s", input) == (int)strlen(input));
+	datum_test(buf.len == strlen(input));
+	datum_test(!memcmp(buf.s, input, buf.len));
+	datum_test(buf_nullterminate(&buf));
+	datum_test(buf.s[buf.len] == '\0');
+	free(buf.s);
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
 	datum_utils_tests_secure_strequals();
 	datum_utils_tests_scriptnum();
 	datum_utils_tests_pdiff_to_bdiff();
 	datum_utils_tests_network_difficulty_blake2b();
+	datum_utils_tests_buf();
 }
