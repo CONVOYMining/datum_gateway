@@ -220,7 +220,7 @@ int datum_script_sigop_cost(const unsigned char *script, int len) {
 	return n * 4;
 }
 
-void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1) {
+void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, T_DATUM_COINBASE_HEX *hex, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1) {
 	// This function finishes off the stratum coinb1+coinb2 using the available outputs in the job and other flags specified.
 	// it does not attempt to maximize coinb1's size to any specific size
 	
@@ -276,16 +276,16 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 	if (space_for_en_in_coinbase) {
 		// we'll start the empty coinb2 with the "sequence"
 		m+=2; // pool addr + witness
-		pk_u64le(s->coinbase[coinbase_index].coinb2, cb2idx[coinbase_index], 0x6666666666666666ULL);  // "ffffffff"
+		pk_u64le(hex[coinbase_index].coinb2, cb2idx[coinbase_index], 0x6666666666666666ULL);  // "ffffffff"
 		cb2idx[coinbase_index] = 8;
-		cb2idx[coinbase_index] += append_bitcoin_varint_hex(m, &s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]]); // us, witness, and "m" outputs
+		cb2idx[coinbase_index] += append_bitcoin_varint_hex(m, &hex[coinbase_index].coinb2[cb2idx[coinbase_index]]); // us, witness, and "m" outputs
 	} else {
 		m+=3;
-		cb1idx[coinbase_index] += append_bitcoin_varint_hex(m, &s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]]); // extranonce, us, witness commit, and "m" outputs
+		cb1idx[coinbase_index] += append_bitcoin_varint_hex(m, &hex[coinbase_index].coinb1[cb1idx[coinbase_index]]); // extranonce, us, witness commit, and "m" outputs
 		
 		if (!special_coinb1) {
 			// append extranonce op_return
-			cb1idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
+			cb1idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb1[cb1idx[coinbase_index]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
 			en_done = true;
 		}
 	}
@@ -303,24 +303,24 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 			
 			if ((special_coinb1) && (k < c1cnt)) {
 				// put in coinb1
-				cb1idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]], "%016llx", (unsigned long long)__builtin_bswap64(s->available_coinbase_outputs[k].value_sats)); // TODO: Profile a faster way to do this
-				cb1idx[coinbase_index] += append_bitcoin_varint_hex(s->available_coinbase_outputs[k].output_script_len, &s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]]); // Append script length
+				cb1idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb1[cb1idx[coinbase_index]], "%016llx", (unsigned long long)__builtin_bswap64(s->available_coinbase_outputs[k].value_sats)); // TODO: Profile a faster way to do this
+				cb1idx[coinbase_index] += append_bitcoin_varint_hex(s->available_coinbase_outputs[k].output_script_len, &hex[coinbase_index].coinb1[cb1idx[coinbase_index]]); // Append script length
 				for(i=0;i<s->available_coinbase_outputs[k].output_script_len;i++) {
-					uchar_to_hex(&s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]], s->available_coinbase_outputs[k].output_script[i]);
+					uchar_to_hex(&hex[coinbase_index].coinb1[cb1idx[coinbase_index]], s->available_coinbase_outputs[k].output_script[i]);
 					cb1idx[coinbase_index]+=2;
 				}
 			} else {
 				if ((special_coinb1) && (k == c1cnt)) {
 					// append extranonce op_return
-					cb1idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
+					cb1idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb1[cb1idx[coinbase_index]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
 					en_done = true;
 				}
 				
 				// put in coinb2
-				cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "%016llx", (unsigned long long)__builtin_bswap64(s->available_coinbase_outputs[k].value_sats)); // TODO: Profile a faster way to do this
-				cb2idx[coinbase_index] += append_bitcoin_varint_hex(s->available_coinbase_outputs[k].output_script_len, &s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]]); // Append script length
+				cb2idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], "%016llx", (unsigned long long)__builtin_bswap64(s->available_coinbase_outputs[k].value_sats)); // TODO: Profile a faster way to do this
+				cb2idx[coinbase_index] += append_bitcoin_varint_hex(s->available_coinbase_outputs[k].output_script_len, &hex[coinbase_index].coinb2[cb2idx[coinbase_index]]); // Append script length
 				for(i=0;i<s->available_coinbase_outputs[k].output_script_len;i++) {
-					uchar_to_hex(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], s->available_coinbase_outputs[k].output_script[i]);
+					uchar_to_hex(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], s->available_coinbase_outputs[k].output_script[i]);
 					cb2idx[coinbase_index]+=2;
 				}
 			}
@@ -336,16 +336,16 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 	}
 	
 	if ((!space_for_en_in_coinbase) && (!en_done)) {
-		cb1idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb1[cb1idx[coinbase_index]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
+		cb1idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb1[cb1idx[coinbase_index]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
 		en_done = true;
 	}
 	
 	if (s->coinbase_value > mval) {
 		// append our payout output value and script, since there are leftover funds
-		cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "%016llx", (unsigned long long)__builtin_bswap64(s->coinbase_value - mval)); // TODO: Profile a faster way to do this
-		cb2idx[coinbase_index] += append_bitcoin_varint_hex(s->pool_addr_script_len, &s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]]); // Append script length
+		cb2idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], "%016llx", (unsigned long long)__builtin_bswap64(s->coinbase_value - mval)); // TODO: Profile a faster way to do this
+		cb2idx[coinbase_index] += append_bitcoin_varint_hex(s->pool_addr_script_len, &hex[coinbase_index].coinb2[cb2idx[coinbase_index]]); // Append script length
 		for(i=0;i<s->pool_addr_script_len;i++) {
-			uchar_to_hex(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], s->pool_addr_script[i]);
+			uchar_to_hex(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], s->pool_addr_script[i]);
 			cb2idx[coinbase_index]+=2;
 		}
 	} else {
@@ -354,14 +354,14 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 		// so tack on a dead output, sadly.
 		// TODO: Make code smarter above, don't waste an output if we don't need it.
 		// This is quite unlikely in practice, but, just in case let's make this a prunable OP_RETURN
-		cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000036a0100"); // TODO: Is a naked OP_RETURN without any bytes after safe?  Above TODO is probably better than investigating.
+		cb2idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000036a0100"); // TODO: Is a naked OP_RETURN without any bytes after safe?  Above TODO is probably better than investigating.
 	}
 	
 	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
-	cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
+	cb2idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
-	cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "00000000");
+	cb2idx[coinbase_index] += sprintf(&hex[coinbase_index].coinb2[cb2idx[coinbase_index]], "00000000");
 }
 
 int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_STRATUM_JOB *s) {
@@ -398,6 +398,24 @@ int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_
 	}
 }
 
+// Converts a coinbase built in ascii hex to the binary parts the job keeps.
+static void datum_coinbase_hex_to_bin(T_DATUM_STRATUM_COINBASE *cb, const T_DATUM_COINBASE_HEX *hex) {
+	int i, j;
+	
+	i = strlen(hex->coinb1);
+	cb->coinb1_len = 0;
+	for(j=0;j<i;j+=2) {
+		cb->coinb1_bin[j>>1] = hex2bin_uchar(&hex->coinb1[j]);
+		cb->coinb1_len++;
+	}
+	i = strlen(hex->coinb2);
+	cb->coinb2_len = 0;
+	for(j=0;j<i;j+=2) {
+		cb->coinb2_bin[j>>1] = hex2bin_uchar(&hex->coinb2[j]);
+		cb->coinb2_len++;
+	}
+}
+
 void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool new_block) {
 	char cb[512];
 	int cb_input_sz = 0;
@@ -406,6 +424,15 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	int cb1idx[1] = { 0 };
 	int cb2idx[1] = { 0 };
 	int target_pot_index;
+	// hex[0] is class 0, hex[1] the subsidy-only coinbase
+	T_DATUM_COINBASE_HEX *hex = calloc(2, sizeof(T_DATUM_COINBASE_HEX));
+	T_DATUM_COINBASE_HEX * const subsidy_hex = hex ? &hex[1] : NULL;
+	
+	if (!hex) {
+		DLOG_FATAL("Could not allocate the coinbase build buffers! This is bad.");
+		panic_from_thread(__LINE__);
+		return;
+	}
 	
 	if (datum_protocol_is_active()) {
 		// DATUM
@@ -423,7 +450,7 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	}
 	// copy beginning of the generation txn to the appropriate outputs
 	j = strlen(cbstart_hex);
-	memcpy(&s->coinbase[0].coinb1[0], cbstart_hex, j);
+	memcpy(&hex[0].coinb1[0], cbstart_hex, j);
 	cb1idx[0] = j;
 	
 	cb_input_sz = generate_coinbase_input(s->height, &cb[0], &target_pot_index);
@@ -437,59 +464,59 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	}
 	
 	if (space_for_en_in_coinbase) {
-		cb1idx[0] += append_bitcoin_varint_hex(cb_input_sz+15, &s->coinbase[0].coinb1[cb1idx[0]]); // 15 bytes for extranonce+uid push + data
+		cb1idx[0] += append_bitcoin_varint_hex(cb_input_sz+15, &hex[0].coinb1[cb1idx[0]]); // 15 bytes for extranonce+uid push + data
 	} else {
-		cb1idx[0] += append_bitcoin_varint_hex(cb_input_sz, &s->coinbase[0].coinb1[cb1idx[0]]);
+		cb1idx[0] += append_bitcoin_varint_hex(cb_input_sz, &hex[0].coinb1[cb1idx[0]]);
 	}
-	memcpy(&s->coinbase[0].coinb1[cb1idx[0]], &cb[0], cb_input_sz*2);
+	memcpy(&hex[0].coinb1[cb1idx[0]], &cb[0], cb_input_sz*2);
 	s->target_pot_index = target_pot_index + (cb1idx[0]>>1); // adjust for placement in the txn. always safe for all types, since the varint will always be 1 byte.
 	cb1idx[0] += cb_input_sz*2;
 	
 	if (space_for_en_in_coinbase) {
 		// if we are doing extranonce in the coinbase, then this is ALMOST the end of coinbase1
 		// we need a PUSH 14 and our enprefix in the coinbase
-		uchar_to_hex(&s->coinbase[0].coinb1[cb1idx[0]], 0x0E);
+		uchar_to_hex(&hex[0].coinb1[cb1idx[0]], 0x0E);
 		cb1idx[0]+=2;
 		// TODO: Profile a faster way to do this
-		cb1idx[0] += sprintf(&s->coinbase[0].coinb1[cb1idx[0]], "%04" PRIx16, s->enprefix);
+		cb1idx[0] += sprintf(&hex[0].coinb1[cb1idx[0]], "%04" PRIx16, s->enprefix);
 	} else {
 		// if we are not, then we need to append the "sequence"
-		pk_u64le(s->coinbase[0].coinb1, cb1idx[0], 0x6666666666666666ULL);  // "ffffffff"
+		pk_u64le(hex[0].coinb1, cb1idx[0], 0x6666666666666666ULL);  // "ffffffff"
 		cb1idx[0] += 8;
 	}
 	
-	s->coinbase[0].coinb1[cb1idx[0]] = 0;
+	hex[0].coinb1[cb1idx[0]] = 0;
 	
 	/////////////////////////////
 	// 0 / EMPTY
 	// empty should be easy. lets start there
 	if (space_for_en_in_coinbase) {
 		// we'll start the empty coinb2 with the "sequence"
-		pk_u64le(s->coinbase[0].coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
+		pk_u64le(hex[0].coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
 		cb2idx[0] = 8;
-		cb2idx[0] += append_bitcoin_varint_hex(2, &s->coinbase[0].coinb2[cb2idx[0]]); // us and witness commit
+		cb2idx[0] += append_bitcoin_varint_hex(2, &hex[0].coinb2[cb2idx[0]]); // us and witness commit
 		
 		if (new_block) {
 			// copy the beginning to the subsidy-only
-			memcpy(&s->subsidy_only_coinbase.coinb1[0], &s->coinbase[0].coinb1[0], cb1idx[0]);
-			pk_u64le(s->subsidy_only_coinbase.coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
-			append_bitcoin_varint_hex(1, &s->subsidy_only_coinbase.coinb2[8]); // just us!
+			memcpy(&subsidy_hex->coinb1[0], &hex[0].coinb1[0], cb1idx[0]);
+			pk_u64le(subsidy_hex->coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
+			append_bitcoin_varint_hex(1, &subsidy_hex->coinb2[8]); // just us!
 		}
 	} else {
 		// we're already at the point in coinb1 where we need an output count, which will be 3
 		if (new_block) {
 			j = cb1idx[0];
 		}
-		cb1idx[0] += append_bitcoin_varint_hex(3, &s->coinbase[0].coinb1[cb1idx[0]]); // extranonce, us, and witness commit
+		cb1idx[0] += append_bitcoin_varint_hex(3, &hex[0].coinb1[cb1idx[0]]); // extranonce, us, and witness commit
 		
 		// append extranonce op_return
-		cb1idx[0] += sprintf(&s->coinbase[0].coinb1[cb1idx[0]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
+		cb1idx[0] += sprintf(&hex[0].coinb1[cb1idx[0]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
 		
 		if (new_block) {
 			// copy the beginning to the subsidy-only
-			memcpy(&s->subsidy_only_coinbase.coinb1[0], &s->coinbase[0].coinb1[0], cb1idx[0]);
-			k = append_bitcoin_varint_hex(2, &s->subsidy_only_coinbase.coinb1[j]); // extranonce and us
-			s->subsidy_only_coinbase.coinb1[j+k] = s->coinbase[0].coinb1[j+k];
+			memcpy(&subsidy_hex->coinb1[0], &hex[0].coinb1[0], cb1idx[0]);
+			k = append_bitcoin_varint_hex(2, &subsidy_hex->coinb1[j]); // extranonce and us
+			subsidy_hex->coinb1[j+k] = hex[0].coinb1[j+k];
 		}
 	}
 	// finish off "empty" coinbase
@@ -499,10 +526,10 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 		j = cb2idx[0];
 	}
 	
-	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "%016llx", (unsigned long long)__builtin_bswap64(s->coinbase_value)); // TODO: Profile a faster way to do this
-	cb2idx[0] += append_bitcoin_varint_hex(s->pool_addr_script_len, &s->coinbase[0].coinb2[cb2idx[0]]); // Append script length
+	cb2idx[0] += sprintf(&hex[0].coinb2[cb2idx[0]], "%016llx", (unsigned long long)__builtin_bswap64(s->coinbase_value)); // TODO: Profile a faster way to do this
+	cb2idx[0] += append_bitcoin_varint_hex(s->pool_addr_script_len, &hex[0].coinb2[cb2idx[0]]); // Append script length
 	for(i=0;i<s->pool_addr_script_len;i++) {
-		uchar_to_hex(&s->coinbase[0].coinb2[cb2idx[0]], s->pool_addr_script[i]);
+		uchar_to_hex(&hex[0].coinb2[cb2idx[0]], s->pool_addr_script[i]);
 		cb2idx[0]+=2;
 	}
 	
@@ -512,15 +539,15 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	
 	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
-	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
+	cb2idx[0] += sprintf(&hex[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
-	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "00000000");
+	cb2idx[0] += sprintf(&hex[0].coinb2[cb2idx[0]], "00000000");
 	
 	if (new_block) {
 		// Append the subsidy-only payout to the subsidy_only_coinbase
-		sprintf(&s->subsidy_only_coinbase.coinb2[j], "%016llx", (unsigned long long)__builtin_bswap64(block_reward(s->height))); // subsidy calc for height
-		memcpy(&s->subsidy_only_coinbase.coinb2[j+16], &s->coinbase[0].coinb2[j+16], k-j-16);
-		sprintf(&s->subsidy_only_coinbase.coinb2[k], "00000000");
+		sprintf(&subsidy_hex->coinb2[j], "%016llx", (unsigned long long)__builtin_bswap64(block_reward(s->height))); // subsidy calc for height
+		memcpy(&subsidy_hex->coinb2[j+16], &hex[0].coinb2[j+16], k-j-16);
+		sprintf(&subsidy_hex->coinb2[k], "00000000");
 	}
 	
 	// End of 0 / Empty
@@ -528,33 +555,13 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	
 	// prep binary versions of the coinbase for speeding up later
 	
-	i = strlen(s->coinbase[0].coinb1);
-	s->coinbase[0].coinb1_len = 0;
-	for(j=0;j<i;j+=2) {
-		s->coinbase[0].coinb1_bin[j>>1] = hex2bin_uchar(&s->coinbase[0].coinb1[j]);
-		s->coinbase[0].coinb1_len++;
-	}
-	i = strlen(s->coinbase[0].coinb2);
-	s->coinbase[0].coinb2_len = 0;
-	for(j=0;j<i;j+=2) {
-		s->coinbase[0].coinb2_bin[j>>1] = hex2bin_uchar(&s->coinbase[0].coinb2[j]);
-		s->coinbase[0].coinb2_len++;
-	}
+	datum_coinbase_hex_to_bin(&s->coinbase[0], &hex[0]);
 	
 	if (new_block) {
-		i = strlen(s->subsidy_only_coinbase.coinb1);
-		s->subsidy_only_coinbase.coinb1_len = 0;
-		for(j=0;j<i;j+=2) {
-			s->subsidy_only_coinbase.coinb1_bin[j>>1] = hex2bin_uchar(&s->subsidy_only_coinbase.coinb1[j]);
-			s->subsidy_only_coinbase.coinb1_len++;
-		}
-		i = strlen(s->subsidy_only_coinbase.coinb2);
-		s->subsidy_only_coinbase.coinb2_len = 0;
-		for(j=0;j<i;j+=2) {
-			s->subsidy_only_coinbase.coinb2_bin[j>>1] = hex2bin_uchar(&s->subsidy_only_coinbase.coinb2[j]);
-			s->subsidy_only_coinbase.coinb2_len++;
-		}
+		datum_coinbase_hex_to_bin(&s->subsidy_only_coinbase, subsidy_hex);
 	}
+	
+	free(hex);
 }
 
 void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_only) {
@@ -575,6 +582,17 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	int cb2idx[MAX_COINBASE_TYPES] = { 0,0,0,0,0,0 };
 	
 	int cb_req_sz[MAX_COINBASE_TYPES] = { 0,0,0,0,0 };
+	
+	// hex[0] through hex[MAX_COINBASE_TYPES-1] are the classes,
+	// hex[MAX_COINBASE_TYPES] the subsidy-only coinbase
+	T_DATUM_COINBASE_HEX *hex = calloc(MAX_COINBASE_TYPES + 1, sizeof(T_DATUM_COINBASE_HEX));
+	T_DATUM_COINBASE_HEX * const subsidy_hex = hex ? &hex[MAX_COINBASE_TYPES] : NULL;
+	
+	if (!hex) {
+		DLOG_FATAL("Could not allocate the coinbase build buffers! This is bad.");
+		panic_from_thread(__LINE__);
+		return;
+	}
 	
 	////////////////
 	
@@ -601,7 +619,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// copy beginning of the generation txn to the appropriate outputs
 	j = strlen(cbstart_hex);
 	for(i=0;i<MAX_COINBASE_TYPES;i++) {
-		memcpy(&s->coinbase[i].coinb1[0], cbstart_hex, j);
+		memcpy(&hex[i].coinb1[0], cbstart_hex, j);
 		cb1idx[i] = j;
 	}
 	
@@ -631,11 +649,11 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// set the len, and copy over the rest of the coinbase
 	for(i=0;i<MAX_COINBASE_TYPES;i++) {
 		if ((i!=2) && (space_for_en_in_coinbase)) {
-			cb1idx[i] += append_bitcoin_varint_hex(cb_input_sz+15, &s->coinbase[i].coinb1[cb1idx[i]]);
+			cb1idx[i] += append_bitcoin_varint_hex(cb_input_sz+15, &hex[i].coinb1[cb1idx[i]]);
 		} else {
-			cb1idx[i] += append_bitcoin_varint_hex(cb_input_sz, &s->coinbase[i].coinb1[cb1idx[i]]);
+			cb1idx[i] += append_bitcoin_varint_hex(cb_input_sz, &hex[i].coinb1[cb1idx[i]]);
 		}
-		memcpy(&s->coinbase[i].coinb1[cb1idx[i]], &cb[0], cb_input_sz*2);
+		memcpy(&hex[i].coinb1[cb1idx[i]], &cb[0], cb_input_sz*2);
 		// save this and adjust for placement in the txn... this is always safe because the coinbase input is always < 0xFD len
 		// little silly to set this multiple times, but it's fine for consistency.
 		s->target_pot_index = target_pot_index + (cb1idx[i]>>1);
@@ -644,17 +662,17 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		if ((i!=2) && (space_for_en_in_coinbase)) {
 			// if we are doing extranonce in the coinbase, then this is ALMOST the end of coinbase1
 			// we need a PUSH 14 and our enprefix in the coinbase
-			uchar_to_hex(&s->coinbase[i].coinb1[cb1idx[i]], 0x0E);
+			uchar_to_hex(&hex[i].coinb1[cb1idx[i]], 0x0E);
 			cb1idx[i]+=2;
 			// TODO: Profile a faster way to do this
-			cb1idx[i] += sprintf(&s->coinbase[i].coinb1[cb1idx[i]], "%04" PRIx16, s->enprefix);
+			cb1idx[i] += sprintf(&hex[i].coinb1[cb1idx[i]], "%04" PRIx16, s->enprefix);
 		} else {
 			// if we are not, then we need to append the "sequence"
-			pk_u64le(s->coinbase[i].coinb1, cb1idx[i], 0x6666666666666666ULL);  // "ffffffff"
+			pk_u64le(hex[i].coinb1, cb1idx[i], 0x6666666666666666ULL);  // "ffffffff"
 			cb1idx[i] += 8;
 		}
 		
-		s->coinbase[i].coinb1[cb1idx[i]] = 0;
+		hex[i].coinb1[cb1idx[i]] = 0;
 	}
 	
 	// extranonce ends up at the end of coinb1
@@ -671,31 +689,31 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// empty should be easy. lets start there
 	if (space_for_en_in_coinbase) {
 		// we'll start the empty coinb2 with the "sequence"
-		pk_u64le(s->coinbase[0].coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
+		pk_u64le(hex[0].coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
 		cb2idx[0] = 8;
-		cb2idx[0] += append_bitcoin_varint_hex(2, &s->coinbase[0].coinb2[cb2idx[0]]); // us and witness commit
+		cb2idx[0] += append_bitcoin_varint_hex(2, &hex[0].coinb2[cb2idx[0]]); // us and witness commit
 		
 		if (empty_only) {
 			// copy the beginning to the subsidy-only
-			memcpy(&s->subsidy_only_coinbase.coinb1[0], &s->coinbase[0].coinb1[0], cb1idx[0]);
-			pk_u64le(s->subsidy_only_coinbase.coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
-			append_bitcoin_varint_hex(1, &s->subsidy_only_coinbase.coinb2[8]); // just us!
+			memcpy(&subsidy_hex->coinb1[0], &hex[0].coinb1[0], cb1idx[0]);
+			pk_u64le(subsidy_hex->coinb2, 0, 0x6666666666666666ULL);  // "ffffffff"
+			append_bitcoin_varint_hex(1, &subsidy_hex->coinb2[8]); // just us!
 		}
 	} else {
 		// we're already at the point in coinb1 where we need an output count, which will be 3
 		if (empty_only) {
 			j = cb1idx[0];
 		}
-		cb1idx[0] += append_bitcoin_varint_hex(3, &s->coinbase[0].coinb1[cb1idx[0]]); // extranonce, us, and witness commit
+		cb1idx[0] += append_bitcoin_varint_hex(3, &hex[0].coinb1[cb1idx[0]]); // extranonce, us, and witness commit
 		
 		// append extranonce op_return
-		cb1idx[0] += sprintf(&s->coinbase[0].coinb1[cb1idx[0]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
+		cb1idx[0] += sprintf(&hex[0].coinb1[cb1idx[0]], "0000000000000000106a0e%04" PRIx16, s->enprefix);
 		
 		if (empty_only) {
 			// copy the beginning to the subsidy-only
-			memcpy(&s->subsidy_only_coinbase.coinb1[0], &s->coinbase[0].coinb1[0], cb1idx[0]);
-			k = append_bitcoin_varint_hex(2, &s->subsidy_only_coinbase.coinb1[j]); // extranonce and us
-			s->subsidy_only_coinbase.coinb1[j+k] = s->coinbase[0].coinb1[j+k];
+			memcpy(&subsidy_hex->coinb1[0], &hex[0].coinb1[0], cb1idx[0]);
+			k = append_bitcoin_varint_hex(2, &subsidy_hex->coinb1[j]); // extranonce and us
+			subsidy_hex->coinb1[j+k] = hex[0].coinb1[j+k];
 		}
 	}
 	// finish off "empty" coinbase
@@ -705,10 +723,10 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		j = cb2idx[0];
 	}
 	
-	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "%016llx", (unsigned long long)__builtin_bswap64(s->coinbase_value)); // TODO: Profile a faster way to do this
-	cb2idx[0] += append_bitcoin_varint_hex(s->pool_addr_script_len, &s->coinbase[0].coinb2[cb2idx[0]]); // Append script length
+	cb2idx[0] += sprintf(&hex[0].coinb2[cb2idx[0]], "%016llx", (unsigned long long)__builtin_bswap64(s->coinbase_value)); // TODO: Profile a faster way to do this
+	cb2idx[0] += append_bitcoin_varint_hex(s->pool_addr_script_len, &hex[0].coinb2[cb2idx[0]]); // Append script length
 	for(i=0;i<s->pool_addr_script_len;i++) {
-		uchar_to_hex(&s->coinbase[0].coinb2[cb2idx[0]], s->pool_addr_script[i]);
+		uchar_to_hex(&hex[0].coinb2[cb2idx[0]], s->pool_addr_script[i]);
 		cb2idx[0]+=2;
 	}
 	
@@ -718,15 +736,15 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	
 	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
-	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
+	cb2idx[0] += sprintf(&hex[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
-	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "00000000");
+	cb2idx[0] += sprintf(&hex[0].coinb2[cb2idx[0]], "00000000");
 	
 	if (empty_only) {
 		// Append the subsidy-only payout to the subsidy_only_coinbase
-		sprintf(&s->subsidy_only_coinbase.coinb2[j], "%016llx", (unsigned long long)__builtin_bswap64(block_reward(s->height))); // subsidy calc for height
-		memcpy(&s->subsidy_only_coinbase.coinb2[j+16], &s->coinbase[0].coinb2[j+16], k-j-16);
-		sprintf(&s->subsidy_only_coinbase.coinb2[k], "00000000");
+		sprintf(&subsidy_hex->coinb2[j], "%016llx", (unsigned long long)__builtin_bswap64(block_reward(s->height))); // subsidy calc for height
+		memcpy(&subsidy_hex->coinb2[j+16], &hex[0].coinb2[j+16], k-j-16);
+		sprintf(&subsidy_hex->coinb2[k], "00000000");
 	}
 	
 	// End of 0 / Empty
@@ -735,8 +753,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	if (empty_only) {
 		// copy empty coinbaser to the others
 		for (i=1;i<MAX_COINBASE_TYPES;i++) {
-			strcpy(s->coinbase[i].coinb1, s->coinbase[0].coinb1);
-			strcpy(s->coinbase[i].coinb2, s->coinbase[0].coinb2);
+			strcpy(hex[i].coinb1, hex[0].coinb1);
+			strcpy(hex[i].coinb2, hex[0].coinb2);
 		}
 	} else {
 		// ok, let's figure out how much space, if any, we have for miner payout outputs
@@ -772,55 +790,35 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		
 		// TYPE 1 - "Nicehash" friendly, max 500 bytes
 		i = datum_stratum_coinbase_fit_to_template(500, cb_req_sz[1], s);
-		generate_coinbase_txns_for_stratum_job_subtypebysize(s, 1, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
+		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 1, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
 		
 		// TYPE 3 - "Whatsminer" friendly, max 6500 bytes
 		i = datum_stratum_coinbase_fit_to_template(6500, cb_req_sz[3], s);
-		generate_coinbase_txns_for_stratum_job_subtypebysize(s, 3, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
+		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 3, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
 		
 		// TYPE 4 - "YUGE", max 16KB
 		i = datum_stratum_coinbase_fit_to_template(16000, cb_req_sz[4], s);
-		generate_coinbase_txns_for_stratum_job_subtypebysize(s, 4, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
+		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 4, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
 		
 		// TYPE 5 - "Antminer 2", max 2250 bytes
 		i = datum_stratum_coinbase_fit_to_template(2250, cb_req_sz[5], s);
-		generate_coinbase_txns_for_stratum_job_subtypebysize(s, 5, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
+		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 5, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
 		
 		// TYPE 2 - Older Antminer stock (S19)
 		i = datum_stratum_coinbase_fit_to_template(755, cb_req_sz[2], s);
-		generate_coinbase_txns_for_stratum_job_subtypebysize(s, 2, i, false, cb1idx, cb2idx, true);
+		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 2, i, false, cb1idx, cb2idx, true);
 	}
 	
 	// prep binary versions of the coinbase for speeding up later
 	for(k=0;k<MAX_COINBASE_TYPES;k++) {
-		i = strlen(s->coinbase[k].coinb1);
-		s->coinbase[k].coinb1_len = 0;
-		for(j=0;j<i;j+=2) {
-			s->coinbase[k].coinb1_bin[j>>1] = hex2bin_uchar(&s->coinbase[k].coinb1[j]);
-			s->coinbase[k].coinb1_len++;
-		}
-		i = strlen(s->coinbase[k].coinb2);
-		s->coinbase[k].coinb2_len = 0;
-		for(j=0;j<i;j+=2) {
-			s->coinbase[k].coinb2_bin[j>>1] = hex2bin_uchar(&s->coinbase[k].coinb2[j]);
-			s->coinbase[k].coinb2_len++;
-		}
+		datum_coinbase_hex_to_bin(&s->coinbase[k], &hex[k]);
 	}
 	
 	if (empty_only) {
-		i = strlen(s->subsidy_only_coinbase.coinb1);
-		s->subsidy_only_coinbase.coinb1_len = 0;
-		for(j=0;j<i;j+=2) {
-			s->subsidy_only_coinbase.coinb1_bin[j>>1] = hex2bin_uchar(&s->subsidy_only_coinbase.coinb1[j]);
-			s->subsidy_only_coinbase.coinb1_len++;
-		}
-		i = strlen(s->subsidy_only_coinbase.coinb2);
-		s->subsidy_only_coinbase.coinb2_len = 0;
-		for(j=0;j<i;j+=2) {
-			s->subsidy_only_coinbase.coinb2_bin[j>>1] = hex2bin_uchar(&s->subsidy_only_coinbase.coinb2[j]);
-			s->subsidy_only_coinbase.coinb2_len++;
-		}
+		datum_coinbase_hex_to_bin(&s->subsidy_only_coinbase, subsidy_hex);
 	}
+	
+	free(hex);
 
 	datum_stratum_job_refresh_blake2b(s);
 }

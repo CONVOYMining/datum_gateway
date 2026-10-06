@@ -103,9 +103,9 @@
 ////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////
 
+// coinb1 and coinb2 in binary. The coinbaser builds them in ascii hex in a
+// T_DATUM_COINBASE_HEX it allocates per call.
 typedef struct {
-	char coinb1[STRATUM_COINBASE1_MAX_LEN];
-	char coinb2[STRATUM_COINBASE2_MAX_LEN];
 	unsigned char coinb1_bin[STRATUM_COINBASE1_MAX_LEN>>1];
 	unsigned char coinb2_bin[STRATUM_COINBASE2_MAX_LEN>>1];
 	
