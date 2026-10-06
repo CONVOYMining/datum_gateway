@@ -237,11 +237,11 @@ int main(const int argc, const char * const * const argv) {
 	}
 	
 	DLOG_DEBUG("Starting template fetcher thread");
-	pthread_create(&pthread_datum_gateway_template, NULL, datum_gateway_template_thread, NULL);
+	datum_thread_create(&pthread_datum_gateway_template, datum_gateway_template_thread, NULL);
 	
 	// Note: The stratum thread will wait for a template to be available for some time before panicking.
 	DLOG_DEBUG("Starting Stratum v1 server");
-	pthread_create(&pthread_datum_stratum_v1, NULL, datum_stratum_v1_socket_server, NULL);
+	datum_thread_create(&pthread_datum_stratum_v1, datum_stratum_v1_socket_server, NULL);
 	
 	// Randomize the reconnect delay from 5 to 20 seconds to prevent hammering the server
 	next_reconnect_attempt_ms = ( 5000 + (rand() % 15001) );
