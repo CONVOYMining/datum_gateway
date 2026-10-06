@@ -63,8 +63,8 @@ volatile bool log_reopen_signal = false;
 // configurable options
 bool log_to_file = false;
 bool log_to_console = true;
-int log_level_console = DLOG_LEVEL_INFO;
-int log_level_file = DLOG_LEVEL_ALL;
+enum datum_loglevel log_level_console = DLOG_LEVEL_INFO;
+enum datum_loglevel log_level_file = DLOG_LEVEL_ALL;
 bool log_calling_function = true;
 bool log_to_stderr = false;
 bool log_rotate_daily = true;
@@ -85,6 +85,12 @@ uint64_t dlog_queue_version[2] = { 0, 10 };
 int msg_buf_idx[2] = { 0, 0 };
 char *msg_buffer[2] = { NULL, NULL };
 
+static inline enum datum_loglevel datum_logger_clamp_loglevel(int level) {
+	if (level < 0) return 0;
+	if (level > DLOG_LEVEL_FATAL) return DLOG_LEVEL_FATAL;
+	return level;
+}
+
 void datum_logger_config(
 	bool clog_to_file,
 	bool clog_to_console,
@@ -97,22 +103,16 @@ void datum_logger_config(
 ) {
 	log_to_file = clog_to_file;
 	log_to_console = clog_to_console;
-	log_level_console = clog_level_console;
-	log_level_file = clog_level_file;
+	log_level_console = datum_logger_clamp_loglevel(clog_level_console);
+	log_level_file = datum_logger_clamp_loglevel(clog_level_file);
 	log_calling_function = clog_calling_function;
 	log_to_stderr = clog_to_stderr;
 	log_rotate_daily = clog_rotate_daily;
 	strncpy(log_file, clog_file, 1023);
 	log_file[1023] = 0;
-	
-	if (log_level_console < 0) log_level_console = 0;
-	if (log_level_console > DLOG_LEVEL_FATAL) log_level_console = DLOG_LEVEL_FATAL;
-	
-	if (log_level_file < 0) log_level_file = 0;
-	if (log_level_file > DLOG_LEVEL_FATAL) log_level_file = DLOG_LEVEL_FATAL;
 }
 
-int datum_logger_queue_msg(const char *func, int level, const char *format, ...) {
+int datum_logger_queue_msg(const char *func, enum datum_loglevel level, const char *format, ...) {
 	int buffer_id, i;
 	uint64_t buffer_version;
 	DLOG_MSG *msg = NULL;

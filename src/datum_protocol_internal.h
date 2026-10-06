@@ -48,7 +48,9 @@ extern unsigned char datum_state;
 extern int server_out_buf;
 extern unsigned char server_send_buffer[DATUM_PROTOCOL_BUFFER_SIZE];
 extern uint32_t sending_header_key;
+extern uint32_t receiving_header_key;
 extern unsigned char session_nonce_sender[crypto_box_NONCEBYTES];
+extern atomic_bool datum_framing_v2;
 extern atomic_bool datum_protocol_bulk_enabled;
 extern size_t datum_replay_count;
 extern atomic_uint_fast64_t datum_session_generation;
@@ -56,6 +58,7 @@ extern unsigned char datum_protocol_next_job_idx;
 extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
 
 uint32_t datum_header_xor_feedback(uint32_t i);
+void datum_header_upk(T_DATUM_PROTOCOL_HEADER *h, const uint8_t *src, size_t offset, uint32_t *xor_key);
 int datum_protocol_flush_socket(int sockfd);
 void datum_protocol_bulk_reset(void);
 int datum_protocol_bulk_cmd_for_session(
@@ -87,6 +90,8 @@ int datum_protocol_abw_reveal(int len, unsigned char *data);
 
 int datum_protocol_mining_cmd(void *data, int len);
 int datum_protocol_client_configure(int len, unsigned char *data);
+int datum_protocol_send_hello(int sockfd);
+int datum_protocol_server_msg(T_DATUM_PROTOCOL_HEADER *header, unsigned char *data);
 int datum_protocol_mining_cmd5(
 	T_DATUM_PROTOCOL_HEADER *header, unsigned char *data);
 int datum_protocol_share_response(int len, unsigned char *data);
