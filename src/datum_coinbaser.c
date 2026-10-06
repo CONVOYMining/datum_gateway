@@ -568,8 +568,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// Account for available vsize, sigops, size, weight, etc
 	
 	// Note:
-	// With a minimum payout of 10 TBC, the largest likely coinbase as of height 840000 is around 16 KB if we paid every miner the minimum to a long address type.
-	// This seems highly unlikely.  16KB is more than sufficient.
+	// MAX_DICTATED_COINBASE_SIZE bounds the generation transaction; the
+	// template's room and MAX_COINBASER_OUTPUTS usually bound it first.
 	
 	int i, j, k;
 	char cb[300];
@@ -642,7 +642,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// 1 = "nicehash" --- roughly 500 bytes total... smaller than antminer... has nothing before the extranonce OP_RETURN (or no extranonce OP_RETURN if enough space in the coinbase)
 	// 2 = "antminer" --- roughly 730 bytes max size, using a larger coinb1 and UART sync bits.  This also works as a good default.
 	// 3 = "whatsminer" --- max 6500 bytes tested.  does not need the extranonce OP_RETURN unless there's no space in the coinbase itself after tags
-	// 4 = "huge" --- max 16kB --- this is probably the most we should reasonably attempt to do in the coinbase... something like 380 to 530 outputs, depending on the type of output
+	// 4 = "huge" --- max MAX_DICTATED_COINBASE_SIZE --- about 740 to 1030 outputs, depending on the type of output
 	// 5 = "antminer2" --- max 2250 bytes --- latest S21s appear to support this
 	
 	// only type 2 *needs* the OP_RETURN extranonce, unless the coinbase itself is too long
@@ -796,8 +796,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		i = datum_stratum_coinbase_fit_to_template(6500, cb_req_sz[3], s);
 		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 3, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
 		
-		// TYPE 4 - "YUGE", max 16KB
-		i = datum_stratum_coinbase_fit_to_template(16000, cb_req_sz[4], s);
+		// TYPE 4 - "YUGE", max MAX_DICTATED_COINBASE_SIZE
+		i = datum_stratum_coinbase_fit_to_template(MAX_DICTATED_COINBASE_SIZE, cb_req_sz[4], s);
 		generate_coinbase_txns_for_stratum_job_subtypebysize(s, hex, 4, i, space_for_en_in_coinbase, cb1idx, cb2idx, false);
 		
 		// TYPE 5 - "Antminer 2", max 2250 bytes
@@ -878,7 +878,7 @@ int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, i
 		
 		cbvalid++;
 		
-		if (cbvalid >= 512) break; // limitation of datum for now
+		if (cbvalid >= MAX_COINBASER_OUTPUTS) break; // the job's output list is this long
 	}
 	
 	s->datum_coinbaser_id = datum_id;

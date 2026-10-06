@@ -40,23 +40,37 @@
 #include <stdint.h>
 
 #ifndef T_DATUM_CLIENT_DATA
-	#include "datum_sockets.h"
+#include "datum_sockets.h"
 #endif
 
 #ifndef T_DATUM_TEMPLATE_DATA
-	#include "datum_blocktemplates.h"
+#include "datum_blocktemplates.h"
 #endif
 
 #define MAX_STRATUM_JOBS 256
 
 #define MAX_COINBASE_TYPES 6
 #define DATUM_COINBASE_ID_EMPTY 0xff
-#define COINBASE_TYPE_TINY 0 // "empty", just pays pool
-#define COINBASE_TYPE_SMALL 1 // Nicehash needs a tiny coinb1, among other things. Max 500 bytes.
-#define COINBASE_TYPE_ANTMAIN 2 // Hack for antminer stock firmware to 750 bytes
+#define COINBASE_TYPE_TINY 0		// "empty", just pays pool
+#define COINBASE_TYPE_SMALL 1		// Nicehash needs a tiny coinb1, among other things. Max 500 bytes.
+#define COINBASE_TYPE_ANTMAIN 2		// Hack for antminer stock firmware to 750 bytes
 #define COINBASE_TYPE_RESPECTABLE 3 // 6500 byte max (whatsminers)
-#define COINBASE_TYPE_YUGE 4 // 16KB max (ePIC, bitaxe)
-#define COINBASE_TYPE_ANTMAIN2 5 // 2.25KB max (S21, +?)
+#define COINBASE_TYPE_YUGE 4		// MAX_DICTATED_COINBASE_SIZE max
+#define COINBASE_TYPE_ANTMAIN2 5	// 2.25KB max (S21, +?)
+
+// The largest generation transaction this gateway builds, in bytes, and the
+// size of COINBASE_TYPE_YUGE. It holds about 1030 P2WPKH outputs (31 bytes
+// each) or 740 taproot outputs (43 bytes each), and keeps coinb2 inside
+// STRATUM_COINBASE2_MAX_LEN. datum_stratum_coinbase_fit_to_template cuts it to
+// what the template's size, weight and the block's sigop limit leave, which
+// with the node's default -blockreservedweight of 8000 weight units is about
+// 1800 bytes on a full block: raise -blockreservedweight to 4x the coinbase
+// wanted.
+#define MAX_DICTATED_COINBASE_SIZE 32000
+
+// The dictated outputs one coinbaser response may carry, and the size of the
+// job's parsed output list. Matches RATUM's MAX_COINBASER_OUTPUTS.
+#define MAX_COINBASER_OUTPUTS 1024
 
 // Submitblock json rpc command max size is max block size * 2 for ascii plus some breathing room
 #define MAX_SUBMITBLOCK_SIZE 8500000
@@ -105,24 +119,27 @@
 
 // coinb1 and coinb2 in binary. The coinbaser builds them in ascii hex in a
 // T_DATUM_COINBASE_HEX it allocates per call.
-typedef struct {
-	unsigned char coinb1_bin[STRATUM_COINBASE1_MAX_LEN>>1];
-	unsigned char coinb2_bin[STRATUM_COINBASE2_MAX_LEN>>1];
-	
+typedef struct
+{
+	unsigned char coinb1_bin[STRATUM_COINBASE1_MAX_LEN >> 1];
+	unsigned char coinb2_bin[STRATUM_COINBASE2_MAX_LEN >> 1];
+
 	int coinb1_len;
 	int coinb2_len;
 } T_DATUM_STRATUM_COINBASE;
 
-typedef struct {
+typedef struct
+{
 	unsigned char output_script[64];
 	int output_script_len;
 	uint64_t value_sats;
 	int sigops;
 } T_DATUM_TXN_OUTPUT;
 
-typedef struct T_DATUM_STRATUM_JOB {
+typedef struct T_DATUM_STRATUM_JOB
+{
 	int global_index;
-	
+
 	char job_id[24];
 	char prevhash[68];
 	unsigned char prevhash_bin[32];
@@ -136,51 +153,52 @@ typedef struct T_DATUM_STRATUM_JOB {
 	// BLAKE2b job fields
 	uint32_t blake2b_time_on_wire;
 	uint8_t blake2b_flags;
-	
+
 	T_DATUM_TEMPLATE_DATA *block_template;
-	
+
 	unsigned char merklebranch_count;
 	char merklebranches_hex[24][72];
 	unsigned char merklebranches_bin[24][32];
-	
+
 	char merklebranches_full[4096];
-	
+
 	// when fetching the coinbaser, we'll just stash all of the possible and valid output scripts here
-	T_DATUM_TXN_OUTPUT available_coinbase_outputs[512];
+	T_DATUM_TXN_OUTPUT available_coinbase_outputs[MAX_COINBASER_OUTPUTS];
 	int available_coinbase_outputs_count;
 	uint8_t pool_addr_script[MAX_OUTPUT_SCRIPT_LEN];
 	uint8_t pool_addr_script_len;
-	
+
 	// multiple coinbase options
 	// 0 = "empty" --- just pays pool addr, and possibly TIDES data.  extranonce in coinbase if fits, or in first output if not.
 	// 1 = "nicehash" --- roughly 500 bytes total... smaller than antminer... has nothing before the extranonce OP_RETURN (or no extranonce OP_RETURN if enough space in the coinbase)
 	// 2 = "antminer" --- roughly 730 bytes max size, using a larger coinb1 and UART sync bits.  This also works as a good default.
 	// 3 = "whatsminer" --- max 6500 bytes tested.  does not need the extranonce OP_RETURN unless there's no space in the coinbase itself after tags
-	// 4 = "huge" --- max 16kB --- this is probably the most we should reasonably attempt to do in the coinbase... something like 380 to 530 outputs, depending on the type of output
+	// 4 = "huge" --- max MAX_DICTATED_COINBASE_SIZE --- about 740 to 1030 outputs, depending on the type of output
 	// 5 = "antminer2" --- max 2250 bytes --- latest S21s appear to support this
 	T_DATUM_STRATUM_COINBASE coinbase[MAX_COINBASE_TYPES];
 	T_DATUM_STRATUM_COINBASE subsidy_only_coinbase;
 	int target_pot_index; // where in coinb1 do we put our per-user vardiff pot value?
-	
+
 	uint64_t coinbase_value;
 	uint64_t height;
 	uint16_t enprefix;
-	
+
 	uint64_t tsms; // local timestamp for when job was created. can differ from the bitcoin network timestamp.
-	
+
 	bool is_new_block;
 	bool is_stale_prevblock;
-	
+
 	int job_state;
-	
+
 	bool need_coinbaser;
-	
+
 	bool is_datum_job;
 	unsigned char datum_job_idx;
 	unsigned char datum_coinbaser_id;
 } T_DATUM_STRATUM_JOB;
 
-typedef struct T_DATUM_STRATUM_THREADPOOL_DATA {
+typedef struct T_DATUM_STRATUM_THREADPOOL_DATA
+{
 	T_DATUM_STRATUM_JOB *cur_stratum_job;
 	int latest_stratum_job_index;
 	bool new_job;
@@ -188,7 +206,7 @@ typedef struct T_DATUM_STRATUM_THREADPOOL_DATA {
 	int last_sent_job_state;
 	uint64_t loop_tsms;
 	bool full_coinbase_ready;
-	
+
 	int notify_remaining_count;
 	uint64_t notify_start_time;
 	uint64_t notify_last_time;
@@ -196,67 +214,69 @@ typedef struct T_DATUM_STRATUM_THREADPOOL_DATA {
 	int notify_last_cid;
 	uint64_t last_job_height;
 	uint64_t next_kick_check_tsms;
-	
+
 	char submitblock_req[MAX_SUBMITBLOCK_SIZE];
-	
+
 	void *dupes;
 } T_DATUM_STRATUM_THREADPOOL_DATA;
 
-typedef struct {
+typedef struct
+{
 	unsigned char active_index; // the one we're adding to.  use the other for stats
-	
+
 	uint64_t last_swap_tsms; // timestamp of last swap
-	uint64_t last_swap_ms; // length of time for the last
-	
+	uint64_t last_swap_ms;	 // length of time for the last
+
 	uint64_t diff_accepted[2];
-	
+
 	uint64_t last_share_tsms;
 } T_DATUM_STRATUM_USER_STATS;
 
-typedef struct {
+typedef struct
+{
 	uint32_t sid, sid_inv;
 	uint64_t unique_id;
 	uint64_t connect_tsms;
 	char request_id_json[129];
 	char useragent[128];
 	char last_auth_username[192];
-	
+
 	bool extension_minimum_difficulty;
 	double extension_minimum_difficulty_value;
-	
+
 	bool authorized;
 	bool subscribed;
 	uint64_t subscribe_tsms;
-	
+
 	uint64_t last_sent_diff;
 	uint64_t current_diff;
-	
+
 	uint8_t stratum_job_targets[MAX_STRATUM_JOBS][32];
 	uint64_t stratum_job_diffs[MAX_STRATUM_JOBS];
-	
+
 	unsigned char coinbase_selection;
-	
+
 	uint64_t share_diff_accepted;
 	uint64_t share_count_accepted;
-	
+
 	uint64_t share_diff_rejected;
 	uint64_t share_count_rejected;
-	
+
 	// for vardiff
 	uint64_t share_count_since_snap;
 	uint64_t share_diff_since_snap;
 	uint64_t share_snap_tsms;
-	
+
 	bool quickdiff_active;
 	uint64_t quickdiff_value;
 	uint8_t quickdiff_target[32];
-	
+
 	uint64_t forced_high_min_diff;
-	
+
 	int last_sent_stratum_job_index;
-	
+
 	T_DATUM_STRATUM_USER_STATS stats;
-	
+
 	T_DATUM_STRATUM_THREADPOOL_DATA *sdata;
 } T_DATUM_MINER_DATA;
 
@@ -279,14 +299,14 @@ int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t 
 size_t datum_stratum_coinbase_for_block_hex(char *out, size_t out_size, const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness);
 bool datum_stratum_block_needs_witness(const T_DATUM_STRATUM_JOB *job, bool subsidy_only);
 size_t datum_stratum_build_block_request_parts(char *out, size_t out_size,
-	const uint8_t *block_header,
-	const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness,
-	uint32_t transaction_count, const char *transactions_hex,
-	size_t transactions_hex_size, bool subsidy_only, size_t *header_hex_offset);
+											   const uint8_t *block_header,
+											   const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness,
+											   uint32_t transaction_count, const char *transactions_hex,
+											   size_t transactions_hex_size, bool subsidy_only, size_t *header_hex_offset);
 bool datum_stratum_abw_finalize_block_request(char *request, size_t request_size,
-	size_t header_hex_offset, const uint8_t raw_pow_hash[32],
-	uint8_t xor_clear_bits, const uint8_t xor_key[16],
-	const uint8_t expected_pow_hash[32], char block_hash_hex[65]);
+											  size_t header_hex_offset, const uint8_t raw_pow_hash[32],
+											  uint8_t xor_clear_bits, const uint8_t xor_key[16],
+											  const uint8_t expected_pow_hash[32], char block_hash_hex[65]);
 void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_only);
 int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c);
 bool stratum_latest_empty_check_ready_for_full(void);
