@@ -2075,6 +2075,11 @@ static const char *datum_protocol_share_reject_reason_name(const unsigned int re
 		case DATUM_REJECT_DUPLICATE_WORK: return "duplicate_work";
 		case DATUM_REJECT_OTHER: return "other";
 		case DATUM_REJECT_RECONSTRUCTION_MISMATCH: return "reconstruction_mismatch";
+		case DATUM_REJECT_BAD_BLAKE2B_SECTION: return "bad_blake2b_section";
+		case DATUM_REJECT_HEADER_FIELD_MISMATCH: return "header_field_mismatch";
+		case DATUM_REJECT_HEADER_MERKLE_MISMATCH: return "header_merkle_mismatch";
+		case DATUM_REJECT_NO_SPLIT: return "no_split";
+		case DATUM_REJECT_BAD_ABW_SLOT: return "bad_abw_slot";
 		default: return "unknown";
 	}
 }
