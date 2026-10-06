@@ -130,8 +130,8 @@ static inline
 uint16_t upk_u16le(const void * const bufp, const int offset)
 {
 	const uint8_t * const buf = bufp;
-	return (((uint16_t)buf[offset+0]) <<    0)
-	     | (((uint16_t)buf[offset+1]) <<    8);
+	return (uint16_t)buf[offset+0]
+	     | (uint16_t)(((uint16_t)buf[offset+1]) << 8);
 }
 
 static inline
