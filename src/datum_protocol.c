@@ -2051,6 +2051,34 @@ static void datum_protocol_add_share_diff(uint64_t *total, unsigned char pot) {
 	}
 }
 
+static const char *datum_protocol_share_reject_reason_name(const unsigned int reason) {
+	switch (reason) {
+		case DATUM_REJECT_BAD_JOB_ID: return "bad_job_id";
+		case DATUM_REJECT_BAD_COINBASE_ID: return "bad_coinbase_id";
+		case DATUM_REJECT_BAD_EXTRANONCE_SIZE: return "bad_extranonce_size";
+		case DATUM_REJECT_BAD_TARGET: return "bad_target";
+		case DATUM_REJECT_BAD_USERNAME: return "bad_username";
+		case DATUM_REJECT_BAD_COINBASER_ID: return "bad_coinbaser_id";
+		case DATUM_REJECT_BAD_MERKLE_COUNT: return "bad_merkle_count";
+		case DATUM_REJECT_BAD_COINBASE_TOO_LARGE: return "coinbase_too_large";
+		case DATUM_REJECT_COINBASE_MISSING: return "coinbase_missing";
+		case DATUM_REJECT_TARGET_MISMATCH: return "target_mismatch";
+		case DATUM_REJECT_H_NOT_ZERO: return "h_not_zero";
+		case DATUM_REJECT_HIGH_HASH: return "high_hash";
+		case DATUM_REJECT_COINBASE_ID_MISMATCH: return "coinbase_id_mismatch";
+		case DATUM_REJECT_BAD_NTIME: return "bad_ntime";
+		case DATUM_REJECT_BAD_VERSION: return "bad_version";
+		case DATUM_REJECT_STALE_BLOCK: return "stale_block";
+		case DATUM_REJECT_BAD_COINBASE: return "bad_coinbase";
+		case DATUM_REJECT_BAD_COINBASE_OUTPUTS: return "bad_coinbase_outputs";
+		case DATUM_REJECT_MISSING_POOL_TAG: return "missing_pool_tag";
+		case DATUM_REJECT_DUPLICATE_WORK: return "duplicate_work";
+		case DATUM_REJECT_OTHER: return "other";
+		case DATUM_REJECT_RECONSTRUCTION_MISMATCH: return "reconstruction_mismatch";
+		default: return "unknown";
+	}
+}
+
 // TODO: Ensure all shares are responded to!  Currently this has no bearing on anything, just logging
 int datum_protocol_share_response(const int len, unsigned char * const data) {
 	if (len < 9) {
@@ -2079,8 +2107,8 @@ int datum_protocol_share_response(const int len, unsigned char * const data) {
 		case DATUM_POW_SHARE_RESPONSE_REJECTED: {
 			const unsigned int reject_reason = upk_u16le(data, 1);
 			const enum datum_loglevel loglevel = (reject_reason == DATUM_REJECT_STALE_BLOCK) ? DLOG_LEVEL_DEBUG : DLOG_LEVEL_ERROR;
-			DLOG(loglevel, "DATUM server rejected our share!  Reason code: %u / TargetPOT: %2.2x / Job ID: %u / Nonce: %8.8x",
-			           reject_reason,
+			DLOG(loglevel, "DATUM server rejected our share!  Reason: %s (%u) / TargetPOT: %2.2x / Job ID: %u / Nonce: %8.8x",
+			           datum_protocol_share_reject_reason_name(reject_reason), reject_reason,
 			           target_pot,
 			           job_id,
 			           nonce);
