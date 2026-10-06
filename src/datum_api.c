@@ -670,8 +670,6 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 
 int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 	struct MHD_Response *response;
-	char output[1024];
-	int sz = 0;
 	json_t *root, *cmd, *param;
 	json_error_t error;
 	const char *cstr;
@@ -762,8 +760,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 		}
 	}
 	
-	sprintf(output, "{}");
-	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_COPY);
+	response = MHD_create_response_from_buffer(2, "{}", MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", "application/json");
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
