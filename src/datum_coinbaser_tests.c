@@ -244,6 +244,52 @@ static void datum_blake2b_coinbase_sigops_tests(void) {
 	free(job);
 }
 
+/* A split of MAX_COINBASER_OUTPUTS P2WPKH outputs, 31 bytes each, fits one
+ * coinbase: the output count is written as a three-byte varint and the hex of
+ * coinb2 stays inside STRATUM_COINBASE2_MAX_LEN. */
+static void datum_blake2b_large_coinbase_tests(void) {
+	T_DATUM_TEMPLATE_DATA tdata;
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
+	T_DATUM_COINBASE_HEX *hex = calloc(MAX_COINBASE_TYPES, sizeof(*hex));
+	int cb1idx[MAX_COINBASE_TYPES] = {0};
+	int cb2idx[MAX_COINBASE_TYPES] = {0};
+	size_t cb_bytes;
+	int k;
+
+	datum_test(job != NULL && hex != NULL);
+	if (!job || !hex) {
+		free(job);
+		free(hex);
+		return;
+	}
+	memset(&tdata, 0, sizeof(tdata));
+	tdata.sigoplimit = 80000;
+	job->block_template = &tdata;
+	job->coinbase_value = 5000000000ULL;
+	memcpy(job->pool_addr_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
+	job->pool_addr_script_len = sizeof(datum_test_p2wpkh_script);
+	for (k = 0; k < MAX_COINBASER_OUTPUTS; k++) {
+		job->available_coinbase_outputs[k].value_sats = 1000;
+		memcpy(job->available_coinbase_outputs[k].output_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
+		job->available_coinbase_outputs[k].output_script_len = sizeof(datum_test_p2wpkh_script);
+		job->available_coinbase_outputs[k].sigops = 0;
+	}
+	job->available_coinbase_outputs_count = MAX_COINBASER_OUTPUTS;
+
+	generate_coinbase_txns_for_stratum_job_subtypebysize(
+		job, hex, COINBASE_TYPE_YUGE, MAX_COINBASER_OUTPUTS * 31, true, cb1idx, cb2idx, false);
+
+	/* MAX_COINBASER_OUTPUTS dictated outputs, the pool output and the witness
+	 * commitment: 2050, written as fd followed by 0x0802 little-endian. */
+	datum_test(!strncmp(hex[COINBASE_TYPE_YUGE].coinb2 + 8, "fd0208", 6));
+	datum_test(strlen(hex[COINBASE_TYPE_YUGE].coinb2) < STRATUM_COINBASE2_MAX_LEN);
+	cb_bytes = (strlen(hex[COINBASE_TYPE_YUGE].coinb1) +
+		strlen(hex[COINBASE_TYPE_YUGE].coinb2)) / 2 + 12;
+	datum_test(cb_bytes > 63000 && cb_bytes <= MAX_DICTATED_COINBASE_SIZE);
+	free(hex);
+	free(job);
+}
+
 /* The job keeps the binary of the hex the builder writes, as one transaction:
  * coinb1, 12 zero extranonce bytes, coinb2. With no pool connected the job is
  * built empty: class 0 is version 1 and one input in coinb1, then in coinb2
@@ -319,5 +365,6 @@ void datum_coinbaser_tests(void) {
 	datum_blake2b_coinbase_sigops_tests();
 	datum_script_sigop_cost_tests();
 	datum_coinbaser_parse_sigops_tests();
+	datum_blake2b_large_coinbase_tests();
 	datum_coinbase_binary_parts_tests();
 }
