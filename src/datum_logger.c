@@ -463,7 +463,7 @@ int datum_logger_init(void) {
 	
 	pthread_t pthread_datum_logger_thread;
 	
-	pthread_create(&pthread_datum_logger_thread, NULL, datum_logger_thread, NULL);
+	datum_thread_create(&pthread_datum_logger_thread, datum_logger_thread, NULL);
 	
 	return 0;
 }

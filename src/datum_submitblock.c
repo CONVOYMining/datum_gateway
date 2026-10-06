@@ -188,6 +188,6 @@ bool datum_submitblock_trigger_owned(char *ptr, const char *hash) {
 void datum_submitblock_init(void) {
 	// TODO: Handle rare issues.
 	pthread_t pthread_datum_submitblock_thread;
-	pthread_create(&pthread_datum_submitblock_thread, NULL, datum_submitblock_thread, NULL);
+	datum_thread_create(&pthread_datum_submitblock_thread, datum_submitblock_thread, NULL);
 	return;
 }

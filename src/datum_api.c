@@ -1573,7 +1573,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 		DLOG_INFO("Config change requires restarting gateway, proceeding");
 		struct MHD_Daemon * const mhd = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_DAEMON)->daemon;
 		pthread_t pthread_datum_restart_thread;
-		pthread_create(&pthread_datum_restart_thread, NULL, datum_restart_thread, mhd);
+		datum_thread_create(&pthread_datum_restart_thread, datum_restart_thread, mhd);
 	}
 	
 	return ret;
@@ -1908,6 +1908,7 @@ static struct MHD_Daemon *datum_api_try_start(unsigned int flags, const int sock
 	                          MHD_OPTION_CONNECTION_TIMEOUT, (unsigned int)120,
 	                          MHD_OPTION_NOTIFY_COMPLETED, datum_api_request_completed, NULL,
 	                          MHD_OPTION_LISTENING_ADDRESS_REUSE, (unsigned int)1,
+	                          MHD_OPTION_THREAD_STACK_SIZE, (size_t)DATUM_THREAD_STACK_SIZE,
 	                          MHD_OPTION_END);
 }
 
@@ -1947,7 +1948,7 @@ int datum_api_init(void) {
 		DLOG_INFO("INFO: No API port configured. API disabled.");
 		return 0;
 	}
-	pthread_create(&pthread_datum_api_thread, NULL, datum_api_thread, NULL);
+	datum_thread_create(&pthread_datum_api_thread, datum_api_thread, NULL);
 	
 	return 0;
 }

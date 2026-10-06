@@ -356,6 +356,20 @@ void hex_to_bin(const char *hex, unsigned char *bin) {
 	}
 }
 
+// pthread_create with a DATUM_THREAD_STACK_SIZE stack. Returns 0 or the error
+// number from pthread_attr_init, pthread_attr_setstacksize or pthread_create.
+int datum_thread_create(pthread_t *thread, void *(*start_routine)(void *), void *arg) {
+	pthread_attr_t attr;
+	int ret;
+	
+	ret = pthread_attr_init(&attr);
+	if (ret) return ret;
+	ret = pthread_attr_setstacksize(&attr, DATUM_THREAD_STACK_SIZE);
+	if (!ret) ret = pthread_create(thread, &attr, start_routine, arg);
+	pthread_attr_destroy(&attr);
+	return ret;
+}
+
 void panic_from_thread(int a) {
 	// set panic flag
 	panic_mode = 1;

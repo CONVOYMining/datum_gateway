@@ -176,7 +176,7 @@ int datum_parent_fetch_init(const datum_parent_fetch_reply_fn reply) {
 		return -1;
 	}
 	pthread_t thread;
-	if (pthread_create(&thread, NULL, datum_parent_fetch_worker, curl)) {
+	if (datum_thread_create(&thread, datum_parent_fetch_worker, curl)) {
 		curl_easy_cleanup(curl);
 		pthread_mutex_unlock(&parent_fetch_lock);
 		return -1;
