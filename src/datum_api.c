@@ -907,6 +907,10 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	double thr = 0.0;
 	char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
 	
+	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
+		return MHD_YES;
+	}
+	
 	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
 	
 	for (i = 0; i < max_threads; ++i) {
@@ -922,10 +926,6 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	tsms = current_time_millis();
 	
 	sz = snprintf(output, max_sz-1-sz, "%s", www_clients_top_html);
-	
-	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
-		return MHD_YES;
-	}
 	
 	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
 	
