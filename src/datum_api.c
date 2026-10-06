@@ -336,7 +336,7 @@ bool datum_api_fill_vars(const char * const input, struct buf * const buf, const
 				DLOG_ERROR("%s: Missing closing } for variable", __func__);
 				break;
 			}
-			const size_t var_name_len = var_end - var_start;
+			const size_t var_name_len = (size_t)(var_end - var_start);
 			
 			if (!var_fill_func(var_start, var_name_len, buf, vardata)) return false;
 			
@@ -390,7 +390,7 @@ static enum MHD_Result datum_api_formdata_to_json_cb(void * const cls, const enu
 	return MHD_YES;
 }
 
-bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char * const post, const int len, json_t * const j) {
+bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char * const post, const size_t len, json_t * const j) {
 	struct MHD_PostProcessor * const pp = MHD_create_post_processor(connection, 32768, datum_api_formdata_to_json_cb, j);
 	if (!pp) {
 		return false;
@@ -579,12 +579,12 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	const char * const end = &data[size];
 	const char *underscore_pos = memchr(data, '_', size);
 	if (!underscore_pos) return;
-	const size_t tid_size = underscore_pos - data;
+	const size_t tid_size = (size_t)(underscore_pos - data);
 	const int tid = datum_atoi_strict(data, tid_size);
 	const char *p = &underscore_pos[1];
-	underscore_pos = memchr(p, '_', end - p);
+	underscore_pos = memchr(p, '_', (size_t)(end - p));
 	if (!underscore_pos) underscore_pos = end;
-	const int cid = datum_atoi_strict(p, underscore_pos - p);
+	const int cid = datum_atoi_strict(p, (size_t)(underscore_pos - p));
 	
 	// Valid input; unconditionally redirect back to clients dashboard
 	*redirect_p = "/clients";
@@ -596,16 +596,16 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	if (underscore_pos != end) {
 		// Check it's the same client intended
 		p = &underscore_pos[1];
-		underscore_pos = memchr(p, '_', end - p);
+		underscore_pos = memchr(p, '_', (size_t)(end - p));
 		if (!underscore_pos) underscore_pos = end;
-		const uint64_t connect_tsms = datum_atoi_strict_u64(p, underscore_pos - p);
+		const uint64_t connect_tsms = datum_atoi_strict_u64(p, (size_t)(underscore_pos - p));
 		const T_DATUM_MINER_DATA * const m = global_stratum_app->datum_threads[tid].client_data[cid].app_client_data;
 		if (connect_tsms != m->connect_tsms) {
 			DLOG_WARN("API Request to disconnect FORMER stratum client %d/%d (ignored; connect tsms req=%lu vs cur=%lu)", tid, cid, (unsigned long)connect_tsms, (unsigned long)m->connect_tsms);
 			return;
 		}
 		p = &underscore_pos[1];
-		const uint64_t unique_id = datum_atoi_strict_u64(p, end - p);
+		const uint64_t unique_id = datum_atoi_strict_u64(p, (size_t)(end - p));
 		if (unique_id != m->unique_id) {
 			DLOG_WARN("API Request to disconnect FORMER stratum client %d/%d (ignored; unique id req=%lu vs cur=%lu)", tid, cid, (unsigned long)unique_id, (unsigned long)m->unique_id);
 			return;
@@ -614,12 +614,11 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	datum_api_cmd_kill_client(tid, cid);
 }
 
-int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
+int datum_api_cmd(struct MHD_Connection *connection, char *post, size_t len) {
 	struct MHD_Response *response;
 	json_t *root, *cmd, *param;
 	json_error_t error;
 	const char *cstr;
-	int tid,cid;
 	
 	if ((len) && (post)) {
 		DLOG_DEBUG("POST DATA: %s", post);
@@ -642,7 +641,10 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 								if (!strcmp(cstr,"empty_thread")) {
 									param = json_object_get(root, "tid");
 									if (json_is_integer(param)) {
-										datum_api_cmd_empty_thread(json_integer_value(param));
+										const json_int_t tid_json_int = json_integer_value(param);
+										if (tid_json_int <= INT_MAX) {
+											datum_api_cmd_empty_thread((int)tid_json_int);
+										}
 									}
 									break;
 								}
@@ -652,11 +654,13 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 								if (!strcmp(cstr,"kill_client")) {
 									param = json_object_get(root, "tid");
 									if (json_is_integer(param)) {
-										tid = json_integer_value(param);
+										const json_int_t tid_json_int = json_integer_value(param);
 										param = json_object_get(root, "cid");
 										if (json_is_integer(param)) {
-											cid = json_integer_value(param);
-											datum_api_cmd_kill_client(tid,cid);
+											const json_int_t cid_json_int = json_integer_value(param);
+											if (tid_json_int <= INT_MAX && cid_json_int <= INT_MAX) {
+												datum_api_cmd_kill_client((int)tid_json_int, (int)cid_json_int);
+											}
 										}
 									}
 									break;
@@ -686,7 +690,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 			
 			// param set for "empty_thread" above
 			if (param) {
-				tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
+				const int tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
 				if (tid != -1) {
 					datum_api_cmd_empty_thread(tid);
 					redirect = "/threads";
@@ -714,7 +718,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 int datum_api_coinbaser(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	T_DATUM_STRATUM_JOB *sjob;
-	int j, i, max_sz;
+	int j, i;
 	char tempaddr[256];
 	uint64_t tv = 0;
 	
@@ -723,7 +727,7 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 	sjob = (j >= 0 && j < MAX_STRATUM_JOBS) ? global_cur_stratum_jobs[j] : NULL;
 	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
 	
-	max_sz = www_coinbaser_top_html_sz + www_foot_html_sz + (sjob ? (sjob->available_coinbase_outputs_count * 512) : 0) + 2048; // approximate max size of each row
+	const size_t max_sz = www_coinbaser_top_html_sz + www_foot_html_sz + (sjob ? ((size_t)sjob->available_coinbase_outputs_count * 512) : (size_t)0) + 2048; // approximate max size of each row
 	struct buf output = BUF_INIT;
 	buf_reserve(&output, max_sz + 16);
 	
@@ -759,7 +763,7 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 static
 struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	struct MHD_Response *response;
-	int max_sz, j, ii;
+	int j, ii;
 	T_DATUM_MINER_DATA *m = NULL;
 	uint64_t tsms;
 	double hr;
@@ -769,7 +773,7 @@ struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	
 	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
 	
-	max_sz = www_threads_top_html_sz + www_foot_html_sz + (max_threads * 512) + 2048; // approximate max size of each row
+	const size_t max_sz = www_threads_top_html_sz + www_foot_html_sz + ((size_t)max_threads * 512) + 2048; // approximate max size of each row
 	struct buf output = BUF_INIT;
 	buf_reserve(&output, max_sz + 16);
 	
@@ -846,8 +850,8 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 
 int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
-	int connected_clients = 0;
-	int i, max_sz, j, ii;
+	size_t connected_clients = 0;
+	int i, j, ii;
 	T_DATUM_MINER_DATA *m = NULL;
 	uint64_t tsms;
 	double hr;
@@ -861,10 +865,10 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
 	
 	for (i = 0; i < max_threads; ++i) {
-		connected_clients+=global_stratum_app->datum_threads[i].connected_clients;
+		connected_clients += (size_t)global_stratum_app->datum_threads[i].connected_clients;
 	}
 	
-	max_sz = www_clients_top_html_sz + www_foot_html_sz + (connected_clients * 1024) + 2048; // approximate max size of each row
+	const size_t max_sz = www_clients_top_html_sz + www_foot_html_sz + (connected_clients * 1024) + 2048; // approximate max size of each row
 	struct buf output = BUF_INIT;
 	buf_reserve(&output, max_sz + 16);
 	
@@ -961,7 +965,7 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 	const char *colon_pos = memchr(var_start, ':', var_name_len);
 	const char *var_start_2 = colon_pos ? &colon_pos[1] : var_start;
 	const char * const var_end = &var_start[var_name_len];
-	const size_t var_name_len_2 = var_end - var_start_2;
+	const size_t var_name_len_2 = (size_t)(var_end - var_start_2);
 	const char * const underscore_pos = memchr(var_start_2, '_', var_name_len_2);
 	int val;
 	if (var_name_len_2 == 3 && 0 == strncmp(var_start_2, "*ro", 3)) {
@@ -996,12 +1000,12 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 	} else if (var_name_len_2 == 21 && 0 == strncmp(var_start_2, "*reward_sharing_never", 21)) {
 		val = (!datum_config.datum_pooled_mining_only) && !datum_config.datum_pool_host[0];
 	} else if (var_name_len_2 == 34 && 0 == strncmp(var_start_2, "*mining_coinbase_tag_secondary_max", 34)) {
-		val = 88 - strlen(datum_config.mining_coinbase_tag_primary);
+		val = (int)(88 - strlen(datum_config.mining_coinbase_tag_primary));
 		if (val > 60) val = 60;
 	} else if (var_name_len_2 == 11 && 0 == strncmp(var_start_2, "*CSRF_TOKEN", 11)) {
 		return buf_strcat(buf, datum_config.api_csrf_token);
 	} else if (underscore_pos) {
-		const T_DATUM_CONFIG_ITEM * const item = datum_config_get_option_info(var_start_2, underscore_pos - var_start_2, &underscore_pos[1], var_end - &underscore_pos[1]);
+		const T_DATUM_CONFIG_ITEM * const item = datum_config_get_option_info(var_start_2, (size_t)(underscore_pos - var_start_2), &underscore_pos[1], (size_t)(var_end - &underscore_pos[1]));
 		if (item) {
 			switch (item->var_type) {
 				case DATUM_CONF_INT: {
@@ -1038,7 +1042,7 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 				case DATUM_CONF_DIFFICULTY: {
 					val = *((int *)item->ptr);
 					if (!colon_pos) {
-						return buf_datum_format_difficulty(buf, datum_pdiff_to_diff(val));
+						return buf_datum_format_difficulty(buf, datum_pdiff_to_diff((uint64_t)val));
 					}
 					break;
 				}
@@ -1055,7 +1059,7 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 	if (colon_pos) {
 		if (0 == strncmp(var_start, "readonly:", 9) || 0 == strncmp(var_start, "selected:", 9) || 0 == strncmp(var_start, "checked:", 8) || 0 == strncmp(var_start, "disabled:", 9)) {
 			if (val) {
-				size_t attr_len = colon_pos - var_start;
+				size_t attr_len = (size_t)(colon_pos - var_start);
 				if (!buf_strcat(buf, " ")) return false;
 				return buf_append(buf, var_start, attr_len);
 			} else {
@@ -1408,7 +1412,7 @@ void *datum_restart_thread(void *ptr) {
 	abort();  // impossible to get here
 }
 
-int datum_api_config_post(struct MHD_Connection * const connection, char * const post, const int len) {
+int datum_api_config_post(struct MHD_Connection * const connection, char * const post, const size_t len) {
 	struct MHD_Response *response;
 	int ret;
 	const char *key;
@@ -1442,7 +1446,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 		while (p[0] != '\0') {
 			const char *p2 = strchr(p, ' ');
 			if (!p2) p2 = &checkboxes[checkboxes_len];
-			const size_t i_len = p2 - p;
+			const size_t i_len = (size_t)(p2 - p);
 			if (i_len < sizeof(buf)) {
 				memcpy(buf, p, i_len);
 				buf[i_len] = '\0';
@@ -1638,9 +1642,9 @@ int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
 	// Get the time parameter from the URL query
 	time_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "ts");
 	
-	uint32_t t = -1000;
+	int t = -1000;
 	if (time_str != NULL) {
-		// Convert the time parameter to uint32_t
+		// FIXME: Pass the time parameter as uint32_t
 		t = (int)strtoul(time_str, NULL, 10);
 	}
 	
@@ -1670,7 +1674,7 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	struct MHD_Response *response;
 	struct ConnectionInfo *con_info = *con_cls;
 	int int_method = 0;
-	int uds = 0;
+	size_t uds = 0;
 	
 	if (strcmp(method, "GET") == 0) {
 		int_method = 1;
@@ -1741,7 +1745,7 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	const union MHD_ConnectionInfo *conn_info = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
 	char *client_ip = inet_ntoa(((struct sockaddr_in*)conn_info->client_addr)->sin_addr);
 	
-	DLOG_DEBUG("REQUEST: %s, %s, %s, %d", client_ip, method, url, uds);
+	DLOG_DEBUG("REQUEST: %s, %s, %s, %zu", client_ip, method, url, uds);
 	
 	pass = NULL;
 	user = MHD_basic_auth_get_username_password (connection, &pass);
