@@ -86,6 +86,8 @@ static void html_leading_zeros(char * const buffer, const size_t buffer_size, co
 	}
 	if (zeros) {
 		snprintf(buffer, buffer_size, "<span class='leading_zeros'>%.*s</span>%s", zeros, numstr, &numstr[zeros]);
+	} else {
+		snprintf(buffer, buffer_size, "%s", numstr);
 	}
 }
 
