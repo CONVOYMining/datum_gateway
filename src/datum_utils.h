@@ -39,6 +39,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <float.h>
 #include "datum_logger.h"
 
 void datum_utils_init(void);
@@ -60,8 +61,18 @@ bool my_sha256(void *digest, const void *buffer, size_t length);
 void nbits_to_target(uint32_t nbits, uint8_t *target);
 int compare_hashes(const uint8_t *hash1, const uint8_t *hash2);
 
+typedef long double bitcoin_difficulty_typ;
+_Static_assert(LDBL_MANT_DIG >= 23, "long double must have at least 23 bits of precision for compact targets");
+#define PRIdiff ".0Lf"
+
+#define DATUM_MAX_PDIFF (UINT64_C(1) << 63)
+
 static inline long double datum_pdiff_to_bdiff(uint64_t n) {
 	return ((long double)n) * 65535.0L / 65536.0L;
+}
+
+static inline bitcoin_difficulty_typ datum_pdiff_to_diff(uint64_t n) {
+	return (bitcoin_difficulty_typ)n * 4294967296.0L;
 }
 
 unsigned long long block_reward(unsigned int block_height);
@@ -80,7 +91,9 @@ void uchar_to_hex(char *s, const unsigned char b);
 int get_bitcoin_varint_len_bytes(uint64_t n);
 bool strncpy_uachars(char *out, const char *in, size_t maxlen);
 bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
-long double calc_network_difficulty(const char *bits_hex);
+bitcoin_difficulty_typ calc_network_difficulty_blake2b(uint32_t nbits);
+#define DATUM_FORMAT_DIFFICULTY_OUT_SZ 8
+int datum_format_difficulty(char *out, size_t out_size, bitcoin_difficulty_typ difficulty);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);

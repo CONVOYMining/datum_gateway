@@ -36,6 +36,8 @@
 // Custom configurator and help output generator
 
 #include <assert.h>
+#include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -58,6 +60,7 @@ const char *datum_conf_var_type_text[] = {
 	"string",
 	"string_array",
 	"{\"modname\":{\"address\":proportion,...},...}",
+	"difficulty",
 };
 
 const T_DATUM_CONFIG_ITEM datum_config_options[] = {
@@ -93,7 +96,7 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.stratum_v1_max_clients, 				.default_int = 1024 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "trust_proxy",		.description = "Enable support for the PROXY protocol, trusting up to the specified number of levels deep of proxies (-1 to disable entirely)",
 		.required = false, .ptr = &datum_config.stratum_v1_trust_proxy, 	.default_int = -1 },
-	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "vardiff_min",				.description = "Work difficulty floor",
+	{ .var_type = DATUM_CONF_DIFFICULTY, .category = "stratum", 		.name = "vardiff_min",				.description = "Work difficulty floor (integer or quoted decimal with SI suffix)",
 		.required = false, .ptr = &datum_config.stratum_v1_vardiff_min, 				.default_int = 1024 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "vardiff_target_shares_min",.description = "Adjust work difficulty to target this many shares per minute",
 		.required = false, .ptr = &datum_config.stratum_v1_vardiff_target_shares_min, 	.default_int = 8 },
@@ -261,6 +264,11 @@ void datum_config_set_default(const T_DATUM_CONFIG_ITEM *c) {
 			*umods_p = NULL;
 			break;
 		}
+		
+		case DATUM_CONF_DIFFICULTY: {
+			*((int *)c->ptr) = c->default_int;
+			break;
+		}
 	}
 }
 
@@ -363,6 +371,110 @@ struct datum_username_mod *datum_username_mods_find(struct datum_username_mod *u
 	return NULL;
 }
 
+static int datum_config_compare_difficulty(const char *value, const char *end, int exponent, uint64_t boundary) {
+	// Removing the decimal point gives an integer coefficient in units of 10^exponent.
+	// Compare it with the hash boundary rounded to those units (the input's half-unit tolerance).
+	if (exponent > 0) {
+		for (int i = 1; i < exponent && boundary; ++i) boundary /= 10;
+		boundary = boundary / 10 + (boundary % 10 >= 5);
+		if (!boundary) return 1; // The validated input is positive.
+		exponent = 0;
+	}
+	int comparison = 0;
+	while (end > value) {
+		const char digit = *--end;
+		if (digit == '.') continue;
+		const int value_digit = digit - '0';
+		int boundary_digit;
+		if (exponent < 0) {
+			boundary_digit = 0;
+			++exponent; // Consume a virtual trailing zero without multiplying the boundary.
+		} else {
+			boundary_digit = boundary % 10;
+			boundary /= 10;
+		}
+		if (value_digit != boundary_digit) {
+			comparison = value_digit > boundary_digit ? 1 : -1;
+		}
+	}
+	return boundary ? -1 : comparison;
+}
+
+int datum_config_parse_difficulty(int * const out, json_t * const item) {
+	switch (json_typeof(item)) {
+		case JSON_INTEGER: {
+			const json_int_t value = json_integer_value(item);
+			if (value < 1) return -1;
+			if (value <= INT_MAX) {
+				*out = roundDownToPowerOfTwo_64(value);
+				return (*out == value) ? 3 : -1;
+			}
+			const uint64_t hashes = value;
+			const uint64_t minimum = (hashes >> 32) + !!(hashes & UINT32_MAX);
+			const uint64_t max = roundDownToPowerOfTwo_64(INT_MAX);
+			if (minimum > max) return -1;
+			*out = minimum <= 1 ? 1 : roundDownToPowerOfTwo_64(minimum - 1) << 1;
+			return (((uint64_t)*out << 32) > hashes) ? 2 : 1;
+		}
+		case JSON_REAL:
+		case JSON_STRING:
+			break;
+		default:
+			return -1;
+	}
+	
+	const char * const value_str = json_string_value(item);
+	char *end = NULL;
+	int exponent = 0;
+	bitcoin_difficulty_typ requested;
+	if (value_str) {
+		errno = 0;
+		requested = strtold(value_str, &end);
+		if (errno || end == value_str) return -1;
+		
+		int decimal_places = 0;
+		for (const char *p = value_str; p < end; ++p) {
+			if (*p == '.') {
+				if (end - p - 1 > INT_MAX) return -1;
+				decimal_places = (end - p) - 1;
+			} else if (!isdigit((unsigned char)*p)) {
+				// Don't allow explicit exponents, whitespace, sign, etc
+				return -1;
+			}
+		}
+		
+		int decimal_exponent = 0;
+		if (end[0]) {
+			static const char suffixes[] = "KMGTPEZYRQ";
+			const char * const suffix = strchr(suffixes, toupper((unsigned char)end[0]));
+			if (end[1] || !suffix) return -1;
+			decimal_exponent = ((suffix - suffixes) + 1) * 3;
+			requested *= powl(10.0L, decimal_exponent);
+		}
+		exponent = decimal_exponent - decimal_places;
+	} else {
+		requested = json_real_value(item);
+	}
+	
+	if (!isfinite(requested) || requested <= 0) return -1;
+	const uint64_t max = roundDownToPowerOfTwo_64(INT_MAX);
+	// Estimate the next power of two; only the original digits decide which boundary is admissible.
+	const uint64_t minimum = ceill(fminl(requested / datum_pdiff_to_diff(1), max));
+	*out = minimum <= 1 ? 1 : roundDownToPowerOfTwo_64(minimum - 1) << 1;
+	if (!value_str) {
+		if (requested > datum_pdiff_to_diff(max)) return -1;
+		return datum_pdiff_to_diff(*out) > requested ? 2 : 1;
+	}
+	// A positive decimal's half-unit tolerance cannot extend below half its value.
+	if (*out > 1 && datum_config_compare_difficulty(value_str, end, exponent, (uint64_t)(*out / 2) << 32) <= 0) {
+		*out /= 2;
+	} else if (datum_config_compare_difficulty(value_str, end, exponent, (uint64_t)*out << 32) > 0) {
+		if ((uint64_t)*out >= max) return -1;
+		*out *= 2;
+	}
+	return datum_config_compare_difficulty(value_str, end, exponent, (uint64_t)*out << 32) < 0 ? 2 : 1;
+}
+
 int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 	switch(c->var_type) {
 		case DATUM_CONF_INT: {
@@ -425,6 +537,25 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 		
 		case DATUM_CONF_USERNAME_MODS: {
 			return datum_config_parse_username_mods(c->ptr, item, true);
+		}
+		
+		case DATUM_CONF_DIFFICULTY: {
+			int * const out = c->ptr;
+			const int result = datum_config_parse_difficulty(out, item);
+			if (result < 0) return result;
+			if (result > 1) {
+				char diffstr[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+				datum_format_difficulty(diffstr, sizeof(diffstr), datum_pdiff_to_diff(*out));
+				switch (result) {
+					case 2:
+						DLOG_WARN("%s.%s rounded up to %s", c->category, c->name, diffstr);
+						break;
+					case 3:
+						DLOG_WARN("%s.%s uses legacy integer syntax; use \"%s\" instead", c->category, c->name, diffstr);
+						break;
+				}
+			}
+			return 1;
 		}
 	}
 	
@@ -589,15 +720,15 @@ int datum_read_config(const char *conffile) {
 		return 0;
 	}
 	
+	if (datum_config.stratum_v1_vardiff_min < 1) {
+		DLOG_FATAL("Stratum server stratum.vardiff_min must be at least 1 (suggest at least 1024, but more likely 32768)");
+		return 0;
+	}
+	
 	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
 		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
 		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
 		datum_config.stratum_v1_vardiff_min = nv;
-	}
-	
-	if (datum_config.stratum_v1_vardiff_min < 1) {
-		DLOG_FATAL("Stratum server stratum.vardiff_min must be at least 1 (suggest at least 1024, but more likely 32768)");
-		return 0;
 	}
 	
 	if (datum_config.stratum_v1_max_clients > (datum_config.stratum_v1_max_clients_per_thread*datum_config.stratum_v1_max_threads)) {
@@ -677,6 +808,13 @@ void datum_gateway_help(const char * const argv0) {
 					break;
 				}
 				
+				case DATUM_CONF_DIFFICULTY: {
+					char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(opt->default_int));
+					printf(", default: \"%s\")\n", difficulty);
+					break;
+				}
+				
 				default: {
 					puts(")");
 					break;
@@ -735,6 +873,13 @@ void datum_gateway_example_conf(void) {
 				
 				case DATUM_CONF_USERNAME_MODS: {
 					puts("{}");
+					break;
+				}
+				
+				case DATUM_CONF_DIFFICULTY: {
+					char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
+					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(opt->default_int));
+					printf("\"%s\"", difficulty);
 					break;
 				}
 			}

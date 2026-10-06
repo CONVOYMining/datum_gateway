@@ -55,6 +55,7 @@ enum datum_conf_vartype {
 	DATUM_CONF_STRING,
 	DATUM_CONF_STRING_ARRAY,
 	DATUM_CONF_USERNAME_MODS,
+	DATUM_CONF_DIFFICULTY,
 };
 
 typedef struct {
@@ -80,6 +81,7 @@ typedef struct {
 
 const T_DATUM_CONFIG_ITEM *datum_config_get_option_info(const char *category, size_t category_len, const char *name, size_t name_len);
 const T_DATUM_CONFIG_ITEM *datum_config_get_option_info2(const char *category, const char *name);
+int datum_config_parse_difficulty(int *out, json_t *item);
 
 struct datum_addr_range {
 	char *addr;

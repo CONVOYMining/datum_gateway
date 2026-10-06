@@ -607,31 +607,27 @@ bool strncpy_uachars(char *out, const char *in, size_t maxlen) {
 	return true;
 }
 
-long double calc_network_difficulty(const char *bits_hex) {
-	// given a share solution in hex, calculate the network difficulty
-	// Postgres code for this (with hex_to_int added function)
-	// (pow(10,  ( (29-tpower_val)*2.4082399653118495617099111577959 ) + log( (65535 / tvalue_val) )   )  ) as network_difficulty
+bitcoin_difficulty_typ calc_network_difficulty_blake2b(uint32_t nbits) {
+	const unsigned int exponent = nbits >> 24;
+	const uint32_t mantissa = nbits & UINT32_C(0x00ffffff);
 	
-	char tpower[3];
-	char tvalue[7];
-	unsigned char tpower_val;
-	unsigned long tvalue_val;
-	char *ep;
-	int i;
-	long double d;
-	signed short s;
+	return ldexpl(1.0L, 280 - 8 * (int)exponent) / mantissa;
+}
+
+int datum_format_difficulty(char * const out, const size_t outsz, bitcoin_difficulty_typ diff) {
+	if (diff < 1000) {
+		return snprintf(out, outsz, "%"PRIdiff, diff);
+	}
 	
-	tpower[0] = bits_hex[0];
-	tpower[1] = bits_hex[1];
-	tpower[2] = 0;
+	static const char suffixes[] = "kMGTPEZYRQ";
+	const char *suffix = &suffixes[0];
 	
-	for(i=0;i<6;i++) tvalue[i] = bits_hex[2+i];
-	tvalue[6] = 0;
-	tpower_val = (unsigned char)strtoul(tpower, &ep, 16);
-	tvalue_val = strtoul(tvalue, &ep, 16);
-	s = (signed short)29 - (signed short)tpower_val;
-	d = powl(10.0,(double)s*(long double)2.4082399653118495617099111577959 + log10(65535.0 / (double)tvalue_val));
-	return d;
+	diff /= 1000;
+	while (diff >= 999.95L && suffix[1]) {
+		diff /= 1000;
+		++suffix;
+	}
+	return snprintf(out, outsz, "%.1Lf%c", diff, suffix[0]);
 }
 
 #define SIPHASH_ROTATE(a, b) ((uint64_t)(((a)<<(b))|((a)>>(64-(b)))))
