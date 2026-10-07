@@ -50,6 +50,7 @@
 #define MAX_STRATUM_JOBS 256
 
 #define MAX_COINBASE_TYPES 6
+#define MAX_COINBASE_DATA_SIZE 100
 #define DATUM_COINBASE_ID_EMPTY 0xff
 #define COINBASE_TYPE_TINY 0 // "empty", just pays pool
 #define COINBASE_TYPE_SMALL 1 // Nicehash needs a tiny coinb1, among other things. Max 500 bytes.
@@ -160,6 +161,9 @@ typedef struct T_DATUM_STRATUM_JOB {
 	// 5 = "antminer2" --- max 2250 bytes --- latest S21s appear to support this
 	T_DATUM_STRATUM_COINBASE coinbase[MAX_COINBASE_TYPES];
 	T_DATUM_STRATUM_COINBASE subsidy_only_coinbase;
+	uint8_t coinbase_data[MAX_COINBASE_DATA_SIZE];
+	int coinbase_data_len;
+	int coinbase_data_target_pot_index;
 	int target_pot_index; // where in coinb1 do we put our per-user vardiff pot value?
 	
 	uint64_t coinbase_value;

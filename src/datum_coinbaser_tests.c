@@ -42,6 +42,8 @@
 #include "datum_utils.h"
 #include "datum_pow.h"
 
+static const char datum_test_witness_commitment[] = "6a24aa21a9ed0000000000000000000000000000000000000000000000000000000000000000";
+
 int datum_stratum_coinbase_fit_to_template(
 	int max_sz, int fixed_bytes, T_DATUM_STRATUM_JOB *s);
 
@@ -69,7 +71,7 @@ static void datum_coinbase_data_serialization_tests(void) {
 	strcpy(datum_config.mining_coinbase_tag_secondary, "BC");
 	datum_config.prime_id = 0;
 	datum_config.coinbase_unique_id = 0x1234;
-	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index);
+	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index, false);
 	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 12);
 	datum_test(target_pot_index == 9);
@@ -78,7 +80,7 @@ static void datum_coinbase_data_serialization_tests(void) {
 	datum_config.mining_coinbase_tag_primary[0] = '\0';
 	datum_config.mining_coinbase_tag_secondary[0] = '\0';
 	target_pot_index = -1;
-	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index);
+	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index, false);
 	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 8);
 	datum_test(target_pot_index == 5);
@@ -86,7 +88,7 @@ static void datum_coinbase_data_serialization_tests(void) {
 	
 	datum_config.prime_id = UINT64_C(0x887766555d965e4e);
 	target_pot_index = -1;
-	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index);
+	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index, false);
 	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 16);
 	datum_test(target_pot_index == 5);
@@ -97,7 +99,7 @@ static void datum_coinbase_data_serialization_tests(void) {
 	memset(datum_config.mining_coinbase_tag_secondary, 'B', 20);
 	datum_config.mining_coinbase_tag_secondary[20] = '\0';
 	target_pot_index = -1;
-	coinbase_data_size = generate_coinbase_data(840000, coinbase_data, &target_pot_index);
+	coinbase_data_size = generate_coinbase_data(840000, coinbase_data, &target_pot_index, false);
 	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 100);
 	datum_test(target_pot_index == 89);
@@ -108,6 +110,53 @@ static void datum_coinbase_data_serialization_tests(void) {
 	memcpy(datum_config.mining_coinbase_tag_secondary, saved_secondary, sizeof(saved_secondary));
 	datum_config.prime_id = saved_prime_id;
 	datum_config.coinbase_unique_id = saved_unique_id;
+}
+
+static void datum_coinbase_data_identity_tests(void) {
+	const uint64_t saved_prime_id = datum_config.prime_id;
+	char saved_solo_tag[sizeof(datum_config.mining_coinbase_tag_primary)];
+	char saved_secondary_tag[sizeof(datum_config.mining_coinbase_tag_secondary)];
+	char saved_pool_address[sizeof(datum_config.mining_pool_address)];
+	T_DATUM_TEMPLATE_DATA tdata;
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
+	char original_coinb1[STRATUM_COINBASE1_MAX_LEN];
+	char original_coinb2[STRATUM_COINBASE2_MAX_LEN];
+	
+	datum_test(job != NULL);
+	if (!job) return;
+	memcpy(saved_solo_tag, datum_config.mining_coinbase_tag_primary, sizeof(saved_solo_tag));
+	memcpy(saved_secondary_tag, datum_config.mining_coinbase_tag_secondary, sizeof(saved_secondary_tag));
+	memcpy(saved_pool_address, datum_config.mining_pool_address, sizeof(saved_pool_address));
+	
+	memset(&tdata, 0, sizeof(tdata));
+	job->block_template = &tdata;
+	job->coinbase_value = 5000000000ULL;
+	job->height = 42;
+	tdata.sizelimit = 4000000;
+	tdata.weightlimit = 4000000;
+	tdata.sigoplimit = 80000;
+	strcpy(tdata.default_witness_commitment, datum_test_witness_commitment);
+	strcpy(datum_config.mining_pool_address, "1BoatSLRHtKNngkdXEeobR76b53LETtpyT");
+	strcpy(datum_config.mining_coinbase_tag_primary, "solo-before");
+	datum_config.mining_coinbase_tag_secondary[0] = 0;
+	datum_config.prime_id = 0;
+	generate_base_coinbase_txns_for_stratum_job(job, false);
+	strcpy(original_coinb1, job->coinbase[0].coinb1);
+	strcpy(original_coinb2, job->coinbase[0].coinb2);
+	
+	/* A connection/configuration change before the asynchronous expansion must not rewrite work that has already been published. */
+	strcpy(datum_config.mining_pool_address, "1BitcoinEaterAddressDontSendf59kuE");
+	strcpy(datum_config.mining_coinbase_tag_primary, "solo-after");
+	datum_config.prime_id = UINT64_C(0x1122334455667788);
+	generate_coinbase_txns_for_stratum_job(job, false);
+	datum_test(!strcmp(job->coinbase[0].coinb1, original_coinb1));
+	datum_test(!strcmp(job->coinbase[0].coinb2, original_coinb2));
+	
+	datum_config.prime_id = saved_prime_id;
+	memcpy(datum_config.mining_coinbase_tag_primary, saved_solo_tag, sizeof(saved_solo_tag));
+	memcpy(datum_config.mining_coinbase_tag_secondary, saved_secondary_tag, sizeof(saved_secondary_tag));
+	memcpy(datum_config.mining_pool_address, saved_pool_address, sizeof(saved_pool_address));
+	free(job);
 }
 
 static void datum_blake2b_coinbase_limit_tests(void) {
@@ -286,6 +335,7 @@ static void datum_blake2b_coinbase_sigops_tests(void) {
 
 void datum_coinbaser_tests(void) {
 	datum_coinbase_data_serialization_tests();
+	datum_coinbase_data_identity_tests();
 	datum_blake2b_coinbase_limit_tests();
 	datum_coinbaser_value_overflow_tests();
 	datum_blake2b_coinbase_sigops_tests();
