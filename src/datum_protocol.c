@@ -252,6 +252,13 @@ void datum_header_upk(T_DATUM_PROTOCOL_HEADER * const h, const uint8_t * const s
 	h->proto_cmd            = (raw >> 27) & 0x1f;
 }
 
+static
+size_t datum_protocol_random_padding(unsigned char * const pad, const size_t max_size) {
+	const size_t j = 1 + ((size_t)rand() % max_size);
+	memset(pad, rand(), j);
+	return j;
+}
+
 // Take the hexidecimal public key string and store it in a DATUM_ENC_KEYS
 int datum_pubkey_to_struct(const char *input, DATUM_ENC_KEYS *key) {
 	int i;
@@ -635,8 +642,7 @@ static void datum_protocol_replay_unanswered(void) {
 		pthread_mutex_unlock(&datum_replay_mutex);
 		if (!message) break;
 		
-		const size_t padding = 1 + (rand() % 80);
-		memset(message + message_size, rand(), padding);
+		const size_t padding = datum_protocol_random_padding(&message[message_size], 80);
 		if (datum_protocol_mining_cmd(message,
 			(int)(message_size + padding)) != 0) {
 			free(message);
@@ -1346,7 +1352,7 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	T_DATUM_STRATUM_JOB *s = (T_DATUM_STRATUM_JOB *)sptr;
 	uint64_t value = s->coinbase_value;
 	unsigned char msg[128 + crypto_box_MACBYTES];
-	int i = 0, j;
+	int i = 0;
 	int rc;
 	struct timespec ts;
 	
@@ -1364,10 +1370,7 @@ int datum_protocol_coinbaser_fetch(void *sptr) {
 	memcpy(&msg[i], s->prevhash_bin, 32); i+=32;
 	msg[i] = 0xFE; i++;
 	
-	// pad
-	j = 1 + (rand() % 80);
-	memset(&msg[i], rand(), j);
-	i+=j;
+	i += (int)datum_protocol_random_padding(&msg[i], 80);
 	
 	const uint64_t session_generation =
 		atomic_load(&datum_session_generation);
@@ -1532,6 +1535,22 @@ err:
 	return 1;
 }
 
+static
+void datum_protocol_job_validation_response_prep(unsigned char * const msg, const uint8_t cmd, const uint8_t job_index, const uint8_t code) {
+	msg[0] = 0x50;
+	msg[1] = cmd;
+	msg[2] = job_index;
+	msg[3] = code;
+}
+
+static
+void datum_protocol_job_validation_send_error(unsigned char * const msg, const uint8_t cmd, const uint8_t job_index, const uint8_t code) {
+	// error response to 0x50 0x10
+	datum_protocol_job_validation_response_prep(msg, cmd, job_index, code);
+	const size_t j = datum_protocol_random_padding(&msg[4], 100);
+	datum_protocol_mining_cmd(msg, 4 + j);
+}
+
 int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	// similar to compact blocks, we're going to send a list of short transaction IDs for the requested job
 	unsigned char job_index = data[0];
@@ -1551,18 +1570,7 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	int i = 0, j;
 	
 	if (job_index >= 8) {
-		// error response to 0x50 0x10
-		msg[i] = 0x50; i++;
-		msg[i] = 0x90; i++;
-		msg[i] = 0xFF; i++;
-		msg[i] = 0xF3; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x90, 0xFF, 0xF3);
 		return 1;
 	}
 	
@@ -1574,37 +1582,14 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	if (!sj || memcmp(sj->job_id, dj->server_job_id,
 	    sizeof(dj->server_job_id))) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x10
-		msg[i] = 0x50; i++;
-		msg[i] = 0x90; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF0; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
-		
+		datum_protocol_job_validation_send_error(msg, 0x90, job_index, 0xF0);
 		return 1;
 	}
 	
 	block_template = sj->block_template;
 	if (!block_template) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x10
-		msg[i] = 0x50; i++;
-		msg[i] = 0x90; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF1; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x90, job_index, 0xF1);
 		return 1;
 	}
 	
@@ -1614,45 +1599,26 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 		// there are no transactions in this block...
 		// normal response, except our tx count is 0
 		// since tx count = 0, we dont need anything else
-		msg[i] = 0x50; i++;
-		msg[i] = 0x90; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0x01; i++;
+		datum_protocol_job_validation_response_prep(msg, 0x90, job_index, 0x01);
+		i = 4;
 		msg[i++] = 0; msg[i++] = 0;
 		
 		// no need to send the crosscheck... there's nothing to crosscheck!
 		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
+		i += (int)datum_protocol_random_padding(&msg[i], 100);
 		datum_protocol_mining_cmd(msg, i);
 		return 1;
 	}
 	
 	if (block_template->txn_count > 16383) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x10
-		msg[i] = 0x50; i++;
-		msg[i] = 0x90; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF2; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x90, job_index, 0xF2);
 		return 1;
 	}
 	
 	// ok, we're good
-	msg[i] = 0x50; i++;
-	msg[i] = 0x90; i++;
-	msg[i] = job_index; i++;
-	msg[i] = 0x01; i++;
+	datum_protocol_job_validation_response_prep(msg, 0x90, job_index, 0x01);
+	i = 4;
 	pk_u16le(msg, i, block_template->txn_count); i += 2;
 	
 	// we don't have the benefit that compact blocks have of fully having something unknown to an attacker before an attack
@@ -1681,10 +1647,7 @@ int datum_protocol_job_validation_stxlist(unsigned char *data) {
 	memcpy(&msg[i], &crosscheck[0], 0x20); i += 0x20;
 	msg[i] = 0xFE; i++;
 	
-	// pad with some randomness
-	j = 1 + (rand() % 111);
-	memset(&msg[i], rand(), j);
-	i+=j;
+	i += (int)datum_protocol_random_padding(&msg[i], 111);
 	if (i > DATUM_BULK_FRAGMENT_DATA_SIZE) {
 		if (datum_protocol_bulk_cmd(msg, i))
 			DLOG_WARN("Could not queue large transaction-validation reply");
@@ -1720,18 +1683,7 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 	int i = 0, j,k=3;
 	
 	if (job_index >= 8) {
-		// error response to 0x50 0x11
-		msg[i] = 0x50; i++;
-		msg[i] = 0x91; i++;
-		msg[i] = 0xFF; i++;
-		msg[i] = 0xF3; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x91, 0xFF, 0xF3);
 		return 1;
 	}
 	
@@ -1760,62 +1712,26 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 	if (!sj || memcmp(sj->job_id, dj->server_job_id,
 	    sizeof(dj->server_job_id))) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x11
-		msg[i] = 0x50; i++;
-		msg[i] = 0x91; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF0; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
-		
+		datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF0);
 		return 1;
 	}
 	
 	block_template = sj->block_template;
 	if (!block_template) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x11
-		msg[i] = 0x50; i++;
-		msg[i] = 0x91; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF1; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF1);
 		return 1;
 	}
 	
 	if ((req_count == 0) || (req_count > block_template->txn_count)) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x11
-		msg[i] = 0x50; i++;
-		msg[i] = 0x91; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF4; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF4);
 		return 1;
 	}
 	
 	// ok, make it happen.
-	msg[i] = 0x50; i++;
-	msg[i] = 0x91; i++;
-	msg[i] = job_index; i++;
-	msg[i] = 0x01; i++;
+	datum_protocol_job_validation_response_prep(msg, 0x91, job_index, 0x01);
+	i = 4;
 	pk_u16le(msg, i, req_count); i += 2;
 	
 	for(j=0;j<req_count;j++) {
@@ -1824,19 +1740,7 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 		if (req_id >= block_template->txn_count) {
 			// error....
 			pthread_rwlock_unlock(&datum_jobs_rwlock);
-			// error response to 0x50 0x11
-			i = 0; // reset index
-			msg[i] = 0x50; i++;
-			msg[i] = 0x91; i++;
-			msg[i] = job_index; i++;
-			msg[i] = 0xF4; i++;
-			
-			// pad with some randomness
-			j = 1 + (rand() % 100);
-			memset(&msg[i], rand(), j);
-			i+=j;
-			
-			datum_protocol_mining_cmd(msg, i);
+			datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF4);
 			return 1;
 		}
 		
@@ -1875,10 +1779,7 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 	pthread_rwlock_unlock(&datum_jobs_rwlock);
 	msg[i] = 0xFE; i++;
 	
-	// pad with some randomness
-	j = 1 + (rand() % 111);
-	memset(&msg[i], rand(), j);
-	i+=j;
+	i += (int)datum_protocol_random_padding(&msg[i], 111);
 	if (i > DATUM_BULK_FRAGMENT_DATA_SIZE) {
 		if (datum_protocol_bulk_cmd(msg, i))
 			DLOG_WARN("Could not queue large transaction-validation reply");
@@ -1908,18 +1809,7 @@ int datum_protocol_job_validation_sblock(unsigned char *data) {
 	int i = 0, j;
 	
 	if (job_index >= 8) {
-		// error response to 0x50 0x12
-		msg[i] = 0x50; i++;
-		msg[i] = 0x92; i++;
-		msg[i] = 0xFF; i++;
-		msg[i] = 0xF3; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x92, 0xFF, 0xF3);
 		return 1;
 	}
 	
@@ -1931,44 +1821,19 @@ int datum_protocol_job_validation_sblock(unsigned char *data) {
 	if (!sj || memcmp(sj->job_id, dj->server_job_id,
 	    sizeof(dj->server_job_id))) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x12
-		msg[i] = 0x50; i++;
-		msg[i] = 0x92; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF0; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
-		
+		datum_protocol_job_validation_send_error(msg, 0x92, job_index, 0xF0);
 		return 1;
 	}
 	
 	block_template = sj->block_template;
 	if (!block_template) {
 		pthread_rwlock_unlock(&datum_jobs_rwlock);
-		// error response to 0x50 0x12
-		msg[i] = 0x50; i++;
-		msg[i] = 0x92; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF1; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x92, job_index, 0xF1);
 		return 1;
 	}
 	
-	msg[i] = 0x50; i++;
-	msg[i] = 0x92; i++;
-	msg[i] = job_index; i++;
-	msg[i] = 0x01; i++;
+	datum_protocol_job_validation_response_prep(msg, 0x92, job_index, 0x01);
+	i = 4;
 	pk_u16le(msg, i, block_template->txn_count); i += 2;
 	
 	for(j=0;j<block_template->txn_count;j++) {
@@ -2004,10 +1869,7 @@ static void datum_protocol_parent_fetch_reply(
 	const size_t message_size = 41 + block_size;
 	unsigned char * const msg = malloc(message_size);
 	if (!msg) return;
-	msg[0] = 0x50;
-	msg[1] = 0x94;
-	msg[2] = job_id;
-	msg[3] = status;
+	datum_protocol_job_validation_response_prep(msg, 0x94, job_id, status);
 	memcpy(msg + 4, parent_hash, 32);
 	pk_u32le(msg, 36, (uint32_t)block_size);
 	if (block_size) memcpy(msg + 40, block, block_size);
@@ -2517,10 +2379,7 @@ int datum_protocol_send_hello(int sockfd) {
 			DATUM_RESUME_TOKEN_SIZE);
 	}
 	
-	// pad with some randomness
-	j = 1 + (rand() % 200);
-	memset(&hello_msg[i], rand(), j);
-	i+=j;
+	i += (int)datum_protocol_random_padding(&hello_msg[i], 200);
 	
 	// tack the signature on to the message
 	DLOG_DEBUG("Signing handshake %d bytes",i);
