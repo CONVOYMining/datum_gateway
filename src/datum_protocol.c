@@ -1689,18 +1689,7 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 	
 	if (3 + 2 * (int)req_count > len) {
 		// the index list is shorter than the count claims
-		// error response to 0x50 0x11
-		msg[i] = 0x50; i++;
-		msg[i] = 0x91; i++;
-		msg[i] = job_index; i++;
-		msg[i] = 0xF4; i++;
-		
-		// pad with some randomness
-		j = 1 + (rand() % 100);
-		memset(&msg[i], rand(), j);
-		i+=j;
-		
-		datum_protocol_mining_cmd(msg, i);
+		datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF4);
 		return 1;
 	}
 	
@@ -1750,19 +1739,7 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 		if (!datum_protocol_stxlist_reply_fits((size_t)i, block_template->txns[req_id].size)) {
 			pthread_rwlock_unlock(&datum_jobs_rwlock);
 			DLOG_WARN("DATUM server requested %u transactions for job %d, more than one reply can carry; refusing", (unsigned)req_count, (int)job_index);
-			// error response to 0x50 0x11
-			i = 0; // reset index
-			msg[i] = 0x50; i++;
-			msg[i] = 0x91; i++;
-			msg[i] = job_index; i++;
-			msg[i] = 0xF4; i++;
-			
-			// pad with some randomness
-			j = 1 + (rand() % 100);
-			memset(&msg[i], rand(), j);
-			i+=j;
-			
-			datum_protocol_mining_cmd(msg, i);
+			datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF4);
 			return 1;
 		}
 		
