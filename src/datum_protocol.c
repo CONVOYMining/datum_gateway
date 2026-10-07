@@ -1434,7 +1434,7 @@ err:
 	// read pool addr script
 	if (i >= len) goto err;
 	a = data[i]; i++;
-	if (a > MAX_OUTPUT_SCRIPT_LEN) goto err;
+	if (!a || a > MAX_OUTPUT_SCRIPT_LEN) goto err;
 	if (i + a > len) goto err;
 	memcpy(datum_config.override_mining_pool_scriptpubkey, &data[i], a); i+=a;
 	datum_config.override_mining_pool_scriptpubkey_len = a;

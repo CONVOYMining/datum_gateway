@@ -609,6 +609,9 @@ static void datum_protocol_config_v3_tests(void) {
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(datum_config.override_vardiff_min == DATUM_MAX_PDIFF);
 	pk_u64le(payload, vardiff_min, 1024);
+	payload[1] = 0;
+	datum_test(!datum_protocol_client_configure((int)i, payload));
+	payload[1] = 1;
 	datum_test(!datum_protocol_is_active());
 	unsigned char notice[36] = {
 		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 0,
