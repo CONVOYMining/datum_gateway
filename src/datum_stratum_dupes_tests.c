@@ -291,9 +291,71 @@ static void datum_dupe_table_cycle_tests(void) {
 	datum_config.stratum_v1_share_stale_seconds = saved_stale;
 }
 
+// A full wipe forgets every share. It zeroes the entries, so nothing may still be reachable
+// from the bucket index afterwards, and the same shares are new again.
+static void datum_dupe_table_full_wipe_tests(void) {
+	const int saved_clients = datum_config.stratum_v1_max_clients_per_thread;
+	const int saved_shares = datum_config.stratum_v1_vardiff_target_shares_min;
+	const int saved_stale = datum_config.stratum_v1_share_stale_seconds;
+
+	// A 16 slot table that never holds more than 12 entries, so the only cleanup in this
+	// test is the wipe it asks for
+	datum_config.stratum_v1_max_clients_per_thread = 1;
+	datum_config.stratum_v1_vardiff_target_shares_min = 1;
+	datum_config.stratum_v1_share_stale_seconds = 60;
+
+	T_DATUM_STRATUM_THREADPOOL_DATA * const thread_data = calloc(1, sizeof(*thread_data));
+	datum_test(thread_data != NULL);
+	if (thread_data) {
+		datum_stratum_dupes_init(thread_data);
+		T_DATUM_STRATUM_DUPES * const dupes = thread_data->dupes;
+		unsigned char extranonce[12] = {0};
+
+		// Two shares to a bucket, so that the buckets hold chains and not only single entries
+		for (int i = 0; i < 12; ++i) {
+			const uint64_t nonce = ((uint64_t)(i + 1) << 32) | (uint64_t)((i / 2) + 1);
+			datum_test(!datum_stratum_check_for_dupe(thread_data, nonce, 1, 4000 + i, 0, extranonce));
+		}
+		datum_test(dupes->current_items == 12);
+
+		datum_stratum_dupes_cleanup(dupes, true);
+		datum_test(dupes->current_items == 0);
+
+		int buckets_left = 0;
+		for (int b = 0; b < 65536; ++b) {
+			if (dupes->index[b]) ++buckets_left;
+		}
+		// The table is not used any further if this fails. A bucket that is left behind names
+		// a zeroed slot, the next insert hands that slot out again, and a chain built that way
+		// can link an entry to itself.
+		const bool full_wipe_left_no_bucket_behind = (buckets_left == 0);
+		if (datum_test(full_wipe_left_no_bucket_behind)) {
+			for (int i = 0; i < 12; ++i) {
+				const uint64_t nonce = ((uint64_t)(i + 1) << 32) | (uint64_t)((i / 2) + 1);
+				datum_test(!datum_stratum_check_for_dupe(thread_data, nonce, 1, 4000 + i, 0, extranonce));
+			}
+			datum_dupe_index_is_sound(dupes);
+			for (int i = 0; i < 12; ++i) {
+				const uint64_t nonce = ((uint64_t)(i + 1) << 32) | (uint64_t)((i / 2) + 1);
+				datum_test(datum_stratum_check_for_dupe(thread_data, nonce, 1, 4000 + i, 0, extranonce));
+			}
+			datum_test(dupes->current_items == 12);
+		}
+
+		free(dupes->ptr);
+		free(thread_data->dupes);
+		free(thread_data);
+	}
+
+	datum_config.stratum_v1_max_clients_per_thread = saved_clients;
+	datum_config.stratum_v1_vardiff_target_shares_min = saved_shares;
+	datum_config.stratum_v1_share_stale_seconds = saved_stale;
+}
+
 void datum_stratum_dupes_tests(void) {
 	datum_pow_dupe_tests();
 	datum_dupe_table_fill_tests();
 	datum_dupe_table_prune_tests();
 	datum_dupe_table_cycle_tests();
+	datum_dupe_table_full_wipe_tests();
 }
