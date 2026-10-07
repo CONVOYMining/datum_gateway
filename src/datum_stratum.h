@@ -141,10 +141,7 @@ typedef struct T_DATUM_STRATUM_JOB {
 	T_DATUM_TEMPLATE_DATA *block_template;
 	
 	unsigned char merklebranch_count;
-	char merklebranches_hex[24][72];
 	unsigned char merklebranches_bin[24][32];
-	
-	char merklebranches_full[4096];
 	
 	// when fetching the coinbaser, we'll just stash all of the possible and valid output scripts here
 	T_DATUM_TXN_OUTPUT available_coinbase_outputs[512];

@@ -1776,7 +1776,7 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 	// NOTE: This uses a static varaible for temp space. Do not call concurrently from multiple threads.
 	bool level_needs_dupe = false;
 	int current_level_size = 0, next_level_size = 0;
-	int q,i,j;
+	int q,i;
 	
 	// 64 byte combined hashes for inputs to merkle hashes
 	unsigned char combined[64];
@@ -1801,9 +1801,6 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 	if (!s->block_template->txn_count) {
 		// no transactions
 		s->merklebranch_count = 0;
-		s->merklebranches_full[0] = '[';
-		s->merklebranches_full[1] = ']';
-		s->merklebranches_full[2] = 0;
 		return;
 	}
 	
@@ -1828,10 +1825,6 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 				if (!q) {
 					// first level branch
 					memcpy(s->merklebranches_bin[0], s->block_template->txns[0].txid_bin, 32);
-					for(j=0;j<32;j++) {
-						pk_u16le(s->merklebranches_hex[0], j << 1, upk_u16le(s->block_template->txns[0].txid_hex, (31 - j) << 1));
-					}
-					s->merklebranches_hex[0][64] = 0;
 				} else {
 					// second+ level branch
 					if (level_needs_dupe && (i==(next_level_size-1))) {
@@ -1839,7 +1832,6 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 					} else {
 						memcpy(s->merklebranches_bin[q], &current_level[(i<<1)+1][0], 32);
 					}
-					hash2hex(s->merklebranches_bin[q], s->merklebranches_hex[q]);
 				}
 			} else {
 				if (!q) {
@@ -1866,26 +1858,11 @@ void stratum_calculate_merkle_branches(T_DATUM_STRATUM_JOB *s) {
 				double_sha256(next_level[i], combined, 64);
 			}
 		}
-		current_level = next_level;
-		next_level+=i+1;
 		current_level_size = next_level_size;
 		q++;
 	}
 	
 	s->merklebranch_count = q;
-	
-	// Pre-construct stratum v1 job field
-	s->merklebranches_full[0] = '[';
-	j=1;
-	for(i=0;i<q;i++) {
-		if (i) {
-			s->merklebranches_full[j] = ',';
-			j++;
-		}
-		j += sprintf(&s->merklebranches_full[j], "\"%s\"", s->merklebranches_hex[i]);
-	}
-	s->merklebranches_full[j] = ']';
-	s->merklebranches_full[j+1] = 0;
 	
 	if (safety_check != marker) {
 		DLOG_FATAL("BUG: stratum_calculate_merkle_branches is NOT thread safe and appears to have been called concurrently!");
