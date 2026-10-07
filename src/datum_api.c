@@ -403,14 +403,14 @@ bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char *
 	return true;
 }
 
-int datum_api_submit_uncached_response(struct MHD_Connection * const connection, const unsigned int status_code, struct MHD_Response * const response) {
+enum MHD_Result datum_api_submit_uncached_response(struct MHD_Connection * const connection, const unsigned int status_code, struct MHD_Response * const response) {
 	http_resp_prevent_caching(response);
-	int ret = MHD_queue_response(connection, status_code, response);
+	enum MHD_Result ret = MHD_queue_response(connection, status_code, response);
 	MHD_destroy_response(response);
 	return ret;
 }
 
-int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
+enum MHD_Result datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
 	struct MHD_Response *response = datum_api_create_empty_mhd_response();
 	return datum_api_submit_uncached_response(connection, status_code, response);
 }
@@ -459,7 +459,7 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 			DLOG_DEBUG("Wrong password in HTTP authentication");
 		}
 		struct MHD_Response * const response = auth_failure_response_creator();
-		ret = MHD_queue_auth_fail_response2(connection, realm, "x", response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
+		MHD_queue_auth_fail_response2(connection, realm, "x", response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
 		MHD_destroy_response(response);
 		return false;
 	}
@@ -541,19 +541,19 @@ static struct MHD_Response *datum_api_create_response_authfail_threads() {
 	return datum_api_create_response_authfail(www_threads_top_html, www_threads_top_html_sz);
 }
 
-static int datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz, const char * const etag) {
+static enum MHD_Result datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz, const char * const etag) {
 	const char * const if_none_match_header = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, "If-None-Match");
 	if (if_none_match_header && 0 == strcmp(if_none_match_header, etag)) {
 		struct MHD_Response *response = datum_api_create_empty_mhd_response();
 		MHD_add_response_header(response, "Etag", etag);
-		int ret = MHD_queue_response(connection, MHD_HTTP_NOT_MODIFIED, response);
+		const enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_NOT_MODIFIED, response);
 		MHD_destroy_response(response);
 		return ret;
 	}
 	struct MHD_Response * const response = MHD_create_response_from_buffer(datasz, (void*)data, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", mimetype);
 	MHD_add_response_header(response, "Etag", etag);
-	const int ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
+	const enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
 	MHD_destroy_response (response);
 	return ret;
 }
@@ -614,7 +614,7 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	datum_api_cmd_kill_client(tid, cid);
 }
 
-int datum_api_cmd(struct MHD_Connection *connection, char *post, size_t len) {
+enum MHD_Result datum_api_cmd(struct MHD_Connection *connection, char *post, size_t len) {
 	struct MHD_Response *response;
 	json_t *root, *cmd, *param;
 	json_error_t error;
@@ -715,7 +715,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, size_t len) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_coinbaser(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_coinbaser(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	T_DATUM_STRATUM_JOB *sjob;
 	int j, i;
@@ -840,7 +840,7 @@ struct MHD_Response *datum_api_thread_dashboard_inner_noadmin() {
 }
 
 static
-int datum_api_thread_dashboard(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_thread_dashboard_inner_noadmin)) {
 		return MHD_YES;
 	}
@@ -848,7 +848,7 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_client_dashboard(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_client_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	size_t connected_clients = 0;
 	int i, j, ii;
@@ -1080,7 +1080,7 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 	return buf_printf(buf, "%d", val);
 }
 
-int datum_api_config_dashboard(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_config_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	size_t max_sz;
 	
@@ -1412,9 +1412,8 @@ void *datum_restart_thread(void *ptr) {
 	abort();  // impossible to get here
 }
 
-int datum_api_config_post(struct MHD_Connection * const connection, char * const post, const size_t len) {
+enum MHD_Result datum_api_config_post(struct MHD_Connection * const connection, char * const post, const size_t len) {
 	struct MHD_Response *response;
-	int ret;
 	const char *key;
 	json_t *j_it;
 	
@@ -1511,7 +1510,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 	}
 	json_decref(errors);
 
-	ret = datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
+	const enum MHD_Result ret = datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
 	
 	if (status.need_restart) {
 		DLOG_INFO("Config change requires restarting gateway, proceeding");
@@ -1573,7 +1572,7 @@ void datum_api_dash_stats(T_DATUM_API_DASH_VARS *dashdata) {
 
 }
 
-int datum_api_homepage(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_homepage(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	T_DATUM_API_DASH_VARS vardata;
 	
@@ -1595,7 +1594,7 @@ int datum_api_homepage(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_OK(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_OK(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	const char *ok_response = "OK";
 	response = MHD_create_response_from_buffer(strlen(ok_response), (void *)ok_response, MHD_RESPMEM_PERSISTENT);
@@ -1631,7 +1630,7 @@ int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
 }
 #endif
 
-int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
+enum MHD_Result datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
 	const char *time_str;
 	
 	time_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "password");
