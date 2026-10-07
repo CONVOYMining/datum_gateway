@@ -98,6 +98,20 @@ void datum_utils_tests_hex(void) {
 	}
 }
 
+static
+void datum_utils_tests_bytes_to_hex(void) {
+	const uint8_t bytes[] = {0x00, 0x12, 0xab, 0xff};
+	char hex[9];
+	
+	memset(hex, 0x0e, sizeof(hex));
+	datum_test(bytes_to_hex(hex, bytes, 0) == 0);
+	datum_test(hex[0] == 0x0e);
+	
+	datum_test(bytes_to_hex(hex, bytes, sizeof(bytes)) == 8);
+	datum_test(memcmp(hex, "0012abff", 8) == 0);
+	datum_test(hex[8] == 0x0e);
+}
+
 void datum_utils_tests_secure_strequals(void) {
 	const char * const secret = "abc";
 	const size_t secret_len = strlen(secret);
@@ -178,6 +192,7 @@ static void datum_utils_tests_buf(void) {
 
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
+	datum_utils_tests_bytes_to_hex();
 	datum_utils_tests_secure_strequals();
 	datum_utils_tests_scriptnum();
 	datum_utils_tests_pdiff_to_bdiff();

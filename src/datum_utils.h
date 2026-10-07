@@ -92,6 +92,14 @@ int addr_2_output_script(const char *addr, unsigned char *script, int max_len);
 int output_script_2_addr(const unsigned char *script, const int len, char *addr);
 int base64_decode(const char *in, size_t inLen, unsigned char *out, size_t *outLen);
 void uchar_to_hex(char *s, const unsigned char b);
+
+static inline size_t bytes_to_hex(char * const hex, const uint8_t * const bytes, const size_t len) {
+	for (size_t i = 0; i < len; ++i) {
+		uchar_to_hex(&hex[i << 1], bytes[i]);
+	}
+	return len << 1;
+}
+
 int get_bitcoin_varint_len_bytes(uint64_t n);
 bool strncpy_uachars(char *out, const char *in, size_t maxlen);
 bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
