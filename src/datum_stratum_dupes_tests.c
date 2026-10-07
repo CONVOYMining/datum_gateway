@@ -352,10 +352,72 @@ static void datum_dupe_table_full_wipe_tests(void) {
 	datum_config.stratum_v1_share_stale_seconds = saved_stale;
 }
 
+// The table is sized from the product of three configured values, and of those
+// stratum.max_clients_per_thread has no lower bound. A table sized from zero or from a
+// negative must still be a table.
+static void datum_dupe_table_min_size_tests(void) {
+	const int saved_clients = datum_config.stratum_v1_max_clients_per_thread;
+	const int saved_shares = datum_config.stratum_v1_vardiff_target_shares_min;
+	const int saved_stale = datum_config.stratum_v1_share_stale_seconds;
+	const int clients[] = { 0, -1 };
+
+	datum_config.stratum_v1_vardiff_target_shares_min = 8;
+	datum_config.stratum_v1_share_stale_seconds = 120;
+
+	// One live job, so that nothing ages out and the table has to grow to take the shares
+	T_DATUM_STRATUM_JOB * const job = calloc(1, sizeof(*job));
+	T_DATUM_STRATUM_JOB * const saved_job = global_cur_stratum_jobs[1];
+	datum_test(job != NULL);
+	if (job) {
+		job->tsms = current_time_millis();
+		global_cur_stratum_jobs[1] = job;
+
+		for (size_t n = 0; n < sizeof(clients) / sizeof(clients[0]); ++n) {
+			datum_config.stratum_v1_max_clients_per_thread = clients[n];
+
+			T_DATUM_STRATUM_THREADPOOL_DATA * const thread_data = calloc(1, sizeof(*thread_data));
+			datum_test(thread_data != NULL);
+			if (!thread_data) break;
+			datum_stratum_dupes_init(thread_data);
+			T_DATUM_STRATUM_DUPES * const dupes = thread_data->dupes;
+
+			// Nothing below runs if this fails, and the negative size is then not tried at
+			// all: a table without room cannot grow either, and allocating a negative number
+			// of entries does not return.
+			const bool table_has_at_least_16_entries = dupes->max_items >= 16;
+			const bool usable = datum_test(table_has_at_least_16_entries);
+			if (usable) {
+				unsigned char extranonce[12] = {0};
+				for (int i = 0; i < 64; ++i) {
+					const uint64_t nonce = ((uint64_t)i << 32) | (uint64_t)((i * 5) + 2);
+					datum_test(!datum_stratum_check_for_dupe(thread_data, nonce, 1, 5000 + i, 0, extranonce));
+				}
+				for (int i = 0; i < 64; ++i) {
+					const uint64_t nonce = ((uint64_t)i << 32) | (uint64_t)((i * 5) + 2);
+					datum_test(datum_stratum_check_for_dupe(thread_data, nonce, 1, 5000 + i, 0, extranonce));
+				}
+			}
+
+			free(dupes->ptr);
+			free(thread_data->dupes);
+			free(thread_data);
+			if (!usable) break;
+		}
+
+		global_cur_stratum_jobs[1] = saved_job;
+		free(job);
+	}
+
+	datum_config.stratum_v1_max_clients_per_thread = saved_clients;
+	datum_config.stratum_v1_vardiff_target_shares_min = saved_shares;
+	datum_config.stratum_v1_share_stale_seconds = saved_stale;
+}
+
 void datum_stratum_dupes_tests(void) {
 	datum_pow_dupe_tests();
 	datum_dupe_table_fill_tests();
 	datum_dupe_table_prune_tests();
 	datum_dupe_table_cycle_tests();
 	datum_dupe_table_full_wipe_tests();
+	datum_dupe_table_min_size_tests();
 }
