@@ -134,22 +134,22 @@ void datum_utils_tests_secure_strequals(void) {
 }
 
 void datum_utils_tests_scriptnum(void) {
-	char encoded[32];
+	uint8_t encoded[16];
 
-	datum_test(append_UNum_hex(0, encoded) == 2);
-	datum_test(!strcmp(encoded, "00"));
-	datum_test(append_UNum_hex(1, encoded) == 2);
-	datum_test(!strcmp(encoded, "51"));
-	datum_test(append_UNum_hex(16, encoded) == 2);
-	datum_test(!strcmp(encoded, "60"));
-	datum_test(append_UNum_hex(17, encoded) == 4);
-	datum_test(!strcmp(encoded, "0111"));
-	datum_test(append_UNum_hex(127, encoded) == 4);
-	datum_test(!strcmp(encoded, "017f"));
-	datum_test(append_UNum_hex(128, encoded) == 6);
-	datum_test(!strcmp(encoded, "028000"));
-	datum_test(append_UNum_hex(32768, encoded) == 8);
-	datum_test(!strcmp(encoded, "03008000"));
+	datum_test(append_UNum(0, encoded) == 1);
+	datum_test(encoded[0] == 0x00);
+	datum_test(append_UNum(1, encoded) == 1);
+	datum_test(encoded[0] == 0x51);
+	datum_test(append_UNum(16, encoded) == 1);
+	datum_test(encoded[0] == 0x60);
+	datum_test(append_UNum(17, encoded) == 2);
+	datum_test(!memcmp(encoded, "\x01\x11", 2));
+	datum_test(append_UNum(127, encoded) == 2);
+	datum_test(!memcmp(encoded, "\x01\x7f", 2));
+	datum_test(append_UNum(128, encoded) == 3);
+	datum_test(!memcmp(encoded, "\x02\x80\x00", 3));
+	datum_test(append_UNum(32768, encoded) == 4);
+	datum_test(!memcmp(encoded, "\x03\x00\x80\x00", 4));
 }
 
 static void datum_utils_tests_pdiff_to_bdiff(void) {

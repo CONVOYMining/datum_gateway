@@ -297,15 +297,14 @@ int append_bitcoin_varint_hex(uint64_t n, char *s) {
 	}
 }
 
-int append_UNum_hex(uint64_t n, char *s) {
+int append_UNum(uint64_t n, uint8_t *s) {
 	if (n == 0) {
-		memcpy(s, "00", 3); // OP_0
-		return 2;
+		s[0] = 0x00; // OP_0
+		return 1;
 	}
 	if (n <= 16) {
-		uchar_to_hex(s, (uint8_t)(0x50 + n)); // OP_1 through OP_16
-		s[2] = '\0';
-		return 2;
+		s[0] = (uint8_t)(0x50 + n); // OP_1 through OP_16
+		return 1;
 	}
 	
 	int count = 0;
@@ -317,29 +316,24 @@ int append_UNum_hex(uint64_t n, char *s) {
 		temp >>= 8;
 	} while (temp != 0);
 	
-	int len = 2;
-	uchar_to_hex(s, count);
+	s[0] = count;
 	
 	for (int i = 0; i < count; i++) {
-		uchar_to_hex(s+len, (uint8_t)(n & 0xFF));
+		s[i + 1] = (uint8_t)(n & 0xFF);
 		
 		last_msb = (n >= 0x80);
 		
 		n >>= 8;
-		len += 2;
 	}
 	
 	// if the last byte is >= 0x80, then we need to inject a zero at the end
 	if (last_msb) {
 		count++;
-		uchar_to_hex(s, count);
-		uchar_to_hex(s+len, 0);
-		len+=2;
+		s[0] = count;
+		s[count] = 0;
 	}
 	
-	s[len] = '\0';
-	
-	return len;
+	return count + 1;
 }
 
 void hex_to_bin_le(const char *hex, unsigned char *bin) {

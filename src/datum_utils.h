@@ -81,7 +81,7 @@ static inline bitcoin_difficulty_typ datum_pdiff_to_diff(uint64_t n) {
 
 unsigned long long block_reward(unsigned int block_height);
 int append_bitcoin_varint_hex(uint64_t n, char *s);
-int append_UNum_hex(uint64_t n, char *s);
+int append_UNum(uint64_t n, uint8_t *s);
 void panic_from_thread(int a);
 bool double_sha256(void *out, const void *in, size_t length);
 void hex_to_bin_le(const char *hex, unsigned char *bin);

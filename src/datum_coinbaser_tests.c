@@ -45,12 +45,21 @@
 int datum_stratum_coinbase_fit_to_template(
 	int max_sz, int fixed_bytes, T_DATUM_STRATUM_JOB *s);
 
+static void datum_test_coinbase_data_hex(char *hex, const uint8_t *coinbase_data, int coinbase_data_size) {
+	if (coinbase_data_size < 0) {
+		hex[0] = '\0';
+		return;
+	}
+	hex[bytes_to_hex(hex, coinbase_data, coinbase_data_size)] = '\0';
+}
+
 static void datum_coinbase_data_serialization_tests(void) {
 	const uint64_t saved_prime_id = datum_config.prime_id;
 	const uint16_t saved_unique_id = datum_config.coinbase_unique_id;
 	char saved_primary[sizeof(datum_config.mining_coinbase_tag_primary)];
 	char saved_secondary[sizeof(datum_config.mining_coinbase_tag_secondary)];
-	char coinbase_data[201] = {0};
+	uint8_t coinbase_data[MAX_COINBASE_DATA_SIZE] = {0};
+	char coinbase_data_hex[MAX_COINBASE_DATA_SIZE * 2 + 1];
 	int target_pot_index = -1;
 	int coinbase_data_size;
 	
@@ -60,40 +69,40 @@ static void datum_coinbase_data_serialization_tests(void) {
 	strcpy(datum_config.mining_coinbase_tag_secondary, "BC");
 	datum_config.prime_id = 0;
 	datum_config.coinbase_unique_id = 0x1234;
-	coinbase_data_size = generate_coinbase_input(42, coinbase_data, &target_pot_index);
-	coinbase_data[coinbase_data_size * 2] = '\0';
+	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index);
+	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 12);
 	datum_test(target_pot_index == 9);
-	datum_test(!strcmp(coinbase_data, "012a05410f42430003ff3412"));
+	datum_test(!strcmp(coinbase_data_hex, "012a05410f42430003ff3412"));
 	
 	datum_config.mining_coinbase_tag_primary[0] = '\0';
 	datum_config.mining_coinbase_tag_secondary[0] = '\0';
 	target_pot_index = -1;
-	coinbase_data_size = generate_coinbase_input(42, coinbase_data, &target_pot_index);
-	coinbase_data[coinbase_data_size * 2] = '\0';
+	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index);
+	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 8);
 	datum_test(target_pot_index == 5);
-	datum_test(!strcmp(coinbase_data, "012a010003ff3412"));
+	datum_test(!strcmp(coinbase_data_hex, "012a010003ff3412"));
 	
 	datum_config.prime_id = UINT64_C(0x887766555d965e4e);
 	target_pot_index = -1;
-	coinbase_data_size = generate_coinbase_input(42, coinbase_data, &target_pot_index);
-	coinbase_data[coinbase_data_size * 2] = '\0';
+	coinbase_data_size = generate_coinbase_data(42, coinbase_data, &target_pot_index);
+	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 16);
 	datum_test(target_pot_index == 5);
-	datum_test(!strcmp(coinbase_data, "012a01000bff34124e5e965d55667788"));
+	datum_test(!strcmp(coinbase_data_hex, "012a01000bff34124e5e965d55667788"));
 	
 	memset(datum_config.mining_coinbase_tag_primary, 'A', 60);
 	datum_config.mining_coinbase_tag_primary[60] = '\0';
 	memset(datum_config.mining_coinbase_tag_secondary, 'B', 20);
 	datum_config.mining_coinbase_tag_secondary[20] = '\0';
 	target_pot_index = -1;
-	coinbase_data_size = generate_coinbase_input(840000, coinbase_data, &target_pot_index);
-	coinbase_data[coinbase_data_size * 2] = '\0';
+	coinbase_data_size = generate_coinbase_data(840000, coinbase_data, &target_pot_index);
+	datum_test_coinbase_data_hex(coinbase_data_hex, coinbase_data, coinbase_data_size);
 	datum_test(coinbase_data_size == 100);
 	datum_test(target_pot_index == 89);
-	datum_test(!strncmp(coinbase_data, "0340d10c4c52", 12));
-	datum_test(!strcmp(coinbase_data + target_pot_index * 2, "ff34124e5e965d55667788"));
+	datum_test(!strncmp(coinbase_data_hex, "0340d10c4c52", 12));
+	datum_test(!strcmp(coinbase_data_hex + target_pot_index * 2, "ff34124e5e965d55667788"));
 	
 	memcpy(datum_config.mining_coinbase_tag_primary, saved_primary, sizeof(saved_primary));
 	memcpy(datum_config.mining_coinbase_tag_secondary, saved_secondary, sizeof(saved_secondary));
