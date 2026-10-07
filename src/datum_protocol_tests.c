@@ -1504,7 +1504,7 @@ static void datum_protocol_stxlist_byid_tests(void) {
 	pk_u16le(request, 1, 64);
 	for (k = 0; k < 64; ++k) pk_u16le(request, 3 + 2 * k, 0);
 	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 64, request) == 1);
-	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF4);
+	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF5);
 	datum_test(!memcmp(tail, canary, sizeof(canary)));
 	server_out_buf = 0;
 	

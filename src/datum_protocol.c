@@ -1739,7 +1739,7 @@ int datum_protocol_job_validation_stxlist_byid(int len, unsigned char *data) {
 		if (!datum_protocol_stxlist_reply_fits((size_t)i, block_template->txns[req_id].size)) {
 			pthread_rwlock_unlock(&datum_jobs_rwlock);
 			DLOG_WARN("DATUM server requested %u transactions for job %d, more than one reply can carry; refusing", (unsigned)req_count, (int)job_index);
-			datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF4);
+			datum_protocol_job_validation_send_error(msg, 0x91, job_index, 0xF5);
 			return 1;
 		}
 		
