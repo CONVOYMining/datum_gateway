@@ -413,6 +413,51 @@ static void datum_dupe_table_min_size_tests(void) {
 	datum_config.stratum_v1_share_stale_seconds = saved_stale;
 }
 
+// Not in the header: nothing but datum_stratum_check_for_dupe is meant to call it
+T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dupes, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int version_bits, unsigned char *extranonce_bin, T_DATUM_STRATUM_DUPE_ITEM *insert_after);
+
+// datum_stratum_check_for_dupe makes room before it inserts, so a full table at the insert
+// means a bug somewhere else. The insert must then refuse the entry, not write past the
+// array.
+static void datum_dupe_table_full_insert_tests(void) {
+	// Two slots more than the table is told about, so that a write past its end is seen
+	// here without being one
+	T_DATUM_STRATUM_DUPE_ITEM items[6] = {0};
+	T_DATUM_STRATUM_DUPES * const dupes = calloc(1, sizeof(*dupes));
+	unsigned char extranonce[12] = {0};
+
+	datum_test(dupes != NULL);
+	if (!dupes) return;
+	dupes->ptr = items;
+	dupes->max_items = 4;
+
+	// No job behind these entries. Should an insert clean up when it fills the table, the
+	// cleanup finds every entry stale and prunes, and does not reallocate this array.
+	T_DATUM_STRATUM_JOB * const saved_job = global_cur_stratum_jobs[1];
+	global_cur_stratum_jobs[1] = NULL;
+
+	for (int i = 0; i < 4; ++i) {
+		datum_test(datum_stratum_add_new_dupe(dupes, 0x10000 + i, 1, 6000, 0, extranonce, NULL) == &items[i]);
+	}
+	const bool table_is_full = (dupes->current_items == 4);
+	datum_test(table_is_full);
+
+	// Once as the first entry of a bucket, once linked in after an existing entry
+	datum_test(datum_stratum_add_new_dupe(dupes, 0x20000, 1, 6000, 0, extranonce, NULL) == NULL);
+	datum_test(datum_stratum_add_new_dupe(dupes, 0x20001, 1, 6000, 0, extranonce, &items[0]) == NULL);
+
+	const bool table_is_still_full = (dupes->current_items == 4);
+	datum_test(table_is_still_full);
+	const bool nothing_written_past_the_table =
+		!items[4].nonce && !items[4].ntime && !items[5].nonce && !items[5].ntime;
+	datum_test(nothing_written_past_the_table);
+	const bool refused_entry_was_not_linked = !items[0].next;
+	datum_test(refused_entry_was_not_linked);
+
+	global_cur_stratum_jobs[1] = saved_job;
+	free(dupes);
+}
+
 void datum_stratum_dupes_tests(void) {
 	datum_pow_dupe_tests();
 	datum_dupe_table_fill_tests();
@@ -420,4 +465,5 @@ void datum_stratum_dupes_tests(void) {
 	datum_dupe_table_cycle_tests();
 	datum_dupe_table_full_wipe_tests();
 	datum_dupe_table_min_size_tests();
+	datum_dupe_table_full_insert_tests();
 }
