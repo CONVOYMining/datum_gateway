@@ -458,6 +458,103 @@ static void datum_dupe_table_full_insert_tests(void) {
 	free(dupes);
 }
 
+// One share of the run below, made from its number: eight buckets for all of them so that
+// the buckets hold long chains, a nonce shared by two shares that differ in ntime and
+// extranonce, and a job that is either current (0, 1) or aged out (2, 3).
+static bool datum_dupe_reference_share(T_DATUM_STRATUM_THREADPOOL_DATA *thread_data, const int number, unsigned short * const out_job) {
+	const uint32_t mixed = (uint32_t)(number >> 1) * 2654435761u;
+	const uint64_t nonce = ((uint64_t)mixed << 16) | (uint64_t)(mixed >> 29);
+	const unsigned short job = (unsigned short)((mixed >> 8) & 3);
+	unsigned char extranonce[12] = {0};
+
+	extranonce[3] = (unsigned char)(number & 1);
+	if (out_job) *out_job = job;
+	return datum_stratum_check_for_dupe(thread_data, nonce, job, 7000 + (number & 0xff), 0x20000000, extranonce);
+}
+
+// What the table is for, across many cleanups of both kinds: a share that was submitted
+// before on a job that is still current is reported as a duplicate, and a share that was
+// never submitted is not. A share on a job that has aged out may be forgotten at any
+// cleanup, so nothing is asserted about submitting one of those again.
+static void datum_dupe_table_reference_tests(void) {
+	enum { rounds = 20000 };
+	const int saved_clients = datum_config.stratum_v1_max_clients_per_thread;
+	const int saved_shares = datum_config.stratum_v1_vardiff_target_shares_min;
+	const int saved_stale = datum_config.stratum_v1_share_stale_seconds;
+
+	datum_config.stratum_v1_max_clients_per_thread = 1;
+	datum_config.stratum_v1_vardiff_target_shares_min = 1;
+	datum_config.stratum_v1_share_stale_seconds = 60;
+
+	T_DATUM_STRATUM_THREADPOOL_DATA * const thread_data = calloc(1, sizeof(*thread_data));
+	T_DATUM_STRATUM_JOB * const jobs = calloc(4, sizeof(*jobs));
+	// The numbers of the shares submitted on a current job, which are the ones that have to
+	// be remembered
+	int * const remembered = calloc(rounds, sizeof(*remembered));
+	datum_test(thread_data != NULL && jobs != NULL && remembered != NULL);
+	if (thread_data && jobs && remembered) {
+		T_DATUM_STRATUM_JOB *saved[4];
+		for (int j = 0; j < 4; ++j) {
+			saved[j] = global_cur_stratum_jobs[j];
+			global_cur_stratum_jobs[j] = &jobs[j];
+		}
+		datum_stratum_dupes_init(thread_data);
+		T_DATUM_STRATUM_DUPES * const dupes = thread_data->dupes;
+		const int initial_max = dupes->max_items;
+
+		uint32_t random = 1;
+		int next_number = 0, remembered_count = 0, resubmitted = 0;
+		int missed_duplicates = 0, false_duplicates = 0;
+		bool saw_prune = false;
+
+		for (int i = 0; i < rounds; ++i) {
+			const uint64_t now = current_time_millis();
+			jobs[0].tsms = now;
+			jobs[1].tsms = now;
+			jobs[2].tsms = now - 600000;
+			jobs[3].tsms = now - 600000;
+
+			const int before = dupes->current_items;
+			random = (random * 1664525u) + 1013904223u;
+			if (remembered_count && (random >> 29) < 3) {
+				// Again, a share that is on a current job
+				const int number = remembered[(random >> 4) % (uint32_t)remembered_count];
+				if (!datum_dupe_reference_share(thread_data, number, NULL)) ++missed_duplicates;
+				++resubmitted;
+			} else {
+				// A share that was never submitted
+				unsigned short job;
+				if (datum_dupe_reference_share(thread_data, next_number, &job)) ++false_duplicates;
+				if (job < 2) remembered[remembered_count++] = next_number;
+				++next_number;
+			}
+			if (dupes->current_items < before) saw_prune = true;
+		}
+
+		datum_test(missed_duplicates == 0);
+		datum_test(false_duplicates == 0);
+		datum_dupe_index_is_sound(dupes);
+
+		// The run has to have gone through both kinds of cleanup, and has to have asked
+		// about remembered shares often, or the two counts above prove little
+		const bool saw_expand = (dupes->max_items > initial_max);
+		datum_test(saw_expand);
+		datum_test(saw_prune);
+		datum_test(resubmitted > rounds / 4);
+
+		for (int j = 0; j < 4; ++j) global_cur_stratum_jobs[j] = saved[j];
+		free(dupes->ptr);
+		free(thread_data->dupes);
+	}
+	free(remembered);
+	free(jobs);
+	free(thread_data);
+
+	datum_config.stratum_v1_max_clients_per_thread = saved_clients;
+	datum_config.stratum_v1_vardiff_target_shares_min = saved_shares;
+	datum_config.stratum_v1_share_stale_seconds = saved_stale;
+}
+
 void datum_stratum_dupes_tests(void) {
 	datum_pow_dupe_tests();
 	datum_dupe_table_fill_tests();
@@ -466,4 +563,5 @@ void datum_stratum_dupes_tests(void) {
 	datum_dupe_table_full_wipe_tests();
 	datum_dupe_table_min_size_tests();
 	datum_dupe_table_full_insert_tests();
+	datum_dupe_table_reference_tests();
 }
