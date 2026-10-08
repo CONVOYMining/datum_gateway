@@ -2156,13 +2156,7 @@ int datum_protocol_migration_request(int len, const unsigned char *data) {
 		port == datum_config.datum_pool_port &&
 		strcmp(pubkey, datum_config.datum_pool_pubkey) == 0;
 	if (returning_to_configured) {
-		if (!datum_protocol_current_migration_deadline_ms) {
-			pthread_mutex_unlock(&datum_protocol_migration_lock);
-			datum_protocol_log_migration_target(
-				"Ignoring DATUM migration target because it is already active",
-				data + 4, host_len, port);
-			return 1;
-		}
+		// Already-active configured endpoint still migrates.
 		deadline_ms = 0;
 	} else {
 		deadline_ms = datum_protocol_current_migration_deadline_ms;
