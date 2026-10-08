@@ -36,14 +36,23 @@
 #ifndef _DATUM_COINBASE_H_
 #define _DATUM_COINBASE_H_
 
+#include "datum_gateway.h"
+
 #define MAX_COINBASE_TAG_SPACE 82 // leaves space for BIP34 height, extranonces, datum prime tag, etc.
 
 typedef struct T_DATUM_STRATUM_JOB T_DATUM_STRATUM_JOB;
 
+// One coinbase's coinb1 and coinb2 in ascii hex, written while the job's
+// coinbases are built. The job keeps only the binary parts.
+typedef struct {
+	char coinb1[STRATUM_COINBASE1_MAX_LEN];
+	char coinb2[STRATUM_COINBASE2_MAX_LEN];
+} T_DATUM_COINBASE_HEX;
+
 int datum_coinbaser_init(void);
 int generate_coinbase_input(int height, char *cb, int *target_pot_index);
 int datum_script_sigop_cost(const unsigned char *script, int len);
-void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1);
+void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, T_DATUM_COINBASE_HEX *hex, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1);
 void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_only);
 void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool new_block);
 int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, int cblen);
