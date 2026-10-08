@@ -10,7 +10,7 @@
  *
  * ---
  *
- * Copyright (c) 2025 Bitcoin Ocean, LLC & Luke Dashjr
+ * Copyright (c) 2024-2025 Bitcoin Ocean, LLC & Luke Dashjr
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -113,6 +113,25 @@ static void datum_conf_difficulty_tests(void) {
 	datum_conf_test_difficulty(json_string("4e12"), -1, 0);
 	datum_conf_test_difficulty(json_string("4.4e12"), -1, 0);
 	datum_conf_test_difficulty(json_string("0x1p42"), -1, 0);
+}
+
+void datum_conf_test_expected_n_global_nonstale_shares(void) {
+	global_config_t cfg = {
+		.stratum_v1_max_clients_per_thread = 1,
+		.stratum_v1_vardiff_target_shares_min = 1,
+		.stratum_v1_share_stale_seconds = 60,
+	};
+	datum_test(datum_expected_n_global_nonstale_shares(&cfg) == 16);
+	
+	cfg.stratum_v1_max_clients_per_thread = 128;
+	cfg.stratum_v1_vardiff_target_shares_min = 8;
+	cfg.stratum_v1_share_stale_seconds = 120;
+	datum_test(datum_expected_n_global_nonstale_shares(&cfg) == 32768);
+	
+	cfg.stratum_v1_max_clients_per_thread = 4096;
+	cfg.stratum_v1_vardiff_target_shares_min = 8096;
+	cfg.stratum_v1_share_stale_seconds = 150;
+	datum_test(datum_expected_n_global_nonstale_shares(&cfg) == 1326448640UL);
 }
 
 struct datum_test_username_mods_range {
@@ -280,5 +299,6 @@ void datum_conf_username_mods_tests() {
 
 void datum_conf_tests(void) {
 	datum_conf_difficulty_tests();
+	datum_conf_test_expected_n_global_nonstale_shares();
 	datum_conf_username_mods_tests();
 }

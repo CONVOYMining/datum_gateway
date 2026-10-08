@@ -227,7 +227,7 @@ static void datum_dupe_table_cycle_tests(void) {
 	if (!thread_data) return;
 	datum_stratum_dupes_init(thread_data);
 	T_DATUM_STRATUM_DUPES * const dupes = thread_data->dupes;
-	const int initial_max = dupes->max_items;
+	const size_t initial_max = dupes->max_items;
 
 	// Job 0 included deliberately. It is a real job slot on a running gateway, and a zeroed
 	// table entry reads as job_index 0, so the sort consults job 0 for entries that are not
@@ -261,7 +261,7 @@ static void datum_dupe_table_cycle_tests(void) {
 		// not a duplicate has to become exactly one new entry. Anything else means the
 		// insert refused it, which is the only way the fix can go wrong quietly: the share
 		// is still accepted, but nothing remembers it and a real resubmission slips past.
-		const int before = dupes->current_items;
+		const size_t before = dupes->current_items;
 		const bool had_room = before < dupes->max_items;
 		const bool dupe = datum_stratum_check_for_dupe(thread_data, nonce,
 			(unsigned short)(i & 3), 3000 + (i & 0xff), (unsigned int)i, extranonce);
