@@ -271,6 +271,71 @@
 				</g>
 				<g>
 					<g>
+						<path d="M 440 145 L 440 212 L 345.8 212 L 345.8 283" fill="none" stroke="rgb(0, 0, 0)" stroke-miterlimit="10" pointer-events="stroke"/>
+					</g>
+					<g>
+						<g>
+							<g fill="rgb(0, 0, 0)" font-family="&quot;Helvetica&quot;" text-anchor="middle" font-size="11px">
+								<rect fill="rgb(255, 255, 255)" stroke="none" x="335" y="181" width="101" height="27" stroke-width="0"/>
+								<text x="384" y="191">HTTP/TCP (optional)</text>
+								<text x="384" y="204">(example port: 7152)</text>
+							</g>
+						</g>
+					</g>
+				</g>
+				<g font-family="&quot;Helvetica&quot;">
+						<rect x="170.41" y="283" width="175.39" height="161.8" fill="#050505" stroke="#72717c" stroke-width="0.4"/>
+						<rect x="170.41" y="283" width="175.39" height="6" fill="#f8f8fb" stroke="#8c8c96" stroke-width="0.3"/>
+						<circle cx="173.2" cy="286" r="0.75" fill="#8c8c96"/>
+						<rect x="176" y="284.2" width="167.5" height="3.6" rx="1.2" fill="#ffffff" stroke="#a5a5c7" stroke-width="0.3"/>
+						<circle cx="178.2" cy="286" r="0.7" fill="none" stroke="#555566" stroke-width="0.3"/>
+						<text x="180" y="286.9" fill="#555566" font-size="2.5px">http://datum-gateway:7152</text>
+						<rect x="170.41" y="289" width="175.39" height="10" fill="#35343b"/>
+						<text x="258.1" y="296" fill="#ffffff" text-anchor="middle" font-size="5.5px" font-weight="bold">Decentralized Client Stats</text>
+						<rect x="170.41" y="299" width="175.39" height="145.8" fill="#050505"/>
+						<rect x="170.41" y="299" width="56" height="145.8" fill="#2c2b3a"/>
+						<g fill="none" stroke="#55545e" stroke-width="0.3">
+							<path d="M 170.41 309 H 345.8"/>
+							<path d="M 170.41 319 H 345.8"/>
+							<path d="M 170.41 329 H 345.8"/>
+							<path d="M 170.41 339 H 345.8"/>
+							<path d="M 170.41 349 H 345.8"/>
+							<path d="M 170.41 359 H 345.8"/>
+							<path d="M 170.41 369 H 345.8"/>
+							<path d="M 170.41 379 H 345.8"/>
+							<path d="M 170.41 389 H 345.8"/>
+							<path d="M 170.41 431 H 345.8"/>
+							<path d="M 226.41 299 V 444.8"/>
+						</g>
+						<g fill="#ffffff" font-size="3.7px">
+							<text x="173" y="306">Local Shares Accepted:</text>
+							<text x="229" y="306">432 (11550720 diff)</text>
+							<text x="173" y="316">Local Shares Rejected:</text>
+							<text x="229" y="316">4 (81920 diff)</text>
+							<text x="173" y="326">Pool Shares Accepted:</text>
+							<text x="229" y="326">421 (11354112 diff)</text>
+							<text x="173" y="336">Pool Shares Rejected:</text>
+							<text x="229" y="336">9 (147456 diff)</text>
+							<text x="173" y="346">Status:</text>
+							<circle cx="231.2" cy="344.8" r="1.4" fill="#65e420"/>
+							<text x="234.5" y="346">Connected and Ready</text>
+							<text x="173" y="356">Pool Host:</text>
+							<text x="229" y="356">datum-beta1.mine.convoy.xyz:28915</text>
+							<text x="173" y="366">Pool Tag:</text>
+							<text x="229" y="366">"CONVOY"</text>
+							<text x="173" y="376">Secondary/Miner Tag:</text>
+							<text x="229" y="376">"DATUM User"</text>
+							<text x="173" y="386">Pool Current MinDiff:</text>
+							<text x="229" y="386">1</text>
+							<text x="173" y="411">Pool Pubkey:</text>
+							<text x="229" y="403" font-family="monospace" font-size="3.4px">02a1b2c3d4e5f67890123456789abcdef</text>
+							<text x="229" y="410" font-family="monospace" font-size="3.4px">0123456789abcdef0123456789abcdef</text>
+							<text x="173" y="440">Process uptime:</text>
+							<text x="229" y="440">1 hours, 33 minutes, 1 seconds</text>
+						</g>
+					</g>
+				<g>
+					<g>
 						<path d="M 471.8 147.5 L 471.8 268.8 L 495 268.8 L 495 390" fill="none" stroke="rgb(0, 0, 0)" stroke-miterlimit="10" pointer-events="stroke"/>
 					</g>
 				</g>
