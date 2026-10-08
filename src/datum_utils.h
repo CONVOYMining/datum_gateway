@@ -39,8 +39,12 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include <float.h>
 #include "datum_logger.h"
+
+struct buf;
 
 void datum_utils_init(void);
 
@@ -77,7 +81,7 @@ static inline bitcoin_difficulty_typ datum_pdiff_to_diff(uint64_t n) {
 
 unsigned long long block_reward(unsigned int block_height);
 int append_bitcoin_varint_hex(uint64_t n, char *s);
-int append_UNum_hex(uint64_t n, char *s);
+int append_UNum(uint64_t n, uint8_t *s);
 void panic_from_thread(int a);
 bool double_sha256(void *out, const void *in, size_t length);
 void hex_to_bin_le(const char *hex, unsigned char *bin);
@@ -88,12 +92,21 @@ int addr_2_output_script(const char *addr, unsigned char *script, int max_len);
 int output_script_2_addr(const unsigned char *script, const int len, char *addr);
 int base64_decode(const char *in, size_t inLen, unsigned char *out, size_t *outLen);
 void uchar_to_hex(char *s, const unsigned char b);
+
+static inline size_t bytes_to_hex(char * const hex, const uint8_t * const bytes, const size_t len) {
+	for (size_t i = 0; i < len; ++i) {
+		uchar_to_hex(&hex[i << 1], bytes[i]);
+	}
+	return len << 1;
+}
+
 int get_bitcoin_varint_len_bytes(uint64_t n);
 bool strncpy_uachars(char *out, const char *in, size_t maxlen);
 bool strncpy_workerchars(char *out, const char *in, size_t maxlen);
 bitcoin_difficulty_typ calc_network_difficulty_blake2b(uint32_t nbits);
 #define DATUM_FORMAT_DIFFICULTY_OUT_SZ 8
 int datum_format_difficulty(char *out, size_t out_size, bitcoin_difficulty_typ difficulty);
+bool buf_datum_format_difficulty(struct buf *, bitcoin_difficulty_typ diff);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
@@ -125,8 +138,8 @@ static inline
 uint16_t upk_u16le(const void * const bufp, const int offset)
 {
 	const uint8_t * const buf = bufp;
-	return (((uint16_t)buf[offset+0]) <<    0)
-	     | (((uint16_t)buf[offset+1]) <<    8);
+	return (uint16_t)buf[offset+0]
+	     | (uint16_t)(((uint16_t)buf[offset+1]) << 8);
 }
 
 static inline
@@ -193,6 +206,115 @@ void pk_u64le(void * const bufp, const int offset, const uint64_t nv)
 	buf[offset+5] = (nv >> 0x28) & 0xff;
 	buf[offset+6] = (nv >> 0x30) & 0xff;
 	buf[offset+7] = (nv >> 0x38) & 0xff;
+}
+
+
+struct buf {
+	char *s;
+	size_t len;
+	size_t allocsz;
+	bool err;
+};
+
+#define BUF_INIT (struct buf){0}
+
+static inline
+void buf_init(struct buf * const buf)
+{
+	*buf = BUF_INIT;
+}
+
+static inline
+bool buf_reserve(struct buf * const buf, const size_t newsz)
+{
+	if (buf->err) return false;
+	if (newsz <= buf->allocsz) return true;
+	
+	void * const n = realloc(buf->s, newsz);
+	if (!n) {
+		buf->err = true;
+		return false;
+	}
+	
+	buf->s = n;
+	buf->allocsz = newsz;
+	return true;
+}
+
+static inline
+bool buf_extend(struct buf * const buf, const size_t min_sz)
+{
+	if (buf->err) return false;
+	if (min_sz <= buf->allocsz) return true;
+	
+	size_t newsz;
+	if (min_sz > SIZE_MAX / 4) {
+		newsz = min_sz;
+	} else {
+		newsz = buf->allocsz ? buf->allocsz : 0x10;
+		do {
+			newsz *= 2;
+		} while (min_sz > newsz);
+	}
+	
+	return buf_reserve(buf, newsz);
+}
+
+[[nodiscard]] static inline
+bool buf_resize(struct buf * const buf, const size_t newlen)
+{
+	if (!buf_extend(buf, newlen)) return false;
+	if (buf->err) return false;
+	buf->len = newlen;
+	return true;
+}
+
+[[nodiscard]] static inline
+void *buf_preappend(struct buf * const buf, const size_t addlen)
+{
+	const size_t origlen = buf->len;
+	if (buf->err) return NULL;
+	if (SIZE_MAX - origlen < addlen) {
+		buf->err = true;
+		return NULL;
+	}
+	if (!buf_extend(buf, origlen + addlen)) return NULL;
+	return &buf->s[origlen];
+}
+
+static inline
+bool buf_append(struct buf * const buf, const void * const add, const size_t addlen)
+{
+	if (!addlen) return !buf->err;
+	void * const appendbuf = buf_preappend(buf, addlen);
+	if (!appendbuf) return false;
+	memcpy(appendbuf, add, addlen);
+	buf->len += addlen;
+	return true;
+}
+
+static inline
+bool buf_strcat(struct buf * const buf, const char * const add)
+{
+	return buf_append(buf, add, strlen(add));
+}
+
+int buf_printf(struct buf *, const char *format, ...) __attribute__((format(printf, 2, 3)));
+
+[[nodiscard]] static inline
+bool buf_nullterminate(struct buf * const buf)
+{
+	char * const appendbuf = buf_preappend(buf, 1);
+	if (!appendbuf) return false;
+	appendbuf[0] = '\0';
+	return true;
+}
+
+static inline
+void buf_destroy(struct buf * const buf)
+{
+	free(buf->s);
+	*buf = BUF_INIT;
 }
 
 

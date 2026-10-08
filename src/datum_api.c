@@ -79,51 +79,54 @@ static struct MHD_Response *datum_api_create_empty_mhd_response() {
 	return MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
 }
 
-static void html_leading_zeros(char * const buffer, const size_t buffer_size, const char * const numstr) {
+static bool buf_strcat_html_escape(struct buf * const buf, const char * const src);
+
+static
+bool html_leading_zeros(struct buf * const buf, const char * const numstr) {
 	int zeros = 0;
 	while (numstr[zeros] == '0') {
 		++zeros;
 	}
 	if (zeros) {
-		snprintf(buffer, buffer_size, "<span class='leading_zeros'>%.*s</span>%s", zeros, numstr, &numstr[zeros]);
+		return buf_printf(buf, "<span class='leading_zeros'>%.*s</span>%s", zeros, numstr, &numstr[zeros]);
+	} else {
+		return buf_strcat(buf, numstr);
 	}
 }
 
-static void datum_api_format_share_counts(char *buffer, size_t buffer_size, uint64_t count, uint64_t diff) {
+static bool datum_api_format_share_counts(struct buf * const buf, uint64_t count, uint64_t diff) {
 	char diffstr[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
 	datum_format_difficulty(diffstr, sizeof(diffstr), datum_pdiff_to_diff(diff));
-	snprintf(buffer, buffer_size, "%llu  (%s diff)", (unsigned long long)count, diffstr);
+	return buf_printf(buf, "%llu  (%s diff)", (unsigned long long)count, diffstr);
 }
 
-void datum_api_var_STRATUM_SHARES_ACCEPTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_STRATUM_SHARES_ACCEPTED(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	(void)vardata;
-	datum_api_format_share_counts(buffer, buffer_size,
+	return datum_api_format_share_counts(buf,
 		__atomic_load_n(&stratum_client_accepted_share_count, __ATOMIC_RELAXED),
 		__atomic_load_n(&stratum_client_accepted_share_diff, __ATOMIC_RELAXED));
 }
-void datum_api_var_STRATUM_SHARES_REJECTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_STRATUM_SHARES_REJECTED(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	(void)vardata;
-	datum_api_format_share_counts(buffer, buffer_size,
+	return datum_api_format_share_counts(buf,
 		__atomic_load_n(&stratum_client_rejected_share_count, __ATOMIC_RELAXED),
 		__atomic_load_n(&stratum_client_rejected_share_diff, __ATOMIC_RELAXED));
 }
-void datum_api_var_DATUM_SHARES_ACCEPTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_DATUM_SHARES_ACCEPTED(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	(void)vardata;
 	if (!datum_config.datum_pool_host[0]) {
-		snprintf(buffer, buffer_size, "N/A");
-		return;
+		return buf_strcat(buf, "N/A");
 	}
-	datum_api_format_share_counts(buffer, buffer_size, datum_accepted_share_count, datum_accepted_share_diff);
+	return datum_api_format_share_counts(buf, datum_accepted_share_count, datum_accepted_share_diff);
 }
-void datum_api_var_DATUM_SHARES_REJECTED(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_DATUM_SHARES_REJECTED(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	(void)vardata;
 	if (!datum_config.datum_pool_host[0]) {
-		snprintf(buffer, buffer_size, "N/A");
-		return;
+		return buf_strcat(buf, "N/A");
 	}
-	datum_api_format_share_counts(buffer, buffer_size, datum_rejected_share_count, datum_rejected_share_diff);
+	return datum_api_format_share_counts(buf, datum_rejected_share_count, datum_rejected_share_diff);
 }
-void datum_api_var_DATUM_CONNECTION_STATUS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_DATUM_CONNECTION_STATUS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	const char *colour = "lime";
 	const char *s, *s2 = "";
 	const char * const bt_err = datum_blocktemplates_error;
@@ -149,48 +152,47 @@ void datum_api_var_DATUM_CONNECTION_STATUS(char *buffer, size_t buffer_size, con
 		}
 		s = "Non-Pooled Mode";
 	}
-	snprintf(buffer, buffer_size, "<svg viewBox='0 0 100 100' role='img' style='width:1em;height:1em'><circle cx='50' cy='60' r='35' style='fill:%s' /></svg> %s%s", colour, s, s2);
+	return buf_printf(buf, "<svg viewBox='0 0 100 100' role='img' style='width:1em;height:1em'><circle cx='50' cy='60' r='35' style='fill:%s' /></svg> %s%s", colour, s, s2);
 }
-void datum_api_var_DATUM_POOL_HOST(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_DATUM_POOL_HOST(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	if (datum_config.datum_pool_host[0]) {
-		snprintf(buffer, buffer_size, "%s:%u", datum_config.datum_pool_host, (unsigned)datum_config.datum_pool_port);
+		return buf_printf(buf, "%s:%u", datum_config.datum_pool_host, (unsigned)datum_config.datum_pool_port);
 	} else {
-		snprintf(buffer, buffer_size, "N/A");
+		return buf_strcat(buf, "N/A");
 	}
 }
-void datum_api_var_DATUM_POOL_TAG(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	size_t i;
-	buffer[0] = '"';
-	i = strncpy_html_escape(&buffer[1], datum_protocol_is_active()?datum_config.override_mining_coinbase_tag_primary:datum_config.mining_coinbase_tag_primary, buffer_size-3);
-	buffer[i+1] = '"';
-	buffer[i+2] = 0;
+bool datum_api_var_DATUM_POOL_TAG(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	if (!buf_strcat(buf, "\"")) return false;
+	if (!buf_strcat_html_escape(buf,
+		datum_protocol_is_active()
+			? datum_config.override_mining_coinbase_tag_primary
+			: datum_config.mining_coinbase_tag_primary)) return false;
+	return buf_strcat(buf, "\"");
 }
-void datum_api_var_DATUM_MINER_TAG(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	size_t i;
-	buffer[0] = '"';
-	i = strncpy_html_escape(&buffer[1], datum_config.mining_coinbase_tag_secondary, buffer_size-3);
-	buffer[i+1] = '"';
-	buffer[i+2] = 0;
+bool datum_api_var_DATUM_MINER_TAG(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	if (!buf_strcat(buf, "\"")) return false;
+	if (!buf_strcat_html_escape(buf, datum_config.mining_coinbase_tag_secondary)) return false;
+	return buf_strcat(buf, "\"");
 }
-void datum_api_var_DATUM_POOL_DIFF(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	datum_format_difficulty(buffer, buffer_size, datum_pdiff_to_diff(datum_config.override_vardiff_min));
+bool datum_api_var_DATUM_POOL_DIFF(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_datum_format_difficulty(buf, datum_pdiff_to_diff(datum_config.override_vardiff_min));
 }
-void datum_api_var_DATUM_POOL_PUBKEY(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%s", datum_config.datum_pool_pubkey);
+bool datum_api_var_DATUM_POOL_PUBKEY(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_strcat(buf, datum_config.datum_pool_pubkey);
 }
-void datum_api_var_STRATUM_ACTIVE_THREADS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%d", vardata->STRATUM_ACTIVE_THREADS);
+bool datum_api_var_STRATUM_ACTIVE_THREADS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%d", vardata->STRATUM_ACTIVE_THREADS);
 }
-void datum_api_var_STRATUM_TOTAL_CONNECTIONS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%d", vardata->STRATUM_TOTAL_CONNECTIONS);
+bool datum_api_var_STRATUM_TOTAL_CONNECTIONS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%d", vardata->STRATUM_TOTAL_CONNECTIONS);
 }
-void datum_api_var_STRATUM_TOTAL_SUBSCRIPTIONS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%d", vardata->STRATUM_TOTAL_SUBSCRIPTIONS);
+bool datum_api_var_STRATUM_TOTAL_SUBSCRIPTIONS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%d", vardata->STRATUM_TOTAL_SUBSCRIPTIONS);
 }
-void datum_api_var_STRATUM_HASHRATE_ESTIMATE(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%.2f Th/sec", vardata->STRATUM_HASHRATE_ESTIMATE);
+bool datum_api_var_STRATUM_HASHRATE_ESTIMATE(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%.2f Th/sec", vardata->STRATUM_HASHRATE_ESTIMATE);
 }
-void datum_api_var_DATUM_PROCESS_UPTIME(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_var_DATUM_PROCESS_UPTIME(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	uint64_t uptime_seconds = get_process_uptime_seconds();
 	uint64_t days = uptime_seconds / (24 * 3600);
 	unsigned int hours = (uptime_seconds % (24 * 3600)) / 3600;
@@ -198,64 +200,63 @@ void datum_api_var_DATUM_PROCESS_UPTIME(char *buffer, size_t buffer_size, const 
 	unsigned int seconds = uptime_seconds % 60;
 	
 	if (days > 0) {
-		snprintf(buffer, buffer_size, "%"PRIu64" days, %u hours, %u minutes, %u seconds",
+		return buf_printf(buf, "%"PRIu64" days, %u hours, %u minutes, %u seconds",
 			days, hours, minutes, seconds);
 	} else if (hours > 0) {
-		snprintf(buffer, buffer_size, "%u hours, %u minutes, %u seconds",
+		return buf_printf(buf, "%u hours, %u minutes, %u seconds",
 			hours, minutes, seconds);
 	} else if (minutes > 0) {
-		snprintf(buffer, buffer_size, "%u minutes, %u seconds",
+		return buf_printf(buf, "%u minutes, %u seconds",
 			minutes, seconds);
 	} else {
-		snprintf(buffer, buffer_size, "%u seconds", seconds);
+		return buf_printf(buf, "%u seconds", seconds);
 	}
 }
-void datum_api_var_STRATUM_JOB_INFO(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	if (!vardata->sjob) return;
-	snprintf(buffer, buffer_size, "%s (%d) @ %.3f", vardata->sjob->job_id, vardata->sjob->global_index, (double)vardata->sjob->tsms / 1000.0);
+bool datum_api_var_STRATUM_JOB_INFO(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%s (%d) @ %.3f", vardata->sjob->job_id, vardata->sjob->global_index, (double)vardata->sjob->tsms / 1000.0);
 }
-void datum_api_var_STRATUM_JOB_BLOCK_HEIGHT(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%llu", (unsigned long long)vardata->sjob->block_template->height);
+bool datum_api_var_STRATUM_JOB_BLOCK_HEIGHT(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%llu", (unsigned long long)vardata->sjob->block_template->height);
 }
-void datum_api_var_STRATUM_JOB_BLOCK_VALUE(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%.8f BTC", (double)vardata->sjob->block_template->coinbasevalue / (double)100000000.0);
+bool datum_api_var_STRATUM_JOB_BLOCK_VALUE(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%.8f BTC", (double)vardata->sjob->block_template->coinbasevalue / (double)100000000.0);
 }
-void datum_api_var_STRATUM_JOB_TARGET(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	html_leading_zeros(buffer, buffer_size, vardata->sjob->block_template->block_target_hex);
+bool datum_api_var_STRATUM_JOB_TARGET(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return html_leading_zeros(buf, vardata->sjob->block_template->block_target_hex);
 }
-void datum_api_var_STRATUM_JOB_PREVBLOCK(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	html_leading_zeros(buffer, buffer_size, vardata->sjob->block_template->previousblockhash);
+bool datum_api_var_STRATUM_JOB_PREVBLOCK(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return html_leading_zeros(buf, vardata->sjob->block_template->previousblockhash);
 }
-void datum_api_var_STRATUM_JOB_WITNESS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%s", vardata->sjob->block_template->default_witness_commitment);
+bool datum_api_var_STRATUM_JOB_WITNESS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_strcat(buf, vardata->sjob->block_template->default_witness_commitment);
 }
-void datum_api_var_STRATUM_JOB_DIFF(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	datum_format_difficulty(buffer, buffer_size,
+bool datum_api_var_STRATUM_JOB_DIFF(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_datum_format_difficulty(buf,
 		calc_network_difficulty_blake2b(vardata->sjob->nbits_uint));
 }
-void datum_api_var_STRATUM_JOB_VERSION(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%s (%u)", vardata->sjob->version, (unsigned)vardata->sjob->version_uint);
+bool datum_api_var_STRATUM_JOB_VERSION(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%s (%u)", vardata->sjob->version, (unsigned)vardata->sjob->version_uint);
 }
-void datum_api_var_STRATUM_JOB_BITS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%s", vardata->sjob->nbits);
+bool datum_api_var_STRATUM_JOB_BITS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_strcat(buf, vardata->sjob->nbits);
 }
-void datum_api_var_STRATUM_JOB_TIMEINFO(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "Current: %llu / Min: %llu", (unsigned long long)vardata->sjob->block_template->curtime, (unsigned long long)vardata->sjob->block_template->mintime);
+bool datum_api_var_STRATUM_JOB_TIMEINFO(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "Current: %llu / Min: %llu", (unsigned long long)vardata->sjob->block_template->curtime, (unsigned long long)vardata->sjob->block_template->mintime);
 }
-void datum_api_var_STRATUM_JOB_LIMITINFO(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "Size: %lu, Weight: %lu, SigOps: %lu", (unsigned long)vardata->sjob->block_template->sizelimit, (unsigned long)vardata->sjob->block_template->weightlimit, (unsigned long)vardata->sjob->block_template->sigoplimit);
+bool datum_api_var_STRATUM_JOB_LIMITINFO(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "Size: %lu, Weight: %lu, SigOps: %lu", (unsigned long)vardata->sjob->block_template->sizelimit, (unsigned long)vardata->sjob->block_template->weightlimit, (unsigned long)vardata->sjob->block_template->sigoplimit);
 }
-void datum_api_var_STRATUM_JOB_SIZE(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%lu", (unsigned long)vardata->sjob->block_template->txn_total_size);
+bool datum_api_var_STRATUM_JOB_SIZE(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%lu", (unsigned long)vardata->sjob->block_template->txn_total_size);
 }
-void datum_api_var_STRATUM_JOB_WEIGHT(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%lu", (unsigned long)vardata->sjob->block_template->txn_total_weight);
+bool datum_api_var_STRATUM_JOB_WEIGHT(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%lu", (unsigned long)vardata->sjob->block_template->txn_total_weight);
 }
-void datum_api_var_STRATUM_JOB_SIGOPS(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%lu", (unsigned long)vardata->sjob->block_template->txn_total_sigops);
+bool datum_api_var_STRATUM_JOB_SIGOPS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%lu", (unsigned long)vardata->sjob->block_template->txn_total_sigops);
 }
-void datum_api_var_STRATUM_JOB_TXNCOUNT(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata) {
-	snprintf(buffer, buffer_size, "%u", (unsigned)vardata->sjob->block_template->txn_count);
+bool datum_api_var_STRATUM_JOB_TXNCOUNT(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	return buf_printf(buf, "%u", (unsigned)vardata->sjob->block_template->txn_count);
 }
 
 
@@ -305,33 +306,28 @@ DATUM_API_VarFunc datum_api_find_var_func(const char * const var_start, const si
 	return NULL; // Variable not found
 }
 
-size_t datum_api_fill_var(const char * const var_start, const size_t var_name_len, char * const replacement, const size_t replacement_max_len, const T_DATUM_API_DASH_VARS * const vardata) {
+bool datum_api_fill_var(const char * const var_start, const size_t var_name_len, struct buf * const buf, const T_DATUM_API_DASH_VARS * const vardata) {
 	DATUM_API_VarFunc func = datum_api_find_var_func(var_start, var_name_len);
 	if (!func) {
 		DLOG_ERROR("%s: Unknown variable '%.*s'", __func__, (int)var_name_len, var_start);
-		return 0;
+		return false;
 	}
 	
 	// Skip running STRATUM_JOB functions if there's no sjob
 	if (var_start[8] == 'J' && !vardata->sjob) {
 		// Leave blank for now
-		return 0;
+		return true;
 	}
 	
-	assert(replacement_max_len > 0);
-	replacement[0] = 0;
-	func(replacement, replacement_max_len, vardata);
-	return strlen(replacement);
+	return func(buf, vardata);
 }
 
-size_t datum_api_fill_vars(const char *input, char *output, size_t max_output_size, const DATUM_API_VarFillFunc var_fill_func, const T_DATUM_API_DASH_VARS *vardata) {
+bool datum_api_fill_vars(const char * const input, struct buf * const buf, const DATUM_API_VarFillFunc var_fill_func, const T_DATUM_API_DASH_VARS * const vardata) {
 	const char* p = input;
-	size_t output_len = 0;
-	size_t var_name_len = 0;
 	const char *var_start;
 	const char *var_end;
 	
-	while (*p && output_len < max_output_size - 1) {
+	while (*p) {
 		if (strncmp(p, "${", 2) == 0) {
 			p += 2; // Skip "${"
 			var_start = p;
@@ -340,87 +336,40 @@ size_t datum_api_fill_vars(const char *input, char *output, size_t max_output_si
 				DLOG_ERROR("%s: Missing closing } for variable", __func__);
 				break;
 			}
-			var_name_len = var_end - var_start;
+			const size_t var_name_len = (size_t)(var_end - var_start);
 			
-			char * const replacement = &output[output_len];
-			size_t replacement_max_len = max_output_size - output_len;
-			if (replacement_max_len > 256) replacement_max_len = 256;
-			const size_t replacement_len = var_fill_func(var_start, var_name_len, replacement, replacement_max_len, vardata);
-			output_len += replacement_len;
-			output[output_len] = 0;
+			if (!var_fill_func(var_start, var_name_len, buf, vardata)) return false;
+			
 			p = var_end + 1; // Move past '}'
 		} else {
-			output[output_len++] = *p++;
-			output[output_len] = 0;
+			buf_append(buf, p++, 1);
 		}
 	}
-	
-	output[output_len] = 0;
-	
-	return output_len;
+	return true;
 }
 
-size_t strncpy_html_escape(char *dest, const char *src, size_t n) {
-	size_t i = 0;
-	
-	while (*src && i < n) {
+static
+bool buf_strcat_html_escape(struct buf * const buf, const char *src) {
+	for ( ; *src ; ++src) {
 		switch (*src) {
 			case '&':
-				if (i + 5 <= n) { // &amp;
-					dest[i++] = '&';
-					dest[i++] = 'a';
-					dest[i++] = 'm';
-					dest[i++] = 'p';
-					dest[i++] = ';';
-				} else {
-					return i; // Stop if there's not enough space
-				}
+				if (!buf_strcat(buf, "&amp;")) return false;
 				break;
 			case '<':
-				if (i + 4 <= n) { // &lt;
-					dest[i++] = '&';
-					dest[i++] = 'l';
-					dest[i++] = 't';
-					dest[i++] = ';';
-				} else {
-					return i; // Stop if there's not enough space
-				}
+				if (!buf_strcat(buf, "&lt;")) return false;
 				break;
 			case '>':
-				if (i + 4 <= n) { // &gt;
-					dest[i++] = '&';
-					dest[i++] = 'g';
-					dest[i++] = 't';
-					dest[i++] = ';';
-				} else {
-					return i; // Stop if there's not enough space
-				}
+				if (!buf_strcat(buf, "&gt;")) return false;
 				break;
 			case '"':
-				if (i + 6 <= n) { // &quot;
-					dest[i++] = '&';
-					dest[i++] = 'q';
-					dest[i++] = 'u';
-					dest[i++] = 'o';
-					dest[i++] = 't';
-					dest[i++] = ';';
-				} else {
-					return i; // Stop if there's not enough space
-				}
+				if (!buf_strcat(buf, "&quot;")) return false;
 				break;
 			default:
-				dest[i++] = *src;
+				if (!buf_append(buf, src, 1)) return false;
 				break;
 		}
-		src++;
 	}
-	
-	// Null-terminate the destination string if there's space
-	if (i < n) {
-		dest[i] = '\0';
-	}
-	
-	return i;
+	return true;
 }
 
 static void http_resp_prevent_caching(struct MHD_Response * const response) {
@@ -441,7 +390,7 @@ static enum MHD_Result datum_api_formdata_to_json_cb(void * const cls, const enu
 	return MHD_YES;
 }
 
-bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char * const post, const int len, json_t * const j) {
+bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char * const post, const size_t len, json_t * const j) {
 	struct MHD_PostProcessor * const pp = MHD_create_post_processor(connection, 32768, datum_api_formdata_to_json_cb, j);
 	if (!pp) {
 		return false;
@@ -454,14 +403,14 @@ bool datum_api_formdata_to_json(struct MHD_Connection * const connection, char *
 	return true;
 }
 
-int datum_api_submit_uncached_response(struct MHD_Connection * const connection, const unsigned int status_code, struct MHD_Response * const response) {
+enum MHD_Result datum_api_submit_uncached_response(struct MHD_Connection * const connection, const unsigned int status_code, struct MHD_Response * const response) {
 	http_resp_prevent_caching(response);
-	int ret = MHD_queue_response(connection, status_code, response);
+	enum MHD_Result ret = MHD_queue_response(connection, status_code, response);
 	MHD_destroy_response(response);
 	return ret;
 }
 
-int datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
+enum MHD_Result datum_api_do_error(struct MHD_Connection * const connection, const unsigned int status_code) {
 	struct MHD_Response *response = datum_api_create_empty_mhd_response();
 	return datum_api_submit_uncached_response(connection, status_code, response);
 }
@@ -510,7 +459,7 @@ bool datum_api_check_admin_password_httponly(struct MHD_Connection * const conne
 			DLOG_DEBUG("Wrong password in HTTP authentication");
 		}
 		struct MHD_Response * const response = auth_failure_response_creator();
-		ret = MHD_queue_auth_fail_response2(connection, realm, "x", response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
+		MHD_queue_auth_fail_response2(connection, realm, "x", response, nonce_is_stale ? MHD_YES : MHD_NO, algo);
 		MHD_destroy_response(response);
 		return false;
 	}
@@ -542,20 +491,19 @@ bool datum_api_check_admin_password(struct MHD_Connection * const connection, co
 
 static struct MHD_Response *datum_api_create_response_authfail(const char * const head, const size_t head_sz) {
 	const size_t max_sz = head_sz + www_auth_failed_html_sz + www_foot_html_sz + 1;
-	size_t sz = 0;
-	char * const output = malloc(max_sz);
-	if (!output) {
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, max_sz);
+	
+	buf_append(&output, head, head_sz);
+	buf_append(&output, www_auth_failed_html, www_auth_failed_html_sz);
+	buf_append(&output, www_foot_html, www_foot_html_sz);
+	
+	if (output.err) {
+		buf_destroy(&output);
 		return datum_api_create_empty_mhd_response();
 	}
 	
-	memcpy(&output[sz], head, head_sz);
-	sz += head_sz;
-	memcpy(&output[sz], www_auth_failed_html, www_auth_failed_html_sz);
-	sz += www_auth_failed_html_sz;
-	memcpy(&output[sz], www_foot_html, www_foot_html_sz);
-	sz += www_foot_html_sz;
-	
-	struct MHD_Response * const response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+	struct MHD_Response * const response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return response;
 }
@@ -564,10 +512,8 @@ static struct MHD_Response *datum_api_create_response_authfail_clients() {
 	return datum_api_create_response_authfail(www_clients_top_html, www_clients_top_html_sz);
 }
 
-size_t datum_api_fill_authfail_error(const char * const var_start, const size_t var_name_len, char * const replacement, const size_t replacement_max_len, const T_DATUM_API_DASH_VARS * const vardata) {
-	assert(replacement_max_len >= www_auth_failed_html_sz);
-	memcpy(replacement, www_auth_failed_html, www_auth_failed_html_sz);
-	return www_auth_failed_html_sz;
+bool datum_api_fill_authfail_error(const char * const var_start, const size_t var_name_len, struct buf * const buf, const T_DATUM_API_DASH_VARS * const vardata) {
+	return buf_append(buf, www_auth_failed_html, www_auth_failed_html_sz);
 }
 
 static struct MHD_Response *datum_api_create_response_authfail_config_view() {
@@ -577,14 +523,16 @@ static struct MHD_Response *datum_api_create_response_authfail_config_view() {
 static struct MHD_Response *datum_api_create_response_authfail_config() {
 	const size_t max_sz = www_config_errors_html_sz + www_auth_failed_html_sz;
 	
-	char * const output = malloc(max_sz);
-	if (!output) {
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, max_sz);
+	
+	datum_api_fill_vars(www_config_errors_html, &output, datum_api_fill_authfail_error, NULL);
+	if (output.err) {
+		buf_destroy(&output);
 		return datum_api_create_empty_mhd_response();
 	}
 	
-	const size_t sz = datum_api_fill_vars(www_config_errors_html, output, max_sz, datum_api_fill_authfail_error, NULL);
-	
-	struct MHD_Response * const response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+	struct MHD_Response * const response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return response;
 }
@@ -593,19 +541,19 @@ static struct MHD_Response *datum_api_create_response_authfail_threads() {
 	return datum_api_create_response_authfail(www_threads_top_html, www_threads_top_html_sz);
 }
 
-static int datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz, const char * const etag) {
+static enum MHD_Result datum_api_asset(struct MHD_Connection * const connection, const char * const mimetype, const char * const data, const size_t datasz, const char * const etag) {
 	const char * const if_none_match_header = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, "If-None-Match");
 	if (if_none_match_header && 0 == strcmp(if_none_match_header, etag)) {
 		struct MHD_Response *response = datum_api_create_empty_mhd_response();
 		MHD_add_response_header(response, "Etag", etag);
-		int ret = MHD_queue_response(connection, MHD_HTTP_NOT_MODIFIED, response);
+		const enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_NOT_MODIFIED, response);
 		MHD_destroy_response(response);
 		return ret;
 	}
 	struct MHD_Response * const response = MHD_create_response_from_buffer(datasz, (void*)data, MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", mimetype);
 	MHD_add_response_header(response, "Etag", etag);
-	const int ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
+	const enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
 	MHD_destroy_response (response);
 	return ret;
 }
@@ -631,12 +579,12 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	const char * const end = &data[size];
 	const char *underscore_pos = memchr(data, '_', size);
 	if (!underscore_pos) return;
-	const size_t tid_size = underscore_pos - data;
+	const size_t tid_size = (size_t)(underscore_pos - data);
 	const int tid = datum_atoi_strict(data, tid_size);
 	const char *p = &underscore_pos[1];
-	underscore_pos = memchr(p, '_', end - p);
+	underscore_pos = memchr(p, '_', (size_t)(end - p));
 	if (!underscore_pos) underscore_pos = end;
-	const int cid = datum_atoi_strict(p, underscore_pos - p);
+	const int cid = datum_atoi_strict(p, (size_t)(underscore_pos - p));
 	
 	// Valid input; unconditionally redirect back to clients dashboard
 	*redirect_p = "/clients";
@@ -648,16 +596,16 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	if (underscore_pos != end) {
 		// Check it's the same client intended
 		p = &underscore_pos[1];
-		underscore_pos = memchr(p, '_', end - p);
+		underscore_pos = memchr(p, '_', (size_t)(end - p));
 		if (!underscore_pos) underscore_pos = end;
-		const uint64_t connect_tsms = datum_atoi_strict_u64(p, underscore_pos - p);
+		const uint64_t connect_tsms = datum_atoi_strict_u64(p, (size_t)(underscore_pos - p));
 		const T_DATUM_MINER_DATA * const m = global_stratum_app->datum_threads[tid].client_data[cid].app_client_data;
 		if (connect_tsms != m->connect_tsms) {
 			DLOG_WARN("API Request to disconnect FORMER stratum client %d/%d (ignored; connect tsms req=%lu vs cur=%lu)", tid, cid, (unsigned long)connect_tsms, (unsigned long)m->connect_tsms);
 			return;
 		}
 		p = &underscore_pos[1];
-		const uint64_t unique_id = datum_atoi_strict_u64(p, end - p);
+		const uint64_t unique_id = datum_atoi_strict_u64(p, (size_t)(end - p));
 		if (unique_id != m->unique_id) {
 			DLOG_WARN("API Request to disconnect FORMER stratum client %d/%d (ignored; unique id req=%lu vs cur=%lu)", tid, cid, (unsigned long)unique_id, (unsigned long)m->unique_id);
 			return;
@@ -666,14 +614,11 @@ void datum_api_cmd_kill_client2(const char * const data, const size_t size, cons
 	datum_api_cmd_kill_client(tid, cid);
 }
 
-int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
+enum MHD_Result datum_api_cmd(struct MHD_Connection *connection, char *post, size_t len) {
 	struct MHD_Response *response;
-	char output[1024];
-	int sz = 0;
 	json_t *root, *cmd, *param;
 	json_error_t error;
 	const char *cstr;
-	int tid,cid;
 	
 	if ((len) && (post)) {
 		DLOG_DEBUG("POST DATA: %s", post);
@@ -696,7 +641,10 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 								if (!strcmp(cstr,"empty_thread")) {
 									param = json_object_get(root, "tid");
 									if (json_is_integer(param)) {
-										datum_api_cmd_empty_thread(json_integer_value(param));
+										const json_int_t tid_json_int = json_integer_value(param);
+										if (tid_json_int <= INT_MAX) {
+											datum_api_cmd_empty_thread((int)tid_json_int);
+										}
 									}
 									break;
 								}
@@ -706,11 +654,13 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 								if (!strcmp(cstr,"kill_client")) {
 									param = json_object_get(root, "tid");
 									if (json_is_integer(param)) {
-										tid = json_integer_value(param);
+										const json_int_t tid_json_int = json_integer_value(param);
 										param = json_object_get(root, "cid");
 										if (json_is_integer(param)) {
-											cid = json_integer_value(param);
-											datum_api_cmd_kill_client(tid,cid);
+											const json_int_t cid_json_int = json_integer_value(param);
+											if (tid_json_int <= INT_MAX && cid_json_int <= INT_MAX) {
+												datum_api_cmd_kill_client((int)tid_json_int, (int)cid_json_int);
+											}
 										}
 									}
 									break;
@@ -740,7 +690,7 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 			
 			// param set for "empty_thread" above
 			if (param) {
-				tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
+				const int tid = datum_atoi_strict(json_string_value(param), json_string_length(param));
 				if (tid != -1) {
 					datum_api_cmd_empty_thread(tid);
 					redirect = "/threads";
@@ -760,51 +710,52 @@ int datum_api_cmd(struct MHD_Connection *connection, char *post, int len) {
 		}
 	}
 	
-	sprintf(output, "{}");
-	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_COPY);
+	response = MHD_create_response_from_buffer(2, "{}", MHD_RESPMEM_PERSISTENT);
 	MHD_add_response_header(response, "Content-Type", "application/json");
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_coinbaser(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_coinbaser(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	T_DATUM_STRATUM_JOB *sjob;
-	int j, i, max_sz = 0, sz = 0;
+	int j, i;
 	char tempaddr[256];
 	uint64_t tv = 0;
-	char *output = NULL;
 	
 	pthread_rwlock_rdlock(&stratum_global_job_ptr_lock);
 	j = global_latest_stratum_job_index;
 	sjob = (j >= 0 && j < MAX_STRATUM_JOBS) ? global_cur_stratum_jobs[j] : NULL;
 	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
 	
-	max_sz = www_coinbaser_top_html_sz + www_foot_html_sz + (sjob ? (sjob->available_coinbase_outputs_count * 512) : 0) + 2048; // approximate max size of each row
-	output = calloc(max_sz+16,1);
-	if (!output) {
-		return MHD_NO;
-	}
+	const size_t max_sz = www_coinbaser_top_html_sz + www_foot_html_sz + (sjob ? ((size_t)sjob->available_coinbase_outputs_count * 512) : (size_t)0) + 2048; // approximate max size of each row
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, max_sz + 16);
 	
-	sz = snprintf(output, max_sz-1-sz, "%s", www_coinbaser_top_html);
-	sz += snprintf(&output[sz], max_sz-1-sz, "<TABLE><TR><TD><U>Value</U></TD>  <TD><U>Address</U></TD></TR>");
+	buf_append(&output, www_coinbaser_top_html, www_coinbaser_top_html_sz);
+	buf_strcat(&output, "<TABLE><TR><TD><U>Value</U></TD>  <TD><U>Address</U></TD></TR>");
 	
 	if (sjob) {
 		for(i=0;i<sjob->available_coinbase_outputs_count;i++) {
 			output_script_2_addr(sjob->available_coinbase_outputs[i].output_script, sjob->available_coinbase_outputs[i].output_script_len, tempaddr);
-			sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)sjob->available_coinbase_outputs[i].value_sats / (double)100000000.0, tempaddr);
+			buf_printf(&output, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)sjob->available_coinbase_outputs[i].value_sats / (double)100000000.0, tempaddr);
 			tv += sjob->available_coinbase_outputs[i].value_sats;
 		}
 		
 		if (tv < sjob->coinbase_value) {
 			output_script_2_addr(sjob->pool_addr_script, sjob->pool_addr_script_len, tempaddr);
-			sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)(sjob->coinbase_value - tv) / (double)100000000.0, tempaddr);
+			buf_printf(&output, "<TR><TD>%.8f BTC</TD><TD>%s</TD></TR>", (double)(sjob->coinbase_value - tv) / (double)100000000.0, tempaddr);
 		}
 	}
 	
-	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE>");
-	sz += snprintf(&output[sz], max_sz-1-sz, "%s", www_foot_html);
+	buf_strcat(&output, "</TABLE>");
+	buf_append(&output, www_foot_html, www_foot_html_sz);
 	
-	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
+	if (output.err) {
+		buf_destroy(&output);
+		return MHD_NO;
+	}
+	
+	response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
@@ -812,8 +763,7 @@ int datum_api_coinbaser(struct MHD_Connection *connection) {
 static
 struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	struct MHD_Response *response;
-	int sz=0, max_sz = 0, j, ii;
-	char *output = NULL;
+	int j, ii;
 	T_DATUM_MINER_DATA *m = NULL;
 	uint64_t tsms;
 	double hr;
@@ -823,19 +773,17 @@ struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 	
 	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
 	
-	max_sz = www_threads_top_html_sz + www_foot_html_sz + (max_threads * 512) + 2048; // approximate max size of each row
-	output = calloc(max_sz+16,1);
-	if (!output) {
-		return datum_api_create_empty_mhd_response();
-	}
+	const size_t max_sz = www_threads_top_html_sz + www_foot_html_sz + ((size_t)max_threads * 512) + 2048; // approximate max size of each row
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, max_sz + 16);
 	
 	tsms = current_time_millis();
 	
-	sz = snprintf(output, max_sz-1-sz, "%s", www_threads_top_html);
+	buf_append(&output, www_threads_top_html, www_threads_top_html_sz);
 	if (have_admin) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' />", datum_config.api_csrf_token);
+		buf_printf(&output, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' />", datum_config.api_csrf_token);
 	}
-	sz += snprintf(&output[sz], max_sz-1-sz, "<TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>");
+	buf_strcat(&output, "<TABLE><TR><TD><U>TID</U></TD>  <TD><U>Connection Count</U></TD>  <TD><U>Sub Count</U></TD> <TD><U>Approx. Hashrate</U></TD> <TD><U>Command</U></TD></TR>");
 	for (j = 0; j < max_threads; ++j) {
 		thr = 0.0;
 		subs = 0;
@@ -859,24 +807,29 @@ struct MHD_Response *datum_api_thread_dashboard_inner(const bool have_admin) {
 			}
 		}
 		if (conns) {
-			sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%d</TD>  <TD>%d</TD>  <TD>%d</TD> <TD>%.2f Th/s</TD><TD><button ", j, conns, subs, thr);
+			buf_printf(&output, "<TR><TD>%d</TD>  <TD>%d</TD>  <TD>%d</TD> <TD>%.2f Th/s</TD><TD><button ", j, conns, subs, thr);
 			if (have_admin) {
-				sz += snprintf(&output[sz], max_sz-1-sz, "name='empty_thread' value='%d' onclick=\"sendPostRequest('/cmd', {cmd:'empty_thread',tid:%d}); return false;\"", j, j);
+				buf_printf(&output, "name='empty_thread' value='%d' onclick=\"sendPostRequest('/cmd', {cmd:'empty_thread',tid:%d}); return false;\"", j, j);
 			} else {
-				sz += snprintf(&output[sz], max_sz-1-sz, "disabled");
+				buf_strcat(&output, "disabled");
 			}
-			sz += snprintf(&output[sz], max_sz-1-sz, ">Disconnect All</button></TD></TR>");
+			buf_strcat(&output, ">Disconnect All</button></TD></TR>");
 		}
 	}
-	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE>");
+	buf_strcat(&output, "</TABLE>");
 	if (have_admin) {
-		sz += snprintf(&output[sz], max_sz-1-sz, "</form><script>");
-		sz += snprintf(&output[sz], max_sz-1-sz, www_assets_post_js, datum_config.api_csrf_token);
-		sz += snprintf(&output[sz], max_sz-1-sz, "</script>");
+		buf_strcat(&output, "</form><script>");
+		buf_printf(&output, www_assets_post_js, datum_config.api_csrf_token);
+		buf_strcat(&output, "</script>");
 	}
-	sz += snprintf(&output[sz], max_sz-1-sz, "%s", www_foot_html);
+	buf_append(&output, www_foot_html, www_foot_html_sz);
 	
-	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
+	if (output.err) {
+		buf_destroy(&output);
+		return datum_api_create_empty_mhd_response();
+	}
+	
+	response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return response;
 }
@@ -887,7 +840,7 @@ struct MHD_Response *datum_api_thread_dashboard_inner_noadmin() {
 }
 
 static
-int datum_api_thread_dashboard(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_thread_dashboard_inner_noadmin)) {
 		return MHD_YES;
 	}
@@ -895,72 +848,70 @@ int datum_api_thread_dashboard(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_client_dashboard(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_client_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
-	int connected_clients = 0;
-	int i, sz = 0, max_sz = 0, j, ii;
-	char *output = NULL;
+	size_t connected_clients = 0;
+	int i, j, ii;
 	T_DATUM_MINER_DATA *m = NULL;
 	uint64_t tsms;
 	double hr;
 	unsigned char astat;
 	double thr = 0.0;
-	char difficulty[DATUM_FORMAT_DIFFICULTY_OUT_SZ];
-	
-	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
-	
-	for (i = 0; i < max_threads; ++i) {
-		connected_clients+=global_stratum_app->datum_threads[i].connected_clients;
-	}
-	
-	max_sz = www_clients_top_html_sz + www_foot_html_sz + (connected_clients * 1024) + 2048; // approximate max size of each row
-	output = calloc(max_sz+16,1);
-	if (!output) {
-		return MHD_NO;
-	}
-	
-	tsms = current_time_millis();
-	
-	sz = snprintf(output, max_sz-1-sz, "%s", www_clients_top_html);
 	
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
 		return MHD_YES;
 	}
 	
-	sz += snprintf(&output[sz], max_sz-1-sz, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
+	const int max_threads = global_stratum_app ? global_stratum_app->max_threads : 0;
+	
+	for (i = 0; i < max_threads; ++i) {
+		connected_clients += (size_t)global_stratum_app->datum_threads[i].connected_clients;
+	}
+	
+	const size_t max_sz = www_clients_top_html_sz + www_foot_html_sz + (connected_clients * 1024) + 2048; // approximate max size of each row
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, max_sz + 16);
+	
+	tsms = current_time_millis();
+	
+	buf_strcat(&output, www_clients_top_html);
+	
+	buf_printf(&output, "<form action='/cmd' method='post'><input type='hidden' name='csrf' value='%s' /><TABLE><TR><TD><U>TID/CID</U></TD>  <TD><U>RemHost</U></TD>  <TD><U>Auth Username</U></TD> <TD><U>Subbed</U></TD> <TD><U>Last Accepted</U></TD> <TD><U>VDiff</U></TD> <TD><U>DiffA (A)</U></TD> <TD><U>DiffR (R)</U></TD> <TD><U>Hashrate (age)</U></TD> <TD><U>Coinbase</U></TD> <TD><U>UserAgent</U> </TD><TD><U>Command</U></TD></TR>", datum_config.api_csrf_token);
 	
 	for (j = 0; j < max_threads; ++j) {
 		for(ii=0;ii<global_stratum_app->max_clients_thread;ii++) {
 			if (global_stratum_app->datum_threads[j].client_data[ii].fd > 0) {
 				m = (T_DATUM_MINER_DATA *)global_stratum_app->datum_threads[j].client_data[ii].app_client_data;
-				sz += snprintf(&output[sz], max_sz-1-sz, "<TR><TD>%d/%d</TD>", j,ii);
+				buf_printf(&output, "<TR><TD>%d/%d</TD>", j, ii);
 				
-				sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s</TD>", global_stratum_app->datum_threads[j].client_data[ii].rem_host);
+				buf_printf(&output, "<TD>%s</TD>", global_stratum_app->datum_threads[j].client_data[ii].rem_host);
 				
-				sz += snprintf(&output[sz], max_sz-1-sz, "<TD>");
-				sz += strncpy_html_escape(&output[sz], m->last_auth_username, max_sz-1-sz);
-				sz += snprintf(&output[sz], max_sz-1-sz, "</TD>");
+				buf_strcat(&output, "<TD>");
+				buf_strcat_html_escape(&output, m->last_auth_username);
+				buf_strcat(&output, "</TD>");
 				
 				if (m->subscribed) {
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD> <span style=\"font-family: monospace;\">%4.4x</span> %.1fs</TD>", m->sid, (double)(tsms - m->subscribe_tsms)/1000.0);
+					buf_printf(&output, "<TD> <span style=\"font-family: monospace;\">%4.4x</span> %.1fs</TD>", m->sid, (double)(tsms - m->subscribe_tsms) / 1000.0);
 					
 					if (m->stats.last_share_tsms) {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%.1fs</TD>", (double)(tsms - m->stats.last_share_tsms)/1000.0);
+						buf_printf(&output, "<TD>%.1fs</TD>", (double)(tsms - m->stats.last_share_tsms) / 1000.0);
 					} else {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>N/A</TD>");
+						buf_strcat(&output, "<TD>N/A</TD>");
 					}
 					
-					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(m->current_diff));
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s</TD>", difficulty);
-					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(m->share_diff_accepted));
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s (%"PRIu64")</TD>", difficulty, m->share_count_accepted);
+					buf_strcat(&output, "<TD>");
+					buf_datum_format_difficulty(&output, datum_pdiff_to_diff(m->current_diff));
+					buf_strcat(&output, "</TD><TD>");
+					buf_datum_format_difficulty(&output, datum_pdiff_to_diff(m->share_diff_accepted));
+					buf_printf(&output, " (%"PRIu64")</TD>", m->share_count_accepted);
 					
 					hr = 0.0;
 					if (m->share_diff_accepted > 0) {
 						hr = ((double)m->share_diff_rejected / (double)(m->share_diff_accepted + m->share_diff_rejected))*100.0;
 					}
-					datum_format_difficulty(difficulty, sizeof(difficulty), datum_pdiff_to_diff(m->share_diff_rejected));
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s (%"PRIu64") %.2f%%</TD>", difficulty, m->share_count_rejected, hr);
+					buf_strcat(&output, "<TD>");
+					buf_datum_format_difficulty(&output, datum_pdiff_to_diff(m->share_diff_rejected));
+					buf_printf(&output, " (%"PRIu64") %.2f%%</TD>", m->share_count_rejected, hr);
 					
 					astat = m->stats.active_index?0:1; // inverted
 					hr = 0.0;
@@ -971,44 +922,50 @@ int datum_api_client_dashboard(struct MHD_Connection *connection) {
 						thr += hr;
 					}
 					if (m->share_diff_accepted > 0) {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%.2f Th/s (%.1fs)</TD>", hr, (double)(tsms - m->stats.last_swap_tsms)/1000.0);
+						buf_printf(&output, "<TD>%.2f Th/s (%.1fs)</TD>", hr, (double)(tsms - m->stats.last_swap_tsms) / 1000.0);
 					} else {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>N/A</TD>");
+						buf_strcat(&output, "<TD>N/A</TD>");
 					}
 					
 					if (m->coinbase_selection < (sizeof(cbnames) / sizeof(cbnames[0]))) {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>%s</TD>", cbnames[m->coinbase_selection]);
+						buf_printf(&output, "<TD>%s</TD>", cbnames[m->coinbase_selection]);
 					} else {
-						sz += snprintf(&output[sz], max_sz-1-sz, "<TD>Unknown</TD>");
+						buf_strcat(&output, "<TD>Unknown</TD>");
 					}
 					
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD>");
-					sz += strncpy_html_escape(&output[sz], m->useragent, max_sz-1-sz);
-					sz += snprintf(&output[sz], max_sz-1-sz, "</TD>");
+					buf_strcat(&output, "<TD>");
+					buf_strcat_html_escape(&output, m->useragent);
+					buf_strcat(&output, "</TD>");
 				} else {
-					sz += snprintf(&output[sz], max_sz-1-sz, "<TD COLSPAN=\"8\">Not Subscribed</TD>");
+					buf_strcat(&output, "<TD COLSPAN=\"8\">Not Subscribed</TD>");
 				}
 				
-				sz += snprintf(&output[sz], max_sz-1-sz, "<TD><button name='kill_client' value='%d_%d_%lu_%lu' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d,t:%lu,id:%lu}); return false;\">Kick</button></TD></TR>", j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id, j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id);
+				buf_printf(&output, "<TD><button name='kill_client' value='%d_%d_%lu_%lu' onclick=\"sendPostRequest('/cmd', {cmd:'kill_client',tid:%d,cid:%d,t:%lu,id:%lu}); return false;\">Kick</button></TD></TR>", j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id, j, ii, (unsigned long)m->connect_tsms, (unsigned long)m->unique_id);
 			}
 		}
 	}
 	
-	sz += snprintf(&output[sz], max_sz-1-sz, "</TABLE></form><p class=\"table-footer\">Total active hashrate estimate: %.2f Th/s</p><script>", thr);
-	sz += snprintf(&output[sz], max_sz-1-sz, www_assets_post_js, datum_config.api_csrf_token);
-	sz += snprintf(&output[sz], max_sz-1-sz, "</script>%s", www_foot_html);
+	buf_printf(&output, "</TABLE></form><p class=\"table-footer\">Total active hashrate estimate: %.2f Th/s</p><script>", thr);
+	buf_printf(&output, www_assets_post_js, datum_config.api_csrf_token);
+	buf_strcat(&output, "</script>");
+	buf_append(&output, www_foot_html, www_foot_html_sz);
+	
+	if (output.err) {
+		buf_destroy(&output);
+		return MHD_NO;
+	}
 	
 	// return the home page with some data and such
-	response = MHD_create_response_from_buffer (sz, (void *) output, MHD_RESPMEM_MUST_FREE);
+	response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_len, char * const replacement, const size_t replacement_max_len, const T_DATUM_API_DASH_VARS * const vardata) {
+bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len, struct buf * const buf, const T_DATUM_API_DASH_VARS * const vardata) {
 	const char *colon_pos = memchr(var_start, ':', var_name_len);
 	const char *var_start_2 = colon_pos ? &colon_pos[1] : var_start;
 	const char * const var_end = &var_start[var_name_len];
-	const size_t var_name_len_2 = var_end - var_start_2;
+	const size_t var_name_len_2 = (size_t)(var_end - var_start_2);
 	const char * const underscore_pos = memchr(var_start_2, '_', var_name_len_2);
 	int val;
 	if (var_name_len_2 == 3 && 0 == strncmp(var_start_2, "*ro", 3)) {
@@ -1035,10 +992,7 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 			const T_DATUM_CONFIG_ITEM * const cfginfo = datum_config_get_option_info("datum", 5, "pool_host", 9);
 			s = cfginfo->default_string[0];
 		}
-		size_t copy_sz = strlen(s);
-		if (copy_sz >= replacement_max_len) copy_sz = replacement_max_len - 1;
-		memcpy(replacement, s, copy_sz);
-		return copy_sz;
+		return buf_strcat(buf, s);
 	} else if (var_name_len_2 == 27 && 0 == strncmp(var_start_2, "*username_behaviour_private", 27)) {
 		val = !(datum_config.datum_pool_pass_workers || datum_config.datum_pool_pass_full_users);
 	} else if (var_name_len_2 == 22 && 0 == strncmp(var_start_2, "*reward_sharing_prefer", 22)) {
@@ -1046,15 +1000,12 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 	} else if (var_name_len_2 == 21 && 0 == strncmp(var_start_2, "*reward_sharing_never", 21)) {
 		val = (!datum_config.datum_pooled_mining_only) && !datum_config.datum_pool_host[0];
 	} else if (var_name_len_2 == 34 && 0 == strncmp(var_start_2, "*mining_coinbase_tag_secondary_max", 34)) {
-		val = 88 - strlen(datum_config.mining_coinbase_tag_primary);
+		val = (int)(88 - strlen(datum_config.mining_coinbase_tag_primary));
 		if (val > 60) val = 60;
 	} else if (var_name_len_2 == 11 && 0 == strncmp(var_start_2, "*CSRF_TOKEN", 11)) {
-		size_t copy_sz = strlen(datum_config.api_csrf_token);
-		if (copy_sz >= replacement_max_len) copy_sz = replacement_max_len - 1;
-		memcpy(replacement, datum_config.api_csrf_token, copy_sz);
-		return copy_sz;
+		return buf_strcat(buf, datum_config.api_csrf_token);
 	} else if (underscore_pos) {
-		const T_DATUM_CONFIG_ITEM * const item = datum_config_get_option_info(var_start_2, underscore_pos - var_start_2, &underscore_pos[1], var_end - &underscore_pos[1]);
+		const T_DATUM_CONFIG_ITEM * const item = datum_config_get_option_info(var_start_2, (size_t)(underscore_pos - var_start_2), &underscore_pos[1], (size_t)(var_end - &underscore_pos[1]));
 		if (item) {
 			switch (item->var_type) {
 				case DATUM_CONF_INT: {
@@ -1063,10 +1014,12 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 				}
 				case DATUM_CONF_BOOL: {
 					val = *((bool *)item->ptr);
-					if ((!colon_pos) && replacement_max_len > 5) {
-						const size_t len = val ? 4 : 5;
-						memcpy(replacement, val ? "true" : "false", len);
-						return len;
+					if (!colon_pos) {
+						if (val) {
+							return buf_strcat(buf, "true");
+						} else {
+							return buf_strcat(buf, "false");
+						}
 					}
 					break;
 				}
@@ -1074,89 +1027,78 @@ size_t datum_api_fill_config_var(const char *var_start, const size_t var_name_le
 					const char * const s = (char *)item->ptr;
 					if (colon_pos) {
 						DLOG_ERROR("%s: '%.*s' modifier not implemented for %s", __func__, (int)(colon_pos - var_start), var_start, "DATUM_CONF_STRING");
-						break;
+						return false;
 					}
-					size_t copy_sz = strlen(s);
-					if (copy_sz >= replacement_max_len) copy_sz = replacement_max_len - 1;
-					memcpy(replacement, s, copy_sz);
-					return copy_sz;
+					return buf_strcat(buf, s);
 				}
 				case DATUM_CONF_STRING_ARRAY: {
 					DLOG_ERROR("%s: %s not implemented", __func__, "DATUM_CONF_STRING_ARRAY");
-					break;
+					return false;
 				}
 				case DATUM_CONF_USERNAME_MODS: {
 					DLOG_ERROR("%s: %s not implemented", __func__, "DATUM_CONF_USERNAME_MODS");
-					break;
+					return false;
 				}
 				case DATUM_CONF_DIFFICULTY: {
 					val = *((int *)item->ptr);
 					if (!colon_pos) {
-						return datum_format_difficulty(replacement, replacement_max_len, datum_pdiff_to_diff(val));
+						return buf_datum_format_difficulty(buf, datum_pdiff_to_diff((uint64_t)val));
 					}
 					break;
 				}
 			}
 		} else {
 			DLOG_ERROR("%s: '%.*s' not implemented", __func__, (int)(var_end - var_start_2), var_start_2);
-			return 0;
+			return false;
 		}
 	} else {
 		DLOG_ERROR("%s: '%.*s' not implemented", __func__, (int)(var_end - var_start_2), var_start_2);
-		return 0;
+		return false;
 	}
-	
-	assert(replacement_max_len > 0);
 	
 	if (colon_pos) {
 		if (0 == strncmp(var_start, "readonly:", 9) || 0 == strncmp(var_start, "selected:", 9) || 0 == strncmp(var_start, "checked:", 8) || 0 == strncmp(var_start, "disabled:", 9)) {
-			size_t attr_len;
 			if (val) {
-				attr_len = colon_pos - var_start;
-				if (attr_len + 2 > replacement_max_len) attr_len = replacement_max_len - 2;
-				replacement[0] = ' ';
-				memcpy(&replacement[1], var_start, attr_len);
-				++attr_len;
+				size_t attr_len = (size_t)(colon_pos - var_start);
+				if (!buf_strcat(buf, " ")) return false;
+				return buf_append(buf, var_start, attr_len);
 			} else {
-				attr_len = 0;
+				return true;
 			}
-			return attr_len;
 		} else if (0 == strncmp(var_start, "msg:", 4)) {
 			if (val) {
-				static const char * const msg = "<br /><em>Config file disallows editing (set \"admin_password\" and \"modify_conf\" in \"api\" section of config file)</em>";
-				const size_t len = strlen(msg);
-				memcpy(replacement, msg, len);
-				return len;
+				return buf_strcat(buf, "<br /><em>Config file disallows editing (set \"admin_password\" and \"modify_conf\" in \"api\" section of config file)</em>");
 			} else {
-				return 0;
+				return true;
 			}
 		} else {
 			DLOG_ERROR("%s: '%.*s' modifier not implemented", __func__, (int)(colon_pos - var_start), var_start);
-			return 0;
+			return false;
 		}
 	}
 	
-	return snprintf(replacement, replacement_max_len, "%d", val);
+	return buf_printf(buf, "%d", val);
 }
 
-int datum_api_config_dashboard(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_config_dashboard(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
-	size_t sz = 0, max_sz = 0;
-	char *output = NULL;
+	size_t max_sz;
 	
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_config_view)) {
 		return MHD_YES;
 	}
 	
 	max_sz = www_config_html_sz * 2;
-	output = malloc(max_sz);
-	if (!output) {
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, max_sz);
+	
+	datum_api_fill_vars(www_config_html, &output, datum_api_fill_config_var, NULL);
+	if (output.err) {
+		buf_destroy(&output);
 		return MHD_NO;
 	}
 	
-	sz += datum_api_fill_vars(www_config_html, output, max_sz, datum_api_fill_config_var, NULL);
-	
-	response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+	response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
@@ -1441,16 +1383,16 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 
 static const char datum_api_config_errors_fmt[] = "<div class='err'>%s</div>";
 
-size_t datum_api_fill_config_errors(const char *var_start, const size_t var_name_len, char * const replacement, const size_t replacement_max_len, const T_DATUM_API_DASH_VARS * const vardata) {
+bool datum_api_fill_config_errors(const char *var_start, const size_t var_name_len, struct buf * const buf, const T_DATUM_API_DASH_VARS * const vardata) {
 	const json_t * const errors = (void*)vardata;
-	size_t index, sz = 0;
+	size_t index;
 	json_t *j_it;
 	
 	json_array_foreach(errors, index, j_it) {
-		sz += snprintf(&replacement[sz], replacement_max_len, datum_api_config_errors_fmt, json_string_value(j_it));
+		if (!buf_printf(buf, datum_api_config_errors_fmt, json_string_value(j_it))) return false;
 	}
 	
-	return sz;
+	return true;
 }
 
 void *datum_restart_thread(void *ptr) {
@@ -1470,9 +1412,8 @@ void *datum_restart_thread(void *ptr) {
 	abort();  // impossible to get here
 }
 
-int datum_api_config_post(struct MHD_Connection * const connection, char * const post, const int len) {
+enum MHD_Result datum_api_config_post(struct MHD_Connection * const connection, char * const post, const size_t len) {
 	struct MHD_Response *response;
-	int ret;
 	const char *key;
 	json_t *j_it;
 	
@@ -1504,7 +1445,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 		while (p[0] != '\0') {
 			const char *p2 = strchr(p, ' ');
 			if (!p2) p2 = &checkboxes[checkboxes_len];
-			const size_t i_len = p2 - p;
+			const size_t i_len = (size_t)(p2 - p);
 			if (i_len < sizeof(buf)) {
 				memcpy(buf, p, i_len);
 				buf[i_len] = '\0';
@@ -1550,13 +1491,15 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 			max_sz += json_string_length(j_it) + sizeof(datum_api_config_errors_fmt);
 		}
 		
-		char * const output = malloc(max_sz);
-		if (!output) {
+		struct buf output = BUF_INIT;
+		buf_reserve(&output, max_sz);
+		datum_api_fill_vars(www_config_errors_html, &output, datum_api_fill_config_errors, (void*)errors);
+		if (output.err) {
+			buf_destroy(&output);
 			return MHD_NO;
 		}
-		const size_t sz = datum_api_fill_vars(www_config_errors_html, output, max_sz, datum_api_fill_config_errors, (void*)errors);
 		
-		response = MHD_create_response_from_buffer(sz, output, MHD_RESPMEM_MUST_FREE);
+		response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 		MHD_add_response_header(response, "Content-Type", "text/html");
 	} else if (status.need_restart) {
 		response = MHD_create_response_from_buffer(www_config_restart_html_sz, (void*)www_config_restart_html, MHD_RESPMEM_PERSISTENT);
@@ -1567,7 +1510,7 @@ int datum_api_config_post(struct MHD_Connection * const connection, char * const
 	}
 	json_decref(errors);
 
-	ret = datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
+	const enum MHD_Result ret = datum_api_submit_uncached_response(connection, MHD_HTTP_FOUND, response);
 	
 	if (status.need_restart) {
 		DLOG_INFO("Config change requires restarting gateway, proceeding");
@@ -1629,25 +1572,29 @@ void datum_api_dash_stats(T_DATUM_API_DASH_VARS *dashdata) {
 
 }
 
-int datum_api_homepage(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_homepage(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
-	char output[DATUM_API_HOMEPAGE_MAX_SIZE];
 	T_DATUM_API_DASH_VARS vardata;
 	
 	memset(&vardata, 0, sizeof(T_DATUM_API_DASH_VARS));
 	
 	datum_api_dash_stats(&vardata);
 	
-	output[0] = 0;
-	datum_api_fill_vars(www_home_html, output, DATUM_API_HOMEPAGE_MAX_SIZE, datum_api_fill_var, &vardata);
+	struct buf output = BUF_INIT;
+	buf_reserve(&output, DATUM_API_HOMEPAGE_MAX_SIZE);
+	datum_api_fill_vars(www_home_html, &output, datum_api_fill_var, &vardata);
+	if (output.err) {
+		buf_destroy(&output);
+		return MHD_NO;
+	}
 	
 	// return the home page with some data and such
-	response = MHD_create_response_from_buffer (strlen(output), (void *) output, MHD_RESPMEM_MUST_COPY);
+	response = MHD_create_response_from_buffer(output.len, output.s, MHD_RESPMEM_MUST_FREE);
 	MHD_add_response_header(response, "Content-Type", "text/html");
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
-int datum_api_OK(struct MHD_Connection *connection) {
+enum MHD_Result datum_api_OK(struct MHD_Connection *connection) {
 	struct MHD_Response *response;
 	const char *ok_response = "OK";
 	response = MHD_create_response_from_buffer(strlen(ok_response), (void *)ok_response, MHD_RESPMEM_PERSISTENT);
@@ -1683,7 +1630,7 @@ int datum_api_umbrel_widget(struct MHD_Connection * const connection) {
 }
 #endif
 
-int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
+enum MHD_Result datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
 	const char *time_str;
 	
 	time_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "password");
@@ -1694,9 +1641,9 @@ int datum_api_testnet_fastforward(struct MHD_Connection * const connection) {
 	// Get the time parameter from the URL query
 	time_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "ts");
 	
-	uint32_t t = -1000;
+	int t = -1000;
 	if (time_str != NULL) {
-		// Convert the time parameter to uint32_t
+		// FIXME: Pass the time parameter as uint32_t
 		t = (int)strtoul(time_str, NULL, 10);
 	}
 	
@@ -1726,7 +1673,7 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	struct MHD_Response *response;
 	struct ConnectionInfo *con_info = *con_cls;
 	int int_method = 0;
-	int uds = 0;
+	size_t uds = 0;
 	
 	if (strcmp(method, "GET") == 0) {
 		int_method = 1;
@@ -1797,7 +1744,7 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 	const union MHD_ConnectionInfo *conn_info = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
 	char *client_ip = inet_ntoa(((struct sockaddr_in*)conn_info->client_addr)->sin_addr);
 	
-	DLOG_DEBUG("REQUEST: %s, %s, %s, %d", client_ip, method, url, uds);
+	DLOG_DEBUG("REQUEST: %s, %s, %s, %zu", client_ip, method, url, uds);
 	
 	pass = NULL;
 	user = MHD_basic_auth_get_username_password (connection, &pass);

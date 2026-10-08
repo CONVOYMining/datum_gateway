@@ -365,7 +365,7 @@ void *datum_threadpool_thread(void *arg) {
 }
 
 void clean_thread_data(T_DATUM_THREAD_DATA *d, T_DATUM_SOCKET_APP *app) {
-	int i,ret;
+	int i;
 	
 	// clean up clients, just in case
 	for(i=0;i<app->max_clients_thread;i++) {
@@ -384,14 +384,6 @@ void clean_thread_data(T_DATUM_THREAD_DATA *d, T_DATUM_SOCKET_APP *app) {
 	// TODO: dynamic allocation of buffers
 	memset(&d->ev, 0, sizeof(struct epoll_event));
 	memset(d->events, 0, sizeof(struct epoll_event) * MAX_CLIENTS_THREAD*2);
-	
-	// init the mutex
-	ret = pthread_mutex_init(&d->thread_data_lock, NULL);
-	if (ret) {
-		DLOG_FATAL("Could not init mutex for thread data: %s", strerror(ret));
-		panic_from_thread(__LINE__);
-		return;
-	}
 	
 	// fix the app pointer
 	d->app = app;
@@ -435,12 +427,14 @@ int assign_to_thread(T_DATUM_SOCKET_APP *app, int fd) {
 		
 		app->datum_threads[tid].thread_id = tid;
 		app->datum_threads[tid].is_active = true;
+		app->datum_active_threads++;
 		
 		if (pthread_create(&app->datum_threads[i].pthread, NULL, datum_threadpool_thread, &app->datum_threads[i]) != 0) {
+			app->datum_active_threads--;
+			app->datum_threads[tid].is_active = false;
 			DLOG_ERROR("Could not start new thread for TID %d", tid);
 			return 0;
 		}
-		app->datum_active_threads++;
 	} else {
 		// active threads are maxed already.  find one with the fewest clients
 		// in general, it should be safe to read the client count without locking, since

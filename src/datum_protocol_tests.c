@@ -609,6 +609,9 @@ static void datum_protocol_config_v3_tests(void) {
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(datum_config.override_vardiff_min == DATUM_MAX_PDIFF);
 	pk_u64le(payload, vardiff_min, 1024);
+	payload[1] = 0;
+	datum_test(!datum_protocol_client_configure((int)i, payload));
+	payload[1] = 1;
 	datum_test(!datum_protocol_is_active());
 	unsigned char notice[36] = {
 		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 0,
@@ -874,6 +877,10 @@ cleanup:
 
 static void datum_protocol_resume_tests(void) {
 	T_DATUM_PROTOCOL_POW pow = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	T_DATUM_TEMPLATE_TXN txn = {0};
+	uint8_t txn_data[] = {0x01, 0x02, 0x03, 0x04};
 	const unsigned char message[] = {0x27, 0xFE};
 	
 	datum_protocol_replay_clear();
@@ -917,6 +924,58 @@ static void datum_protocol_resume_tests(void) {
 	datum_test(sending_header_key == header_key_before);
 	datum_test(!memcmp(session_nonce_sender, nonce_before, sizeof(nonce_before)));
 	datum_test(server_out_buf == buffered_before);
+	
+	// A reconnect forgets what the server has received without discarding the local context needed to answer validation requests.
+	datum_protocol_replay_clear();
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	strcpy(job.job_id, "replayed-job");
+	job.block_template = &block_template;
+	block_template.txn_count = 1;
+	block_template.txns = &txn;
+	txn.size = sizeof(txn_data);
+	txn.txn_data_binary = txn_data;
+	pow.sjob = &job;
+	pow.coinbase_id = 2;
+	memcpy(pow.stratum_job_id, job.job_id, sizeof(pow.stratum_job_id));
+	T_DATUM_PROTOCOL_JOB *protocol_job = &datum_jobs[pow.datum_job_id];
+	protocol_job->server_sjob = &job;
+	memcpy(protocol_job->server_job_id, job.job_id, sizeof(protocol_job->server_job_id));
+	protocol_job->server_has_merkle_branches = true;
+	memset(protocol_job->server_has_coinbase, true, sizeof(protocol_job->server_has_coinbase));
+	protocol_job->server_has_coinbase_empty = true;
+	protocol_job->server_has_short_txnlist = true;
+	protocol_job->server_has_validated_block = true;
+	datum_protocol_reset_server_knowledge();
+	datum_test(protocol_job->server_sjob == &job);
+	datum_test(!memcmp(protocol_job->server_job_id, job.job_id, sizeof(protocol_job->server_job_id)));
+	datum_test(!protocol_job->server_has_merkle_branches);
+	for(size_t i=0;i<MAX_COINBASE_TYPES;i++) datum_test(!protocol_job->server_has_coinbase[i]);
+	datum_test(!protocol_job->server_has_coinbase_empty);
+	datum_test(!protocol_job->server_has_short_txnlist);
+	datum_test(!protocol_job->server_has_validated_block);
+	uint8_t validation_request[] = {pow.datum_job_id};
+	memset(temp_data, 0, 14);
+	datum_test(datum_protocol_job_validation_sblock(sizeof(validation_request), validation_request));
+	datum_test(temp_data[0] == 0x50 && temp_data[1] == 0x92);
+	datum_test(temp_data[2] == pow.datum_job_id && temp_data[3] == 0x01);
+	datum_test(upk_u16le(temp_data, 4) == 1);
+	datum_test(upk_u16le(temp_data, 6) == sizeof(txn_data));
+	datum_test(temp_data[8] == 0);
+	datum_test(!memcmp(temp_data + 9, txn_data, sizeof(txn_data)));
+	datum_test(temp_data[13] == 0xFE);
+	
+	// Preserving the pointer remains safe when its stratum storage is reused because validation also checks the exact job generation.
+	strcpy(job.job_id, "replacement-job");
+	memset(temp_data, 0, 4);
+	datum_test(datum_protocol_job_validation_sblock(sizeof(validation_request), validation_request));
+	datum_test(temp_data[0] == 0x50 && temp_data[1] == 0x92);
+	datum_test(temp_data[2] == pow.datum_job_id && temp_data[3] == 0xF0);
+	datum_protocol_clear_validation_context();
+	datum_test(protocol_job->server_sjob == NULL);
+	for(size_t i=0;i<sizeof(protocol_job->server_job_id);i++) datum_test(protocol_job->server_job_id[i] == 0);
+	datum_protocol_replay_clear();
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	server_out_buf = buffered_before;
 }
 
 static void datum_protocol_migration_tests(void) {
@@ -1504,15 +1563,13 @@ static void datum_protocol_stxlist_byid_tests(void) {
 	pk_u16le(request, 1, 64);
 	for (k = 0; k < 64; ++k) pk_u16le(request, 3 + 2 * k, 0);
 	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 64, request) == 1);
-	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF4);
+	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF5);
 	datum_test(!memcmp(tail, canary, sizeof(canary)));
 	server_out_buf = 0;
 	
 	// A list cut short of its count is refused before it is read.
 	pk_u16le(request, 1, 4);
-	temp_data[3] = 0;
-	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 3, request) == 1);
-	datum_test(temp_data[2] == job_index && temp_data[3] == 0xF4);
+	datum_test(datum_protocol_job_validation_stxlist_byid(3 + 2 * 3, request) == 0);
 	datum_test(datum_protocol_job_validation_stxlist_byid(2, request) == 0);
 	
 	// The bound leaves room for the terminator and the padding.
@@ -1533,6 +1590,31 @@ cleanup:
 	free(job);
 }
 
+int datum_protocol_job_validation_cmd(int len, unsigned char *data);
+
+static void datum_protocol_job_validation_bounds_test(void) {
+	// stxlist-by-id: subcommand 0x11, job index, 16-bit id count, then two
+	// bytes per id. Each request sits in a buffer of exactly its length, so
+	// a read past it is a sanitizer report.
+	unsigned char *req = malloc(1 + 3 + 2 * 3 - 1);  // third id one byte short
+	datum_test(req);
+	req[0] = 0x11;
+	req[1] = 0;
+	pk_u16le(req, 2, 3);
+	memset(&req[4], 0, 2 * 3 - 1);
+	datum_test(!datum_protocol_job_validation_cmd(1 + 3 + 2 * 3 - 1, req));
+	free(req);
+	
+	req = malloc(1 + 3 + 2);  // one id sent, 65535 requested
+	datum_test(req);
+	req[0] = 0x11;
+	req[1] = 0;
+	pk_u16le(req, 2, 0xffff);
+	memset(&req[4], 0, 2);
+	datum_test(!datum_protocol_job_validation_cmd(1 + 3 + 2, req));
+	free(req);
+}
+
 void datum_protocol_tests(void) {
 	datum_protocol_hello_framing_offer_tests();
 	datum_protocol_receive_mode_tests();
@@ -1548,4 +1630,5 @@ void datum_protocol_tests(void) {
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 	datum_protocol_stxlist_byid_tests();
+	datum_protocol_job_validation_bounds_test();
 }

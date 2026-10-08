@@ -37,6 +37,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -97,6 +98,20 @@ void datum_utils_tests_hex(void) {
 	}
 }
 
+static
+void datum_utils_tests_bytes_to_hex(void) {
+	const uint8_t bytes[] = {0x00, 0x12, 0xab, 0xff};
+	char hex[9];
+	
+	memset(hex, 0x0e, sizeof(hex));
+	datum_test(bytes_to_hex(hex, bytes, 0) == 0);
+	datum_test(hex[0] == 0x0e);
+	
+	datum_test(bytes_to_hex(hex, bytes, sizeof(bytes)) == 8);
+	datum_test(memcmp(hex, "0012abff", 8) == 0);
+	datum_test(hex[8] == 0x0e);
+}
+
 void datum_utils_tests_secure_strequals(void) {
 	const char * const secret = "abc";
 	const size_t secret_len = strlen(secret);
@@ -119,22 +134,22 @@ void datum_utils_tests_secure_strequals(void) {
 }
 
 void datum_utils_tests_scriptnum(void) {
-	char encoded[32];
+	uint8_t encoded[16];
 
-	datum_test(append_UNum_hex(0, encoded) == 2);
-	datum_test(!strcmp(encoded, "00"));
-	datum_test(append_UNum_hex(1, encoded) == 2);
-	datum_test(!strcmp(encoded, "51"));
-	datum_test(append_UNum_hex(16, encoded) == 2);
-	datum_test(!strcmp(encoded, "60"));
-	datum_test(append_UNum_hex(17, encoded) == 4);
-	datum_test(!strcmp(encoded, "0111"));
-	datum_test(append_UNum_hex(127, encoded) == 4);
-	datum_test(!strcmp(encoded, "017f"));
-	datum_test(append_UNum_hex(128, encoded) == 6);
-	datum_test(!strcmp(encoded, "028000"));
-	datum_test(append_UNum_hex(32768, encoded) == 8);
-	datum_test(!strcmp(encoded, "03008000"));
+	datum_test(append_UNum(0, encoded) == 1);
+	datum_test(encoded[0] == 0x00);
+	datum_test(append_UNum(1, encoded) == 1);
+	datum_test(encoded[0] == 0x51);
+	datum_test(append_UNum(16, encoded) == 1);
+	datum_test(encoded[0] == 0x60);
+	datum_test(append_UNum(17, encoded) == 2);
+	datum_test(!memcmp(encoded, "\x01\x11", 2));
+	datum_test(append_UNum(127, encoded) == 2);
+	datum_test(!memcmp(encoded, "\x01\x7f", 2));
+	datum_test(append_UNum(128, encoded) == 3);
+	datum_test(!memcmp(encoded, "\x02\x80\x00", 3));
+	datum_test(append_UNum(32768, encoded) == 4);
+	datum_test(!memcmp(encoded, "\x03\x00\x80\x00", 4));
 }
 
 static void datum_utils_tests_pdiff_to_bdiff(void) {
@@ -160,10 +175,27 @@ static void datum_utils_tests_network_difficulty_blake2b(void) {
 	datum_test(!strcmp(formatted, "436.6Z"));
 }
 
+static void datum_utils_tests_buf(void) {
+	struct buf buf = BUF_INIT;
+	char input[257];
+	
+	memset(input, 'x', sizeof(input) - 1);
+	input[sizeof(input) - 1] = '\0';
+	datum_test(buf_append(&buf, input, 0));
+	datum_test(buf_printf(&buf, "%s", input) == (int)strlen(input));
+	datum_test(buf.len == strlen(input));
+	datum_test(!memcmp(buf.s, input, buf.len));
+	datum_test(buf_nullterminate(&buf));
+	datum_test(buf.s[buf.len] == '\0');
+	free(buf.s);
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
+	datum_utils_tests_bytes_to_hex();
 	datum_utils_tests_secure_strequals();
 	datum_utils_tests_scriptnum();
 	datum_utils_tests_pdiff_to_bdiff();
 	datum_utils_tests_network_difficulty_blake2b();
+	datum_utils_tests_buf();
 }

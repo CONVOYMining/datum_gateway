@@ -59,18 +59,15 @@ CURL *coinbaser_curl = NULL;
 
 const char *cbstart_hex = "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff"; // 82 len hex, 41 bytes
 
-int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
-	int cb_input_sz = 0;
+int generate_coinbase_data(int height, uint8_t *cb, int *target_pot_index, bool datum_active) {
+	int coinbase_data_size = 0;
 	int tag_len[2] = { 0, 0 };
 	int k, m, i;
 	int excess;
-	bool datum_active = false;
 	
 	// let's figure out our coinbase tags w/BIP34 height
-	i = append_UNum_hex(height, &cb[0]);
-	cb_input_sz += i>>1;
-	
-	datum_active = datum_protocol_is_active();
+	i = append_UNum(height, &cb[0]);
+	coinbase_data_size += i;
 	
 	// Handle coinbase tagging
 	// The first push after the height should be:
@@ -113,75 +110,82 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 		sleep(1000000);
 	}
 	
+	const int tag_data_size = k ? k + (k <= 75 ? 1 : 2) : 2;
+	const int uid_data_size = ((datum_config.prime_id == 0) && (!datum_active)) ? 4 : 12;
+	if (coinbase_data_size + tag_data_size + uid_data_size > MAX_COINBASE_DATA_SIZE) {
+		DLOG_ERROR("Coinbase data exceeds the 100-byte consensus limit");
+		return -1;
+	}
+	
 	if (k > 0) {
 		// ok, we have one or more coinbase tags with a total len of k
 		if (k <= 75) {
 			// OP_PUSHBYTES (1 byte, 1 to 75)
-			uchar_to_hex(&cb[i], (unsigned char)k); i+=2; cb_input_sz++;
+			cb[i++] = (uint8_t)k; ++coinbase_data_size;
 		} else {
 			// OP_PUSHBYTES (2 byte, 76 to 94)
-			uchar_to_hex(&cb[i], 0x4C); i+=2; cb_input_sz++;
-			uchar_to_hex(&cb[i], (unsigned char)k); i+=2; cb_input_sz++;
+			cb[i++] = 0x4C; ++coinbase_data_size;
+			cb[i++] = (uint8_t)k; ++coinbase_data_size;
 		}
 		
 		if (tag_len[0]) {
 			if (datum_active) {
 				for(m=0;m<tag_len[0];m++) {
-					uchar_to_hex(&cb[i], (unsigned char)datum_config.override_mining_coinbase_tag_primary[m]); i+=2; cb_input_sz++;
+					cb[i++] = (uint8_t)datum_config.override_mining_coinbase_tag_primary[m]; ++coinbase_data_size;
 				}
 			} else {
 				for(m=0;m<tag_len[0];m++) {
-					uchar_to_hex(&cb[i], (unsigned char)datum_config.mining_coinbase_tag_primary[m]); i+=2; cb_input_sz++;
+					cb[i++] = (uint8_t)datum_config.mining_coinbase_tag_primary[m]; ++coinbase_data_size;
 				}
 			}
 			if (!tag_len[1]) {
-				uchar_to_hex(&cb[i], 0x00); i+=2; cb_input_sz++;
+				cb[i++] = 0x00; ++coinbase_data_size;
 			} else {
-				uchar_to_hex(&cb[i], 0x0F); i+=2; cb_input_sz++;
+				cb[i++] = 0x0F; ++coinbase_data_size;
 			}
 		} else {
 			// we wouldn't be here if there wasn't at least one other
 			if (tag_len[1]) {
-				uchar_to_hex(&cb[i], 0x0F); i+=2; cb_input_sz++;
+				cb[i++] = 0x0F; ++coinbase_data_size;
 			}
 		}
 		
 		if (tag_len[1]) {
 			for(m=0;m<tag_len[1];m++) {
-				uchar_to_hex(&cb[i], (unsigned char)datum_config.mining_coinbase_tag_secondary[m]); i+=2; cb_input_sz++;
+				cb[i++] = (uint8_t)datum_config.mining_coinbase_tag_secondary[m]; ++coinbase_data_size;
 			}
-			uchar_to_hex(&cb[i], 0x00); i+=2; cb_input_sz++;
+			cb[i++] = 0x00; ++coinbase_data_size;
 		}
 	} else {
 		// we'll push a null char to be consistent, and to not parse the UID as if it were a pool name
-		uchar_to_hex(&cb[i], 0x01); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], 0x00); i+=2; cb_input_sz++;
+		cb[i++] = 0x01; ++coinbase_data_size;
+		cb[i++] = 0x00; ++coinbase_data_size;
 	}
 	
 	// append the coinbase unique ID tag
 	if ((datum_config.prime_id == 0) && (!datum_active)) {
-		uchar_to_hex(&cb[i], 0x03); i+=2; cb_input_sz++;
-		if (target_pot_index != NULL) *target_pot_index = cb_input_sz;
-		uchar_to_hex(&cb[i], 0xFF); i+=2; cb_input_sz++; // placehodler for PoT target
-		uchar_to_hex(&cb[i], (datum_config.coinbase_unique_id&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.coinbase_unique_id>>8)&0xFF)); i+=2; cb_input_sz++;
+		cb[i++] = 0x03; ++coinbase_data_size;
+		if (target_pot_index != NULL) *target_pot_index = coinbase_data_size;
+		cb[i++] = 0xFF; ++coinbase_data_size; // placeholder for PoT target
+		cb[i++] = datum_config.coinbase_unique_id&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.coinbase_unique_id>>8)&0xFF; ++coinbase_data_size;
 	} else {
-		uchar_to_hex(&cb[i], 0x0B); i+=2; cb_input_sz++;
-		if (target_pot_index != NULL) *target_pot_index = cb_input_sz;
-		uchar_to_hex(&cb[i], 0xFF); i+=2; cb_input_sz++; // placeholder for PoT target
-		uchar_to_hex(&cb[i], (datum_config.coinbase_unique_id&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.coinbase_unique_id>>8)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], (datum_config.prime_id&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>8)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>16)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>24)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>32)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>40)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>48)&0xFF)); i+=2; cb_input_sz++;
-		uchar_to_hex(&cb[i], ((datum_config.prime_id>>56)&0xFF)); i+=2; cb_input_sz++;
+		cb[i++] = 0x0B; ++coinbase_data_size;
+		if (target_pot_index != NULL) *target_pot_index = coinbase_data_size;
+		cb[i++] = 0xFF; ++coinbase_data_size; // placeholder for PoT target
+		cb[i++] = datum_config.coinbase_unique_id&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.coinbase_unique_id>>8)&0xFF; ++coinbase_data_size;
+		cb[i++] = datum_config.prime_id&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>8)&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>16)&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>24)&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>32)&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>40)&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>48)&0xFF; ++coinbase_data_size;
+		cb[i++] = (datum_config.prime_id>>56)&0xFF; ++coinbase_data_size;
 	}
 	
-	return cb_input_sz;
+	return coinbase_data_size;
 }
 
 // The sigop cost of a coinbase output script: Bitcoin's legacy count
@@ -399,8 +403,8 @@ int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_
 }
 
 void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool new_block) {
-	char cb[512];
-	int cb_input_sz = 0;
+	uint8_t *cb = s->coinbase_data;
+	int coinbase_data_size = 0;
 	bool space_for_en_in_coinbase = false;
 	int i, j, k;
 	int cb1idx[1] = { 0 };
@@ -426,24 +430,22 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 	memcpy(&s->coinbase[0].coinb1[0], cbstart_hex, j);
 	cb1idx[0] = j;
 	
-	cb_input_sz = generate_coinbase_input(s->height, &cb[0], &target_pot_index);
-	i = cb_input_sz << 1;
+	coinbase_data_size = generate_coinbase_data(s->height, &cb[0], &target_pot_index, s->is_datum_job);
+	if (coinbase_data_size < 0) return;
+	s->coinbase_data_len = coinbase_data_size;
+	s->coinbase_data_target_pot_index = target_pot_index;
 	
-	// null terminate... probably not needed
-	cb[i] = 0;
-	
-	if (cb_input_sz <= 85) {
+	if (coinbase_data_size <= 85) {
 		space_for_en_in_coinbase = true;
 	}
 	
 	if (space_for_en_in_coinbase) {
-		cb1idx[0] += append_bitcoin_varint_hex(cb_input_sz+15, &s->coinbase[0].coinb1[cb1idx[0]]); // 15 bytes for extranonce+uid push + data
+		cb1idx[0] += append_bitcoin_varint_hex(coinbase_data_size+15, &s->coinbase[0].coinb1[cb1idx[0]]); // 15 bytes for extranonce+uid push + data
 	} else {
-		cb1idx[0] += append_bitcoin_varint_hex(cb_input_sz, &s->coinbase[0].coinb1[cb1idx[0]]);
+		cb1idx[0] += append_bitcoin_varint_hex(coinbase_data_size, &s->coinbase[0].coinb1[cb1idx[0]]);
 	}
-	memcpy(&s->coinbase[0].coinb1[cb1idx[0]], &cb[0], cb_input_sz*2);
 	s->target_pot_index = target_pot_index + (cb1idx[0]>>1); // adjust for placement in the txn. always safe for all types, since the varint will always be 1 byte.
-	cb1idx[0] += cb_input_sz*2;
+	cb1idx[0] += bytes_to_hex(&s->coinbase[0].coinb1[cb1idx[0]], cb, coinbase_data_size);
 	
 	if (space_for_en_in_coinbase) {
 		// if we are doing extranonce in the coinbase, then this is ALMOST the end of coinbase1
@@ -565,9 +567,9 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// This seems highly unlikely.  16KB is more than sufficient.
 	
 	int i, j, k;
-	char cb[300];
+	const uint8_t *cb = s->coinbase_data;
 	int target_pot_index;
-	int cb_input_sz = 0;
+	int coinbase_data_size = 0;
 	
 	bool space_for_en_in_coinbase = false;
 	
@@ -578,21 +580,8 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	
 	////////////////
 	
-	// Initial mainnet coinbaser
-	if (datum_protocol_is_active()) {
-		// DATUM
-		s->pool_addr_script_len = datum_config.override_mining_pool_scriptpubkey_len;
-		memcpy(&s->pool_addr_script[0], datum_config.override_mining_pool_scriptpubkey, datum_config.override_mining_pool_scriptpubkey_len);
-		s->is_datum_job = true;
-		if (s->available_coinbase_outputs_count == 0) {
-			empty_only = true;
-		}
-	} else {
-		// No pool
-		s->pool_addr_script_len = addr_2_output_script(datum_config.mining_pool_address, &s->pool_addr_script[0], 64);
-		s->is_datum_job = false;
-		empty_only = true;
-	}
+	// Keep the pool output fixed to the script used when this job was created.
+	if (!s->is_datum_job || s->available_coinbase_outputs_count == 0) empty_only = true;
 	if (!s->pool_addr_script_len) {
 		DLOG_FATAL("Could not generate output script for pool addr! Perhaps invalid? This is bad.");
 		panic_from_thread(__LINE__);
@@ -605,17 +594,18 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		cb1idx[i] = j;
 	}
 	
-	cb_input_sz = generate_coinbase_input(s->height, &cb[0], &target_pot_index);
+	coinbase_data_size = s->coinbase_data_len;
+	target_pot_index = s->coinbase_data_target_pot_index;
+	if (coinbase_data_size <= 0 || (size_t)coinbase_data_size > sizeof(s->coinbase_data)) {
+		DLOG_FATAL("Cannot expand a job without its original coinbase data");
+		panic_from_thread(__LINE__);
+	}
 	s->target_pot_index = target_pot_index;
-	i = cb_input_sz << 1;
-	
-	// null terminate... probably not needed
-	cb[i] = 0;
 	
 	// do we have space in the coinbase for the extranonce for types that can do it this way?
 	// we need 1 byte for the push, 2 for the enprefix, 4 for en1 and 8 for en2 = 15 bytes
 	// coinbase max is 100
-	if (cb_input_sz <= 85) {
+	if (coinbase_data_size <= 85) {
 		space_for_en_in_coinbase = true;
 	}
 	
@@ -631,15 +621,14 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 	// set the len, and copy over the rest of the coinbase
 	for(i=0;i<MAX_COINBASE_TYPES;i++) {
 		if ((i!=2) && (space_for_en_in_coinbase)) {
-			cb1idx[i] += append_bitcoin_varint_hex(cb_input_sz+15, &s->coinbase[i].coinb1[cb1idx[i]]);
+			cb1idx[i] += append_bitcoin_varint_hex(coinbase_data_size+15, &s->coinbase[i].coinb1[cb1idx[i]]);
 		} else {
-			cb1idx[i] += append_bitcoin_varint_hex(cb_input_sz, &s->coinbase[i].coinb1[cb1idx[i]]);
+			cb1idx[i] += append_bitcoin_varint_hex(coinbase_data_size, &s->coinbase[i].coinb1[cb1idx[i]]);
 		}
-		memcpy(&s->coinbase[i].coinb1[cb1idx[i]], &cb[0], cb_input_sz*2);
-		// save this and adjust for placement in the txn... this is always safe because the coinbase input is always < 0xFD len
+		// save this and adjust for placement in the txn... this is always safe because the coinbase data is always < 0xFD len
 		// little silly to set this multiple times, but it's fine for consistency.
 		s->target_pot_index = target_pot_index + (cb1idx[i]>>1);
-		cb1idx[i] += cb_input_sz*2;
+		cb1idx[i] += bytes_to_hex(&s->coinbase[i].coinb1[cb1idx[i]], cb, coinbase_data_size);
 		
 		if ((i!=2) && (space_for_en_in_coinbase)) {
 			// if we are doing extranonce in the coinbase, then this is ALMOST the end of coinbase1
@@ -744,7 +733,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		
 		// witness commitment output = 47 bytes (8 value, 1 length, 38 script)
 		// pool output = pool_addr_script_len + 9
-		// coinbase itself = cb_input_sz
+		// coinbase itself = coinbase_data_size
 		// coinbase len = 1
 		// cbstart = 41 bytes
 		// lock time = 4 bytes
@@ -755,7 +744,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		// never exceeds what datum_stratum_coinbase_fit_to_template allowed.
 		//
 		// total static bytes = 47+9+1+41+4+3+4+15 = 124 bytes
-		// not-static bytes = pool_addr_script_len + cb_input_sz + (space_for_en_in_coinbase?0:10)
+		// not-static bytes = pool_addr_script_len + coinbase_data_size + (space_for_en_in_coinbase?0:10)
 		//     --- it costs 10 extra bytes to do the OP_RETURN based extranonce
 		//
 		// This was 119, three bytes under the transaction with a one-byte output
@@ -764,9 +753,9 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		// weight units.
 		
 		if (!space_for_en_in_coinbase) {
-			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + cb_input_sz + 10;
+			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + coinbase_data_size + 10;
 		} else {
-			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + cb_input_sz;
+			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + coinbase_data_size;
 			cb_req_sz[2] += 10; // always OP_RETURN extranonce for type 2
 		}
 		

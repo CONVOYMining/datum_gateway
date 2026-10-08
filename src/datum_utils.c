@@ -297,15 +297,14 @@ int append_bitcoin_varint_hex(uint64_t n, char *s) {
 	}
 }
 
-int append_UNum_hex(uint64_t n, char *s) {
+int append_UNum(uint64_t n, uint8_t *s) {
 	if (n == 0) {
-		memcpy(s, "00", 3); // OP_0
-		return 2;
+		s[0] = 0x00; // OP_0
+		return 1;
 	}
 	if (n <= 16) {
-		uchar_to_hex(s, (uint8_t)(0x50 + n)); // OP_1 through OP_16
-		s[2] = '\0';
-		return 2;
+		s[0] = (uint8_t)(0x50 + n); // OP_1 through OP_16
+		return 1;
 	}
 	
 	int count = 0;
@@ -317,29 +316,24 @@ int append_UNum_hex(uint64_t n, char *s) {
 		temp >>= 8;
 	} while (temp != 0);
 	
-	int len = 2;
-	uchar_to_hex(s, count);
+	s[0] = count;
 	
 	for (int i = 0; i < count; i++) {
-		uchar_to_hex(s+len, (uint8_t)(n & 0xFF));
+		s[i + 1] = (uint8_t)(n & 0xFF);
 		
 		last_msb = (n >= 0x80);
 		
 		n >>= 8;
-		len += 2;
 	}
 	
 	// if the last byte is >= 0x80, then we need to inject a zero at the end
 	if (last_msb) {
 		count++;
-		uchar_to_hex(s, count);
-		uchar_to_hex(s+len, 0);
-		len+=2;
+		s[0] = count;
+		s[count] = 0;
 	}
 	
-	s[len] = '\0';
-	
-	return len;
+	return count + 1;
 }
 
 void hex_to_bin_le(const char *hex, unsigned char *bin) {
@@ -630,6 +624,17 @@ int datum_format_difficulty(char * const out, const size_t outsz, bitcoin_diffic
 	return snprintf(out, outsz, "%.1Lf%c", diff, suffix[0]);
 }
 
+bool buf_datum_format_difficulty(struct buf * const buf, const bitcoin_difficulty_typ diff) {
+	char * const appendbuf = buf_preappend(buf, DATUM_FORMAT_DIFFICULTY_OUT_SZ);
+	if (!appendbuf) return false;
+	const int rv = datum_format_difficulty(appendbuf, DATUM_FORMAT_DIFFICULTY_OUT_SZ, diff);
+	if (rv < 0 || rv >= DATUM_FORMAT_DIFFICULTY_OUT_SZ) {
+		return buf_strcat(buf, "(err)");
+	}
+	buf->len += rv;
+	return true;
+}
+
 #define SIPHASH_ROTATE(a, b) ((uint64_t)(((a)<<(b))|((a)>>(64-(b)))))
 #define SIPHASH_HALF_ROUND(a,b,c,d,e,f) do { \
 	a += b; \
@@ -850,4 +855,36 @@ const char *dynamic_hash_unit(double * const inout_hashrate){
 	} else {
 		return "Th/s";
 	}
+}
+
+int buf_printf(struct buf * const buf, const char * const format, ...) {
+	if (buf->err) return -1;
+	
+	if (!buf->s) {
+		if (!buf_reserve(buf, 0x80)) return -1;
+	}
+	
+	const size_t available = buf->allocsz - buf->len;
+	
+	va_list ap;
+	va_start(ap, format);
+	int n = vsnprintf(&buf->s[buf->len], available, format, ap);
+	va_end(ap);
+	
+	if (n >= 0 && (size_t)n >= available) {
+		const size_t required = (size_t)n + 1;
+		void * const appendbuf = buf_preappend(buf, required);
+		if (!appendbuf) return -1;
+		
+		va_start(ap, format);
+		n = vsnprintf(appendbuf, required, format, ap);
+		va_end(ap);
+	}
+	
+	if (n < 0) {
+		buf->err = true;
+		return -1;
+	}
+	buf->len += (size_t)n;
+	return n;
 }

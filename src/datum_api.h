@@ -38,6 +38,8 @@
 
 #include "datum_stratum.h"
 
+struct buf;
+
 typedef struct {
 	int STRATUM_ACTIVE_THREADS;
 	int STRATUM_TOTAL_CONNECTIONS;
@@ -47,8 +49,8 @@ typedef struct {
 	T_DATUM_STRATUM_JOB *sjob;
 } T_DATUM_API_DASH_VARS;
 
-typedef void (*DATUM_API_VarFunc)(char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata);
-typedef size_t (*DATUM_API_VarFillFunc)(const char *var_start, size_t var_name_len, char *buffer, size_t buffer_size, const T_DATUM_API_DASH_VARS *vardata);
+typedef bool (*DATUM_API_VarFunc)(struct buf *, const T_DATUM_API_DASH_VARS *vardata);
+typedef bool (*DATUM_API_VarFillFunc)(const char *var_start, size_t var_name_len, struct buf *, const T_DATUM_API_DASH_VARS *vardata);
 
 typedef struct {
 	const char *var_name;
@@ -57,6 +59,5 @@ typedef struct {
 
 
 int datum_api_init(void);
-size_t strncpy_html_escape(char *dest, const char *src, size_t n);
 
 #endif
