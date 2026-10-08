@@ -649,6 +649,7 @@ static void datum_protocol_replay_unanswered(void) {
 
 #define DATUM_ABW_PENDING_CACHE 65536
 #define DATUM_ABW_TEMPLATE_CACHE 256
+#define DATUM_ABW_COINBASE_CACHE 1024
 
 typedef struct {
 	uint8_t id;
@@ -666,6 +667,19 @@ typedef struct {
 	bool needs_witness;
 } T_DATUM_ABW_TEMPLATE;
 
+// A coinbase transaction retained for ABW candidates. The candidates of one
+// job and coinbase class carry the same coinbase except for the byte at
+// pot_index (the share's PoT target), so each distinct coinbase is stored
+// once and each candidate keeps only its own byte at pot_index. pot_index
+// equals size when the coinbase has no such byte.
+typedef struct {
+	size_t refs;
+	size_t size;
+	size_t pot_index;
+	int slot; // index in datum_abw_coinbases, or -1 if the index was full
+	unsigned char bytes[];
+} T_DATUM_ABW_COINBASE;
+
 typedef struct {
 	uint8_t assignment_id;
 	uint32_t nonce;
@@ -674,8 +688,8 @@ typedef struct {
 	uint8_t xor_clear_bits;
 	unsigned char raw_pow_hash[32];
 	unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
-	unsigned char *coinbase;
-	size_t coinbase_size;
+	T_DATUM_ABW_COINBASE *coinbase;
+	uint8_t coinbase_pot; // this candidate's byte at coinbase->pot_index
 	T_DATUM_ABW_TEMPLATE *block_template;
 	bool subsidy_only;
 	bool pool_handled;
@@ -687,6 +701,7 @@ static unsigned char datum_abw_active_key_hash[32] = {0};
 static T_DATUM_ABW_ASSIGNMENT datum_abw_assignments[DATUM_ABW_ASSIGNMENT_SLOTS] = {{0}};
 static T_DATUM_ABW_PENDING datum_abw_pending[DATUM_ABW_PENDING_CACHE] = {{0}};
 static T_DATUM_ABW_TEMPLATE datum_abw_templates[DATUM_ABW_TEMPLATE_CACHE] = {{0}};
+static T_DATUM_ABW_COINBASE *datum_abw_coinbases[DATUM_ABW_COINBASE_CACHE] = {0};
 static atomic_bool datum_abw_health_latched = true;
 
 bool datum_protocol_abw_health_ok(void) {
@@ -708,9 +723,67 @@ static void datum_protocol_abw_deactivate(void) {
 	pthread_mutex_unlock(&datum_abw_mutex);
 }
 
+static bool datum_protocol_abw_coinbase_matches(
+	const T_DATUM_ABW_COINBASE *entry, const unsigned char *coinbase,
+	size_t size, size_t pot_index) {
+	if (entry->size != size || entry->pot_index != pot_index) return false;
+	if (pot_index >= size) return !memcmp(entry->bytes, coinbase, size);
+	return !memcmp(entry->bytes, coinbase, pot_index) &&
+		!memcmp(entry->bytes + pot_index + 1, coinbase + pot_index + 1,
+			size - pot_index - 1);
+}
+
+// Caller holds datum_abw_mutex. Returns the stored coinbase equal to coinbase
+// outside pot_index with one more reference, storing a copy if none is
+// indexed. A copy made while the index is full is not indexed and is freed
+// with its last reference like any other.
+static T_DATUM_ABW_COINBASE *datum_protocol_abw_coinbase_acquire_locked(
+	const unsigned char *coinbase, size_t size, size_t pot_index) {
+	int free_slot = -1;
+	for (int i = 0; i < DATUM_ABW_COINBASE_CACHE; ++i) {
+		T_DATUM_ABW_COINBASE *entry = datum_abw_coinbases[i];
+		if (!entry) {
+			if (free_slot < 0) free_slot = i;
+			continue;
+		}
+		if (datum_protocol_abw_coinbase_matches(entry, coinbase, size,
+			pot_index)) {
+			entry->refs++;
+			return entry;
+		}
+	}
+	T_DATUM_ABW_COINBASE *entry = malloc(sizeof(*entry) + size);
+	if (!entry) return NULL;
+	entry->refs = 1;
+	entry->size = size;
+	entry->pot_index = pot_index;
+	entry->slot = free_slot;
+	memcpy(entry->bytes, coinbase, size);
+	if (free_slot >= 0) datum_abw_coinbases[free_slot] = entry;
+	return entry;
+}
+
+// Caller holds datum_abw_mutex.
+static void datum_protocol_abw_coinbase_release_locked(
+	T_DATUM_ABW_COINBASE *entry) {
+	if (!entry || --entry->refs) return;
+	if (entry->slot >= 0) datum_abw_coinbases[entry->slot] = NULL;
+	free(entry);
+}
+
+size_t datum_protocol_abw_coinbase_count_for_tests(void) {
+	size_t count = 0;
+	pthread_mutex_lock(&datum_abw_mutex);
+	for (size_t i = 0; i < DATUM_ABW_COINBASE_CACHE; ++i) {
+		if (datum_abw_coinbases[i]) count++;
+	}
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return count;
+}
+
 static void datum_protocol_abw_pending_clear(T_DATUM_ABW_PENDING *pending) {
 	if (!pending) return;
-	free(pending->coinbase);
+	datum_protocol_abw_coinbase_release_locked(pending->coinbase);
 	if (pending->block_template && pending->block_template->refs) {
 		pending->block_template->refs--;
 		if (!pending->block_template->refs) {
@@ -832,11 +905,11 @@ static bool datum_protocol_abw_template_matches_source(
 	return true;
 }
 
-// Caller holds datum_abw_mutex and transfers ownership of coinbase.
+// Caller holds datum_abw_mutex and transfers its reference to coinbase.
 static void datum_protocol_abw_populate_pending(
 	T_DATUM_ABW_PENDING *pending, T_DATUM_ABW_TEMPLATE *block_template,
-	const T_DATUM_PROTOCOL_POW *pow, unsigned char *coinbase,
-	size_t coinbase_size, const unsigned char raw_pow_hash[32],
+	const T_DATUM_PROTOCOL_POW *pow, T_DATUM_ABW_COINBASE *coinbase,
+	uint8_t coinbase_pot, const unsigned char raw_pow_hash[32],
 	const unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE]) {
 	pending->assignment_id = pow->abw_assignment_id;
 	pending->nonce = (uint32_t)pow->nonce;
@@ -847,7 +920,7 @@ static void datum_protocol_abw_populate_pending(
 	memcpy(pending->block_header, block_header,
 		DATUM_BLAKE2B_BLOCK_HEADER_SIZE);
 	pending->coinbase = coinbase;
-	pending->coinbase_size = coinbase_size;
+	pending->coinbase_pot = coinbase_pot;
 	pending->block_template = block_template;
 	pending->subsidy_only = pow->subsidy_only;
 	if (block_template) block_template->refs++;
@@ -862,21 +935,20 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	    !full_cb_tx_size ||
 	    full_cb_tx_size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2) return false;
 	
-	unsigned char *coinbase = malloc(full_cb_tx_size);
-	if (!coinbase) return false;
-	memcpy(coinbase, full_cb_tx, full_cb_tx_size);
 	const T_DATUM_TEMPLATE_DATA *const source = pow->sjob->block_template;
-	if (!pow->subsidy_only && source->txn_count >= UINT16_MAX) {
-		free(coinbase);
-		return false;
-	}
+	if (!pow->subsidy_only && source->txn_count >= UINT16_MAX) return false;
+	const size_t pot_index = pow->sjob->target_pot_index >= 0 &&
+		(size_t)pow->sjob->target_pot_index < full_cb_tx_size ?
+		(size_t)pow->sjob->target_pot_index : full_cb_tx_size;
+	const uint8_t coinbase_pot =
+		pot_index < full_cb_tx_size ? full_cb_tx[pot_index] : 0;
+	T_DATUM_ABW_COINBASE *coinbase;
 	const bool needs_witness =
 		datum_stratum_block_needs_witness(pow->sjob, pow->subsidy_only);
 	unsigned char coinbase_hash[32], merkle[32];
 	unsigned char nonce8[8], ntime8[8];
 	unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE];
 	if (!double_sha256(coinbase_hash, full_cb_tx, full_cb_tx_size)) {
-		free(coinbase);
 		return false;
 	}
 	if (pow->subsidy_only) {
@@ -916,45 +988,35 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 			break;
 		}
 	}
-	if (pending && block_template) {
-		datum_protocol_abw_populate_pending(pending, block_template, pow,
-			coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+	if (pending && (block_template || pow->subsidy_only)) {
+		coinbase = datum_protocol_abw_coinbase_acquire_locked(
+			full_cb_tx, full_cb_tx_size, pot_index);
+		if (coinbase) {
+			datum_protocol_abw_populate_pending(pending, block_template, pow,
+				coinbase, coinbase_pot, raw_pow_hash, block_header);
+		}
 		pthread_mutex_unlock(&datum_abw_mutex);
-		return true;
-	}
-	if (pending && pow->subsidy_only) {
-		datum_protocol_abw_populate_pending(pending, NULL, pow,
-			coinbase, full_cb_tx_size, raw_pow_hash, block_header);
-		pthread_mutex_unlock(&datum_abw_mutex);
-		return true;
+		return coinbase != NULL;
 	}
 	const bool pending_cache_full = !pending;
 	pthread_mutex_unlock(&datum_abw_mutex);
-	if (pending_cache_full) {
-		free(coinbase);
-		return false;
-	}
+	if (pending_cache_full) return false;
 	
 	char *transactions_hex = NULL;
 	const size_t transactions_hex_size = (size_t)source->txn_total_size * 2;
 	if (source->txn_total_size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2 -
 	    full_cb_tx_size || (source->txn_count && !source->txns)) {
-		free(coinbase);
 		return false;
 	}
 	if (transactions_hex_size) {
 		transactions_hex = malloc(transactions_hex_size);
-		if (!transactions_hex) {
-			free(coinbase);
-			return false;
-		}
+		if (!transactions_hex) return false;
 		size_t offset = 0;
 		for (uint32_t i = 0; i < source->txn_count; ++i) {
 			const size_t size = (size_t)source->txns[i].size * 2;
 			if (!source->txns[i].txn_data_hex ||
 			    size > transactions_hex_size - offset) {
 				free(transactions_hex);
-				free(coinbase);
 				return false;
 			}
 			memcpy(transactions_hex + offset,
@@ -963,7 +1025,6 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 		}
 		if (offset != transactions_hex_size) {
 			free(transactions_hex);
-			free(coinbase);
 			return false;
 		}
 	}
@@ -979,6 +1040,9 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 			}
 		}
 	}
+	coinbase = pending ? datum_protocol_abw_coinbase_acquire_locked(
+		full_cb_tx, full_cb_tx_size, pot_index) : NULL;
+	if (!coinbase) pending = NULL;
 	block_template = NULL;
 	if (pending) {
 		for (size_t i = 0; i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
@@ -1010,14 +1074,14 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 		}
 	}
 	if (!pending) {
+		datum_protocol_abw_coinbase_release_locked(coinbase);
 		pthread_mutex_unlock(&datum_abw_mutex);
 		free(transactions_hex);
-		free(coinbase);
 		return false;
 	}
 	free(transactions_hex);
 	datum_protocol_abw_populate_pending(pending, block_template, pow,
-		coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+		coinbase, coinbase_pot, raw_pow_hash, block_header);
 	pthread_mutex_unlock(&datum_abw_mutex);
 	return true;
 }
@@ -1154,22 +1218,30 @@ static char *datum_protocol_abw_take_revealed_candidate_locked(
 				continue;
 			}
 		}
+		T_DATUM_ABW_COINBASE * const coinbase = pending->coinbase;
 		const size_t transactions_hex_size = pending->block_template ?
 			pending->block_template->transactions_hex_size : 0;
-		if (pending->coinbase_size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2 ||
+		if (!coinbase ||
+		    coinbase->size > (MAX_SUBMITBLOCK_SIZE - 1024) / 2 ||
 		    transactions_hex_size > MAX_SUBMITBLOCK_SIZE - 1024 -
-			pending->coinbase_size * 2) {
+			coinbase->size * 2) {
 			datum_protocol_abw_pending_clear(pending);
 			continue;
 		}
-		const size_t capacity = 1024 + pending->coinbase_size * 2 +
+		// Every reader of coinbase->bytes holds datum_abw_mutex and none
+		// compares the byte at pot_index, so this candidate's byte is
+		// written there in place.
+		if (coinbase->pot_index < coinbase->size) {
+			coinbase->bytes[coinbase->pot_index] = pending->coinbase_pot;
+		}
+		const size_t capacity = 1024 + coinbase->size * 2 +
 			transactions_hex_size;
 		char *candidate = malloc(capacity);
 		size_t header_hex_offset = 0;
 		const size_t request_size = candidate ?
 			datum_stratum_build_block_request_parts(candidate, capacity,
-				pending->block_header, pending->coinbase,
-				pending->coinbase_size,
+				pending->block_header, coinbase->bytes,
+				coinbase->size,
 				pending->block_template &&
 					pending->block_template->needs_witness,
 				pending->block_template ?

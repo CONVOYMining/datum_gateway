@@ -1235,6 +1235,100 @@ static void datum_protocol_abw_cache_tests(void) {
 	datum_protocol_replay_clear();
 }
 
+/* ABW candidates whose coinbases differ only in the PoT byte share one stored
+ * coinbase; one that differs elsewhere is stored on its own. A revealed block
+ * is rebuilt with its own PoT byte, not that of the candidate whose coinbase
+ * was stored first. */
+static void datum_protocol_abw_coinbase_sharing_test(void) {
+	unsigned char xor_key[16];
+	unsigned char key_hash[32];
+	unsigned char zero_hash[32] = {0};
+	unsigned char block_hash[32];
+	unsigned char share_hash[32];
+	unsigned char coinbase_a[16] = {1, 0, 0, 0, 0x10, 5, 6, 7};
+	unsigned char coinbase_b[sizeof(coinbase_a)];
+	unsigned char coinbase_c[sizeof(coinbase_a)];
+	char hex_a[sizeof(coinbase_a) * 2 + 1];
+	char hex_b[sizeof(coinbase_a) * 2 + 1];
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_PROTOCOL_POW pow = {0};
+	const bool saved_verify_all = datum_config.mining_abw_verify_all_shares_on_disclosure;
+	
+	for (size_t i = 0; i < sizeof(xor_key); ++i) {
+		xor_key[i] = (unsigned char)(i + 1);
+	}
+	datum_test(datum_blake2b_xor_key_hash(key_hash, xor_key));
+	unsigned char reveal[19] = {DATUM_ABW_DRAFT_REVISION, 3};
+	memcpy(reveal + 2, xor_key, sizeof(xor_key));
+	reveal[18] = 0xFE;
+	unsigned char active_notice[36] = {
+		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 3,
+	};
+	memcpy(active_notice + 3, key_hash, sizeof(key_hash));
+	active_notice[35] = 0xFE;
+	
+	datum_config.mining_abw_verify_all_shares_on_disclosure = false;
+	datum_protocol_abw_reset();
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(active_notice), active_notice));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	
+	block_template.version = UINT32_C(0x20000000);
+	block_template.height = 42;
+	block_template.bits_uint = UINT32_C(0x1d00ffff);
+	job.block_template = &block_template;
+	job.version_uint = block_template.version;
+	job.height = block_template.height;
+	job.nbits_uint = block_template.bits_uint;
+	job.target_pot_index = 4;
+	job.blake2b_time_on_wire = 1000;
+	pow.sjob = &job;
+	pow.datum_job_id = 2;
+	pow.abw_assignment_id = 4;
+	pow.target_byte = 10;
+	pow.ntime = 1000;
+	pow.subsidy_only = true;
+	
+	memcpy(coinbase_b, coinbase_a, sizeof(coinbase_a));
+	coinbase_b[4] = 0x20;
+	memcpy(coinbase_c, coinbase_a, sizeof(coinbase_a));
+	coinbase_c[2] = 0x09;
+	for (size_t i = 0; i < sizeof(coinbase_a); ++i) {
+		snprintf(&hex_a[i * 2], 3, "%02x", coinbase_a[i]);
+		snprintf(&hex_b[i * 2], 3, "%02x", coinbase_b[i]);
+	}
+	/* The block candidate's hash is zero once the XOR mask is applied. */
+	datum_test(datum_blake2b_apply_xor_mask_le(block_hash, zero_hash, xor_key,
+		datum_blake2b_abw_clear_bits(pow.target_byte)));
+	
+	memset(share_hash, 0xff, sizeof(share_hash));
+	pow.nonce = 1;
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase_a, sizeof(coinbase_a), share_hash));
+	pow.nonce = 2;
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase_b, sizeof(coinbase_b), block_hash));
+	datum_test(datum_protocol_abw_coinbase_count_for_tests() == 1);
+	memset(share_hash, 0xfe, sizeof(share_hash));
+	pow.nonce = 3;
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase_c, sizeof(coinbase_c), share_hash));
+	datum_test(datum_protocol_abw_coinbase_count_for_tests() == 2);
+	
+	atomic_store(&new_notify_threadsafe, 0);
+	new_notify_blockhash[0] = '\0';
+	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == 1);
+	pthread_mutex_lock(&submitblock_mutex);
+	datum_test(submitblock_ptr && strstr(submitblock_ptr, hex_b));
+	datum_test(submitblock_ptr && !strstr(submitblock_ptr, hex_a));
+	pthread_mutex_unlock(&submitblock_mutex);
+	datum_test(datum_protocol_test_discard_submitblock());
+	atomic_store(&new_notify_threadsafe, 0);
+	new_notify_blockhash[0] = '\0';
+	/* The reveal clears every candidate of the slot, releasing both coinbases. */
+	datum_test(datum_protocol_abw_coinbase_count_for_tests() == 0);
+	
+	datum_protocol_abw_reset();
+	datum_config.mining_abw_verify_all_shares_on_disclosure = saved_verify_all;
+}
+
 static void datum_pow_response_large_difficulty_test(void) {
 	unsigned char accepted[9] = {DATUM_POW_SHARE_RESPONSE_ACCEPTED};
 	unsigned char rejected[9] = {DATUM_POW_SHARE_RESPONSE_REJECTED};
@@ -1456,6 +1550,7 @@ void datum_protocol_tests(void) {
 	datum_protocol_bulk_tests();
 	datum_protocol_resume_tests();
 	datum_protocol_abw_cache_tests();
+	datum_protocol_abw_coinbase_sharing_test();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 }
