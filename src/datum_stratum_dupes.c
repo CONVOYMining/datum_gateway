@@ -238,7 +238,7 @@ void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe) {
 	memset(dupes->index, 0, sizeof(T_DATUM_STRATUM_DUPE_ITEM *) * 65536);
 	
 	// find the first stale index
-	i = find_first_less_than(dupes->ptr, dupes->max_items, current_time_millis() - (datum_config.stratum_v1_share_stale_seconds*1000));
+	i = find_first_less_than(dupes->ptr, dupes->max_items, current_time_millis() - (uint64_t)(datum_config.stratum_v1_share_stale_seconds*1000));
 	
 	if ((i == (size_t)-1) || (i == dupes->max_items-1)) {
 		// none of the items are stale...
@@ -272,7 +272,7 @@ T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dup
 		static bool reported = false;
 		if (!reported) {
 			reported = true;
-			DLOG_ERROR("Dupe table full at insert (%d/%d); dropping the entry rather than writing past it. This should not be reachable; please report it.", dupes->current_items, dupes->max_items);
+			DLOG_ERROR("Dupe table full at insert (%zu/%zu); dropping the entry rather than writing past it. This should not be reachable; please report it.", dupes->current_items, dupes->max_items);
 		}
 		return NULL;
 	}

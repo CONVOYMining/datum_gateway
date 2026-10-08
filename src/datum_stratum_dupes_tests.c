@@ -33,6 +33,7 @@
  *
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "datum_conf.h"
@@ -102,7 +103,7 @@ static void datum_dupe_table_fill_tests(void) {
 	// is the "first nonce of its kind" case.
 	for (int i = 0; i < 64; ++i) {
 		const uint64_t nonce = ((uint64_t)i << 32) | (uint64_t)((i * 7) + 1);
-		datum_test(!datum_stratum_check_for_dupe(thread_data, nonce, 1, 1000 + i, 0, extranonce));
+		datum_test(!datum_stratum_check_for_dupe(thread_data, nonce, 1, (uint64_t)(1000 + i), 0, extranonce));
 	}
 
 	// The table has to have actually grown, or nothing above went through the path this
@@ -115,7 +116,7 @@ static void datum_dupe_table_fill_tests(void) {
 	// entry, which is where a pointer left over from before a reallocation is read.
 	for (int i = 0; i < 64; ++i) {
 		const uint64_t nonce = ((uint64_t)i << 32) | (uint64_t)((i * 7) + 1);
-		datum_test(datum_stratum_check_for_dupe(thread_data, nonce, 1, 1000 + i, 0, extranonce));
+		datum_test(datum_stratum_check_for_dupe(thread_data, nonce, 1, (uint64_t)(1000 + i), 0, extranonce));
 	}
 
 	global_cur_stratum_jobs[1] = saved_job;
@@ -188,7 +189,7 @@ static void datum_dupe_table_prune_tests(void) {
 	for (int i = 0; i < 256; ++i) {
 		const uint64_t nonce = ((uint64_t)i << 32) | (uint64_t)((i * 11) + 3);
 		const unsigned short job = (i % 8) ? 2 : 1;
-		datum_stratum_check_for_dupe(thread_data, nonce, job, 2000 + i, 0, extranonce);
+		datum_stratum_check_for_dupe(thread_data, nonce, job, (uint64_t)(2000 + i), 0, extranonce);
 		datum_dupe_index_is_sound(dupes);
 	}
 
