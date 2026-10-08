@@ -184,6 +184,42 @@ int generate_coinbase_input(int height, char *cb, int *target_pot_index) {
 	return cb_input_sz;
 }
 
+// The sigop cost of a coinbase output script: Bitcoin's legacy count
+// (CScript::GetSigOpCount(false)) times 4. OP_CHECKSIG and OP_CHECKSIGVERIFY
+// count 1, OP_CHECKMULTISIG and OP_CHECKMULTISIGVERIFY count 20, pushed data
+// is skipped, and counting stops at a push that runs past the end.
+int datum_script_sigop_cost(const unsigned char *script, int len) {
+	int i = 0, n = 0;
+	uint32_t push;
+	
+	while (i < len) {
+		const unsigned char op = script[i++];
+		push = 0;
+		if (op < 0x4c) {
+			push = op;
+		} else if (op == 0x4c) { // OP_PUSHDATA1
+			if (len - i < 1) break;
+			push = script[i];
+			i += 1;
+		} else if (op == 0x4d) { // OP_PUSHDATA2
+			if (len - i < 2) break;
+			push = upk_u16le(script, i);
+			i += 2;
+		} else if (op == 0x4e) { // OP_PUSHDATA4
+			if (len - i < 4) break;
+			push = upk_u32le(script, i);
+			i += 4;
+		} else if ((op == 0xac) || (op == 0xad)) { // OP_CHECKSIG, OP_CHECKSIGVERIFY
+			n += 1;
+		} else if ((op == 0xae) || (op == 0xaf)) { // OP_CHECKMULTISIG, OP_CHECKMULTISIGVERIFY
+			n += 20;
+		}
+		if (push > (uint32_t)(len - i)) break;
+		i += (int)push;
+	}
+	return n * 4;
+}
+
 void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s, int coinbase_index, int remaining_size, bool space_for_en_in_coinbase, int *cb1idx, int *cb2idx, bool special_coinb1) {
 	// This function finishes off the stratum coinb1+coinb2 using the available outputs in the job and other flags specified.
 	// it does not attempt to maximize coinb1's size to any specific size
@@ -206,9 +242,20 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 	// technically an output script could be > 0x4B, meaning an extra byte would be eaten here... but that's not currently the standard
 	// this needs to match the loop lower in this function, as the count will get thrown off if it does not.
 	
-	// TODO: Enforce max sigops! Note: This is not currently enforced in eloipool, either, so punting for now and will monitor network stats to determine priority.
+	// The sigop cost available to these outputs: the template's sigoplimit
+	// (from GBT, in sigop cost units, where one legacy CHECKSIG counts 4) minus
+	// the cost of the template's transactions and minus the cost of the pool's
+	// own output. available_coinbase_outputs[].sigops is set by the coinbaser
+	// parser to datum_script_sigop_cost of the output's script, and the pool
+	// output is charged the same way. An output whose cost exceeds the
+	// remaining budget is skipped, the same as an output that exceeds the
+	// remaining size, in both this counting pass and the writing pass below.
+	int64_t sigops_budget = (int64_t)s->block_template->sigoplimit - (int64_t)s->block_template->txn_total_sigops;
+	sigops_budget -= datum_script_sigop_cost(s->pool_addr_script, s->pool_addr_script_len);
+	if (sigops_budget < 0) sigops_budget = 0;
+	int64_t sigops_left = sigops_budget;
 	for(k=0;k<s->available_coinbase_outputs_count;k++) {
-		if (((s->available_coinbase_outputs[k].output_script_len+9) <= i) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value))  {
+		if (((s->available_coinbase_outputs[k].output_script_len+9) <= i) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value) && (s->available_coinbase_outputs[k].sigops <= sigops_left))  {
 			if ((special_coinb1) && (!c1full) && ((s->available_coinbase_outputs[k].output_script_len+9) <= i2)) {
 				i2 -= (s->available_coinbase_outputs[k].output_script_len+9);
 				c1cnt++;
@@ -217,6 +264,7 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 			}
 			
 			i -= (s->available_coinbase_outputs[k].output_script_len+9);
+			sigops_left -= s->available_coinbase_outputs[k].sigops;
 			m++;
 			mval += s->available_coinbase_outputs[k].value_sats;
 			if (i < 30) break;
@@ -244,9 +292,11 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 	
 	// append "m" payouts. find them the same way we did before
 	mval = 0;
+	sigops_left = sigops_budget;
 	for(k=0;k<s->available_coinbase_outputs_count;k++) {
-		if (((s->available_coinbase_outputs[k].output_script_len+9) <= j) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value)) {
+		if (((s->available_coinbase_outputs[k].output_script_len+9) <= j) && ((mval + s->available_coinbase_outputs[k].value_sats) <= s->coinbase_value) && (s->available_coinbase_outputs[k].sigops <= sigops_left)) {
 			j -= (s->available_coinbase_outputs[k].output_script_len+9);
+			sigops_left -= s->available_coinbase_outputs[k].sigops;
 			m--;
 			
 			mval += s->available_coinbase_outputs[k].value_sats;
@@ -307,7 +357,7 @@ void generate_coinbase_txns_for_stratum_job_subtypebysize(T_DATUM_STRATUM_JOB *s
 		cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000036a0100"); // TODO: Is a naked OP_RETURN without any bytes after safe?  Above TODO is probably better than investigating.
 	}
 	
-	// witness commit output costs 46 bytes
+	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
 	cb2idx[coinbase_index] += sprintf(&s->coinbase[coinbase_index].coinb2[cb2idx[coinbase_index]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
@@ -326,8 +376,13 @@ int datum_stratum_coinbase_fit_to_template(int max_sz, int fixed_bytes, T_DATUM_
 		msz1 = j;
 	}
 	
-	if (((i<<2)+s->block_template->txn_total_weight+340+36) > s->block_template->weightlimit) {
-		j = ((s->block_template->weightlimit - (s->block_template->txn_total_weight+340+36))>>2) - fixed_bytes;
+	// Block weight: four units a byte for the header and the transaction count
+	// (at most five bytes), four a byte for the coinbase (no witness data of
+	// its own) plus the 36 bytes of witness the node adds to it (marker, flag,
+	// one 32-byte item), and the template's transactions at their weight. The
+	// original 340 covered the 80-byte SHA256d header.
+	if (((i<<2)+s->block_template->txn_total_weight+((DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5)<<2)+36) > s->block_template->weightlimit) {
+		j = ((s->block_template->weightlimit - (s->block_template->txn_total_weight+((DATUM_BLAKE2B_BLOCK_HEADER_SIZE+5)<<2)+36))>>2) - fixed_bytes;
 		if (j < 0) return 0;
 		msz1 = j;
 	}
@@ -455,7 +510,7 @@ void generate_base_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool ne
 		k = cb2idx[0];
 	}
 	
-	// witness commit output costs 46 bytes
+	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
 	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
@@ -661,7 +716,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		k = cb2idx[0];
 	}
 	
-	// witness commit output costs 46 bytes
+	// witness commitment output costs 47 bytes (8 value, 1 length, 38 script)
 	// append the default_witness_commitment
 	cb2idx[0] += sprintf(&s->coinbase[0].coinb2[cb2idx[0]], "0000000000000000%2.2x%s", (unsigned int)strlen(s->block_template->default_witness_commitment)>>1, s->block_template->default_witness_commitment);
 	// lock time
@@ -687,7 +742,7 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		// ok, let's figure out how much space, if any, we have for miner payout outputs
 		// we first need to figure out how much space we are using for each type after required data, so let's do that
 		
-		// witness output = 46 bytes
+		// witness commitment output = 47 bytes (8 value, 1 length, 38 script)
 		// pool output = pool_addr_script_len + 9
 		// coinbase itself = cb_input_sz
 		// coinbase len = 1
@@ -695,17 +750,23 @@ void generate_coinbase_txns_for_stratum_job(T_DATUM_STRATUM_JOB *s, bool empty_o
 		// lock time = 4 bytes
 		// "sequence" = 4 bytes
 		// extranonce size = 15 bytes (w/len push needed for either coinbase or OP_RETURN formats)
-		// output count... could technically be up to three bytes for types 3 + 4, most likely 1 byte for 0,1,2.
-		//     --- lets give ourselves the wiggle room and say 3 bytes
+		// output count: one byte up to 252 outputs, three bytes past that (the
+		// largest class holds several hundred); counted at three so the coinbase
+		// never exceeds what datum_stratum_coinbase_fit_to_template allowed.
 		//
-		// total static bytes = 46+9+1+41+4+3+4+15 = 123 bytes
+		// total static bytes = 47+9+1+41+4+3+4+15 = 124 bytes
 		// not-static bytes = pool_addr_script_len + cb_input_sz + (space_for_en_in_coinbase?0:10)
 		//     --- it costs 10 extra bytes to do the OP_RETURN based extranonce
+		//
+		// This was 119, three bytes under the transaction with a one-byte output
+		// count and five under it with a three-byte count; a coinbase built to a
+		// template's room then exceeded the block's weight limit by up to 20
+		// weight units.
 		
 		if (!space_for_en_in_coinbase) {
-			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 119 + s->pool_addr_script_len + cb_input_sz + 10;
+			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + cb_input_sz + 10;
 		} else {
-			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 119 + s->pool_addr_script_len + cb_input_sz;
+			cb_req_sz[1] = cb_req_sz[2] = cb_req_sz[3] = cb_req_sz[4] = cb_req_sz[5] = 124 + s->pool_addr_script_len + cb_input_sz;
 			cb_req_sz[2] += 10; // always OP_RETURN extranonce for type 2
 		}
 		
@@ -813,11 +874,7 @@ int datum_coinbaser_v2_parse(T_DATUM_STRATUM_JOB *s, unsigned char *coinbaser, i
 		memcpy(s->available_coinbase_outputs[cbvalid].output_script, &coinbaser[cidx], slen); cidx+=slen;
 		// 64-bit value in sats is part of the output
 		s->available_coinbase_outputs[cbvalid].value_sats = outval;
-		if (s->available_coinbase_outputs[cbvalid].output_script[0] == 0x76) { // kludge for checking for P2PKH output
-			s->available_coinbase_outputs[cbvalid].sigops = 4;
-		} else {
-			s->available_coinbase_outputs[cbvalid].sigops = 0;
-		}
+		s->available_coinbase_outputs[cbvalid].sigops = datum_script_sigop_cost(s->available_coinbase_outputs[cbvalid].output_script, slen);
 		
 		s->available_coinbase_outputs[cbvalid].output_script_len = slen;
 		
