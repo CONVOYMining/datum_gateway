@@ -191,11 +191,13 @@ void datum_gateway_example_conf(void);
 static inline
 size_t datum_expected_n_global_nonstale_shares(const global_config_t * const cfg) {
 	// NOTE: If we use size_t too early, 32-bit gets capped at a mere 71 MB
-	uint64_t c;
+	uint64_t job_stale_seconds;
+	uint64_t c = 0;
 	bool overflow =
+		ckd_add(&job_stale_seconds, cfg->stratum_v1_share_stale_seconds, cfg->bitcoind_work_update_seconds) ||
 		ckd_mul(&c, cfg->stratum_v1_max_clients_per_thread,
 		               cfg->stratum_v1_vardiff_target_shares_min) ||
-		ckd_mul(&c, c, cfg->stratum_v1_share_stale_seconds) ||
+		ckd_mul(&c, c, job_stale_seconds) ||
 		ckd_mul(&c, c, 16) ||
 		ckd_add(&c, c, 59);
 	c /= 60;  // seconds per minute

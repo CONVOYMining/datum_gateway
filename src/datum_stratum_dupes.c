@@ -224,8 +224,10 @@ void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe) {
 	// links all broken, so wipe out the starting table
 	memset(dupes->index, 0, sizeof(T_DATUM_STRATUM_DUPE_ITEM *) * 65536);
 	
+	const uint64_t job_stale_seconds = datum_config.stratum_v1_share_stale_seconds + datum_config.bitcoind_work_update_seconds;
+	
 	// find the first stale index
-	i = find_first_less_than(dupes->ptr, dupes->max_items, current_time_millis() - (uint64_t)(datum_config.stratum_v1_share_stale_seconds*1000));
+	i = find_first_less_than(dupes->ptr, dupes->max_items, current_time_millis() - (uint64_t)(job_stale_seconds * 1000));
 	
 	if ((i == (size_t)-1) || (i == dupes->max_items-1)) {
 		// none of the items are stale...
