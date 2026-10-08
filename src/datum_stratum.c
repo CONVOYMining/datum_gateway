@@ -377,10 +377,10 @@ void datum_stratum_v1_socket_thread_client_new(T_DATUM_CLIENT_DATA *c) {
 void datum_stratum_v1_socket_thread_init(T_DATUM_THREAD_DATA *my) {
 	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = (T_DATUM_STRATUM_THREADPOOL_DATA *)my->app_thread_data;
 	
-	pthread_rwlock_rdlock(&stratum_global_job_ptr_lock);
-	sdata->latest_stratum_job_index = global_latest_stratum_job_index;
-	sdata->cur_stratum_job = global_cur_stratum_jobs[global_latest_stratum_job_index];
-	pthread_rwlock_unlock(&stratum_global_job_ptr_lock);
+	// No job yet: the first loop picks up the current job like any other job update,
+	// so it is processed (coinbaser readiness, etc) before any client here subscribes
+	sdata->latest_stratum_job_index = -1;
+	sdata->cur_stratum_job = NULL;
 	sdata->new_job = false;
 	sdata->last_sent_job_state = 0;
 	
@@ -405,12 +405,6 @@ int datum_stratum_v1_get_thread_subscriber_count(T_DATUM_THREAD_DATA *my) {
 
 bool stratum_job_coinbaser_ready(T_DATUM_STRATUM_THREADPOOL_DATA *sdata, T_DATUM_STRATUM_JOB *job) {
 	bool a = false;
-	// backup timeout for coinbaser on these jobs
-	if ((sdata->loop_tsms > job->tsms) && (sdata->loop_tsms - job->tsms) > 5000) {
-		// enforce a timeout of 5 seconds on waiting on a coinbaser...
-		sdata->full_coinbase_ready = false;
-		return true;
-	}
 	
 	pthread_rwlock_rdlock(&need_coinbaser_rwlocks[job->global_index]);
 	if (!job->need_coinbaser) {
@@ -420,9 +414,18 @@ bool stratum_job_coinbaser_ready(T_DATUM_STRATUM_THREADPOOL_DATA *sdata, T_DATUM
 	
 	if (a) {
 		sdata->full_coinbase_ready = true;
+		return true;
 	}
 	
-	return a;
+	// backup timeout for coinbaser on these jobs
+	// (only once we know it isn't here: this thread may be looking at the job late)
+	if ((sdata->loop_tsms > job->tsms) && (sdata->loop_tsms - job->tsms) > 5000) {
+		// enforce a timeout of 5 seconds on waiting on a coinbaser...
+		sdata->full_coinbase_ready = false;
+		return true;
+	}
+	
+	return false;
 }
 
 void datum_stratum_v1_socket_thread_loop(T_DATUM_THREAD_DATA *my) {
