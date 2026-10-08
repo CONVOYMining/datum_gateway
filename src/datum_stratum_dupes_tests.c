@@ -136,6 +136,48 @@ static void datum_dupe_index_is_sound(const T_DATUM_STRATUM_DUPES *dupes) {
 	}
 }
 
+static void datum_dupe_table_work_update_grace_tests(void) {
+	const int saved_clients = datum_config.stratum_v1_max_clients_per_thread;
+	const int saved_shares = datum_config.stratum_v1_vardiff_target_shares_min;
+	const int saved_stale = datum_config.stratum_v1_share_stale_seconds;
+	const int saved_work_update = datum_config.bitcoind_work_update_seconds;
+	T_DATUM_STRATUM_THREADPOOL_DATA * const thread_data = calloc(1, sizeof(*thread_data));
+	datum_test(thread_data != NULL);
+	if (!thread_data) return;
+	
+	datum_config.stratum_v1_max_clients_per_thread = 1;
+	datum_config.stratum_v1_vardiff_target_shares_min = 1;
+	datum_config.stratum_v1_share_stale_seconds = 60;
+	datum_config.bitcoind_work_update_seconds = 40;
+	datum_stratum_dupes_init(thread_data);
+	T_DATUM_STRATUM_DUPES * const dupes = thread_data->dupes;
+	datum_test(dupes->max_items == 27);
+	
+	const uint64_t now = current_time_millis();
+	const uint64_t within_work_update_grace = now - 90000;
+	const uint64_t expired = now - 110000;
+	uint8_t retained_hash[28] = {0x01};
+	uint8_t expired_hash[28] = {0x02};
+	
+	datum_test(!datum_stratum_check_for_dupe(thread_data, retained_hash, within_work_update_grace));
+	datum_test(!datum_stratum_check_for_dupe(thread_data, expired_hash, expired));
+	datum_stratum_dupes_cleanup(dupes, false);
+	
+	datum_test(dupes->current_items == 1);
+	datum_test(datum_stratum_check_for_dupe(thread_data, retained_hash, within_work_update_grace));
+	datum_test(!datum_stratum_check_for_dupe(thread_data, expired_hash, expired));
+	datum_dupe_index_is_sound(dupes);
+	
+	free(dupes->ptr);
+	free(thread_data->dupes);
+	free(thread_data);
+	
+	datum_config.stratum_v1_max_clients_per_thread = saved_clients;
+	datum_config.stratum_v1_vardiff_target_shares_min = saved_shares;
+	datum_config.stratum_v1_share_stale_seconds = saved_stale;
+	datum_config.bitcoind_work_update_seconds = saved_work_update;
+}
+
 // The other half of the cleanup, and the half a gateway actually reaches: entries old
 // enough to age out are pruned rather than the array being grown. The prune sorts the
 // array, which moves every entry, so an insertion point taken before it is stale after it
@@ -258,6 +300,7 @@ static void datum_dupe_table_cycle_tests(void) {
 void datum_stratum_dupes_tests(void) {
 	datum_pow_dupe_tests();
 	datum_dupe_table_fill_tests();
+	datum_dupe_table_work_update_grace_tests();
 	datum_dupe_table_prune_tests();
 	datum_dupe_table_cycle_tests();
 }
