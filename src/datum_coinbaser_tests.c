@@ -33,6 +33,7 @@
  *
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -166,13 +167,13 @@ static void datum_coinbaser_parse_sigops_tests(void) {
 	free(job);
 }
 
-/* Builds one coinbase class with the template's used sigop cost set to
+/* Builds one coinbase class in hex with the template's used sigop cost set to
  * sigops_used and the pool script set to P2PKH or P2WPKH, and returns the hex
  * output count that follows the 8-character sequence at the start of coinb2.
  * The count covers the included outputs plus the pool output and the witness
  * commitment. The job's candidate outputs are two P2PKH outputs (cost 4 each)
  * and one P2WPKH output (cost 0). */
-static const char *datum_coinbase_output_count_hex(T_DATUM_STRATUM_JOB *job, uint32_t sigops_used, bool pool_p2pkh) {
+static const char *datum_coinbase_output_count_hex(T_DATUM_STRATUM_JOB *job, T_DATUM_COINBASE_HEX *hex, uint32_t sigops_used, bool pool_p2pkh) {
 	int cb1idx[MAX_COINBASE_TYPES] = {0};
 	int cb2idx[MAX_COINBASE_TYPES] = {0};
 	
@@ -184,9 +185,9 @@ static const char *datum_coinbase_output_count_hex(T_DATUM_STRATUM_JOB *job, uin
 		memcpy(job->pool_addr_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
 		job->pool_addr_script_len = sizeof(datum_test_p2wpkh_script);
 	}
-	memset(job->coinbase[1].coinb2, 0, sizeof(job->coinbase[1].coinb2));
-	generate_coinbase_txns_for_stratum_job_subtypebysize(job, 1, 1000, true, cb1idx, cb2idx, false);
-	return job->coinbase[1].coinb2 + 8;
+	memset(hex[1].coinb2, 0, sizeof(hex[1].coinb2));
+	generate_coinbase_txns_for_stratum_job_subtypebysize(job, hex, 1, 1000, true, cb1idx, cb2idx, false);
+	return hex[1].coinb2 + 8;
 }
 
 static void datum_blake2b_coinbase_sigops_tests(void) {
@@ -194,10 +195,15 @@ static void datum_blake2b_coinbase_sigops_tests(void) {
 	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
 	int cb1idx[MAX_COINBASE_TYPES] = {0};
 	int cb2idx[MAX_COINBASE_TYPES] = {0};
+	T_DATUM_COINBASE_HEX *hex = calloc(MAX_COINBASE_TYPES, sizeof(*hex));
 	int k;
 	
-	datum_test(job != NULL);
-	if (!job) return;
+	datum_test(job != NULL && hex != NULL);
+	if (!job || !hex) {
+		free(job);
+		free(hex);
+		return;
+	}
 	memset(&tdata, 0, sizeof(tdata));
 	tdata.sigoplimit = 80000;
 	job->block_template = &tdata;
@@ -217,23 +223,133 @@ static void datum_blake2b_coinbase_sigops_tests(void) {
 	job->available_coinbase_outputs_count = 3;
 	
 	/* Space for every output: all three, the pool output and the witness commitment. */
-	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 0, false), "05", 2));
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, hex, 0, false), "05", 2));
 	/* Budget for one P2PKH output: the first P2PKH is included, the second is
 	 * skipped, and the P2WPKH is included. */
-	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 80000 - 4, false), "04", 2));
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, hex, 80000 - 4, false), "04", 2));
 	/* Budget of 0: only the P2WPKH output is included. */
-	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 80000, false), "03", 2));
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, hex, 80000, false), "03", 2));
 	/* A P2PKH pool output takes the remaining 4 units of the budget, so neither
 	 * P2PKH candidate is included. */
-	datum_test(!strncmp(datum_coinbase_output_count_hex(job, 80000 - 4, true), "03", 2));
+	datum_test(!strncmp(datum_coinbase_output_count_hex(job, hex, 80000 - 4, true), "03", 2));
 	/* A bare P2PK pool output is charged its script's cost, 4, the same as a
 	 * P2PKH one. */
 	memcpy(job->pool_addr_script, datum_test_p2pk_script, sizeof(datum_test_p2pk_script));
 	job->pool_addr_script_len = sizeof(datum_test_p2pk_script);
 	tdata.txn_total_sigops = 80000 - 4;
-	memset(job->coinbase[1].coinb2, 0, sizeof(job->coinbase[1].coinb2));
-	generate_coinbase_txns_for_stratum_job_subtypebysize(job, 1, 1000, true, cb1idx, cb2idx, false);
-	datum_test(!strncmp(job->coinbase[1].coinb2 + 8, "03", 2));
+	memset(hex[1].coinb2, 0, sizeof(hex[1].coinb2));
+	generate_coinbase_txns_for_stratum_job_subtypebysize(job, hex, 1, 1000, true, cb1idx, cb2idx, false);
+	datum_test(!strncmp(hex[1].coinb2 + 8, "03", 2));
+	free(hex);
+	free(job);
+}
+
+/* A split of MAX_COINBASER_OUTPUTS P2WPKH outputs, 31 bytes each, fits one
+ * coinbase: the output count is written as a three-byte varint and the hex of
+ * coinb2 stays inside STRATUM_COINBASE2_MAX_LEN. */
+static void datum_blake2b_large_coinbase_tests(void) {
+	T_DATUM_TEMPLATE_DATA tdata;
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
+	T_DATUM_COINBASE_HEX *hex = calloc(MAX_COINBASE_TYPES, sizeof(*hex));
+	int cb1idx[MAX_COINBASE_TYPES] = {0};
+	int cb2idx[MAX_COINBASE_TYPES] = {0};
+	size_t cb_bytes;
+	int k;
+
+	datum_test(job != NULL && hex != NULL);
+	if (!job || !hex) {
+		free(job);
+		free(hex);
+		return;
+	}
+	memset(&tdata, 0, sizeof(tdata));
+	tdata.sigoplimit = 80000;
+	job->block_template = &tdata;
+	job->coinbase_value = 5000000000ULL;
+	memcpy(job->pool_addr_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
+	job->pool_addr_script_len = sizeof(datum_test_p2wpkh_script);
+	for (k = 0; k < MAX_COINBASER_OUTPUTS; k++) {
+		job->available_coinbase_outputs[k].value_sats = 1000;
+		memcpy(job->available_coinbase_outputs[k].output_script, datum_test_p2wpkh_script, sizeof(datum_test_p2wpkh_script));
+		job->available_coinbase_outputs[k].output_script_len = sizeof(datum_test_p2wpkh_script);
+		job->available_coinbase_outputs[k].sigops = 0;
+	}
+	job->available_coinbase_outputs_count = MAX_COINBASER_OUTPUTS;
+
+	generate_coinbase_txns_for_stratum_job_subtypebysize(
+		job, hex, COINBASE_TYPE_YUGE, MAX_COINBASER_OUTPUTS * 31, true, cb1idx, cb2idx, false);
+
+	/* MAX_COINBASER_OUTPUTS dictated outputs, the pool output and the witness
+	 * commitment: 1026, written as fd followed by 0x0402 little-endian. */
+	datum_test(!strncmp(hex[COINBASE_TYPE_YUGE].coinb2 + 8, "fd0204", 6));
+	datum_test(strlen(hex[COINBASE_TYPE_YUGE].coinb2) < STRATUM_COINBASE2_MAX_LEN);
+	cb_bytes = (strlen(hex[COINBASE_TYPE_YUGE].coinb1) +
+		strlen(hex[COINBASE_TYPE_YUGE].coinb2)) / 2 + 12;
+	datum_test(cb_bytes > 30000 && cb_bytes <= MAX_DICTATED_COINBASE_SIZE);
+	free(hex);
+	free(job);
+}
+
+/* The job keeps the binary of the hex the builder writes. With no pool
+ * connected the job is built empty: class 0 is version 1 and one input in
+ * coinb1, then in coinb2 the sequence, two outputs (the pool's at the coinbase
+ * value and the witness commitment) and the lock time. Every other class is a
+ * copy of class 0, and the subsidy-only coinbase pays the block reward in its
+ * one output. */
+static void datum_coinbase_binary_parts_tests(void) {
+	static const unsigned char version_and_input_count[5] = {1, 0, 0, 0, 1};
+	static const unsigned char sequence_and_two_outputs[5] = {0xff, 0xff, 0xff, 0xff, 2};
+	static const unsigned char sequence_and_one_output[5] = {0xff, 0xff, 0xff, 0xff, 1};
+	static const unsigned char lock_time[4] = {0};
+	const global_config_t saved_config = datum_config;
+	T_DATUM_TEMPLATE_DATA tdata;
+	T_DATUM_STRATUM_JOB *job = calloc(1, sizeof(*job));
+	const T_DATUM_STRATUM_COINBASE *cb;
+	unsigned char value[8];
+	int k;
+	
+	datum_test(job != NULL);
+	if (!job) return;
+	snprintf(datum_config.mining_pool_address, sizeof(datum_config.mining_pool_address),
+		"bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
+	datum_config.mining_coinbase_tag_primary[0] = 0;
+	datum_config.mining_coinbase_tag_secondary[0] = 0;
+	memset(&tdata, 0, sizeof(tdata));
+	snprintf(tdata.default_witness_commitment, sizeof(tdata.default_witness_commitment),
+		"6a24aa21a9ed%064d", 0);
+	job->block_template = &tdata;
+	job->height = 1000;
+	job->coinbase_value = 5000001234ULL;
+	
+	generate_coinbase_txns_for_stratum_job(job, true);
+	
+	cb = &job->coinbase[0];
+	datum_test(cb->coinb1_len > (int)sizeof(version_and_input_count));
+	datum_test(!memcmp(cb->coinb1_bin, version_and_input_count, sizeof(version_and_input_count)));
+	/* sequence, count, pool output (8 + 1 + 22), witness commitment (8 + 1 + 38), lock time */
+	datum_test(cb->coinb2_len == 4 + 1 + 31 + 47 + 4);
+	datum_test(!memcmp(cb->coinb2_bin, sequence_and_two_outputs, sizeof(sequence_and_two_outputs)));
+	pk_u64le(value, 0, job->coinbase_value);
+	datum_test(!memcmp(cb->coinb2_bin + 5, value, sizeof(value)));
+	datum_test(!memcmp(cb->coinb2_bin + cb->coinb2_len - 4, lock_time, sizeof(lock_time)));
+	for (k = 1; k < MAX_COINBASE_TYPES; k++) {
+		datum_test(job->coinbase[k].coinb1_len == cb->coinb1_len);
+		datum_test(job->coinbase[k].coinb2_len == cb->coinb2_len);
+		datum_test(!memcmp(job->coinbase[k].coinb1_bin, cb->coinb1_bin, cb->coinb1_len));
+		datum_test(!memcmp(job->coinbase[k].coinb2_bin, cb->coinb2_bin, cb->coinb2_len));
+	}
+	
+	cb = &job->subsidy_only_coinbase;
+	datum_test(cb->coinb1_len == job->coinbase[0].coinb1_len);
+	datum_test(!memcmp(cb->coinb1_bin, job->coinbase[0].coinb1_bin, cb->coinb1_len));
+	datum_test(cb->coinb2_len == 4 + 1 + 31 + 4);
+	datum_test(!memcmp(cb->coinb2_bin, sequence_and_one_output, sizeof(sequence_and_one_output)));
+	pk_u64le(value, 0, block_reward(job->height));
+	datum_test(!memcmp(cb->coinb2_bin + 5, value, sizeof(value)));
+	datum_test(!memcmp(cb->coinb2_bin + 13, job->coinbase[0].coinb2_bin + 13, 23));
+	datum_test(!memcmp(cb->coinb2_bin + cb->coinb2_len - 4, lock_time, sizeof(lock_time)));
+	
+	datum_config = saved_config;
 	free(job);
 }
 
@@ -244,4 +360,6 @@ void datum_coinbaser_tests(void) {
 	datum_blake2b_coinbase_sigops_tests();
 	datum_script_sigop_cost_tests();
 	datum_coinbaser_parse_sigops_tests();
+	datum_blake2b_large_coinbase_tests();
+	datum_coinbase_binary_parts_tests();
 }
