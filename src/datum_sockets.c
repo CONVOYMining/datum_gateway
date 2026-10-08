@@ -427,12 +427,14 @@ int assign_to_thread(T_DATUM_SOCKET_APP *app, int fd) {
 		
 		app->datum_threads[tid].thread_id = tid;
 		app->datum_threads[tid].is_active = true;
+		app->datum_active_threads++;
 		
 		if (pthread_create(&app->datum_threads[i].pthread, NULL, datum_threadpool_thread, &app->datum_threads[i]) != 0) {
+			app->datum_active_threads--;
+			app->datum_threads[tid].is_active = false;
 			DLOG_ERROR("Could not start new thread for TID %d", tid);
 			return 0;
 		}
-		app->datum_active_threads++;
 	} else {
 		// active threads are maxed already.  find one with the fewest clients
 		// in general, it should be safe to read the client count without locking, since
