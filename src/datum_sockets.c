@@ -365,7 +365,7 @@ void *datum_threadpool_thread(void *arg) {
 }
 
 void clean_thread_data(T_DATUM_THREAD_DATA *d, T_DATUM_SOCKET_APP *app) {
-	int i,ret;
+	int i;
 	
 	// clean up clients, just in case
 	for(i=0;i<app->max_clients_thread;i++) {
@@ -384,14 +384,6 @@ void clean_thread_data(T_DATUM_THREAD_DATA *d, T_DATUM_SOCKET_APP *app) {
 	// TODO: dynamic allocation of buffers
 	memset(&d->ev, 0, sizeof(struct epoll_event));
 	memset(d->events, 0, sizeof(struct epoll_event) * MAX_CLIENTS_THREAD*2);
-	
-	// init the mutex
-	ret = pthread_mutex_init(&d->thread_data_lock, NULL);
-	if (ret) {
-		DLOG_FATAL("Could not init mutex for thread data: %s", strerror(ret));
-		panic_from_thread(__LINE__);
-		return;
-	}
 	
 	// fix the app pointer
 	d->app = app;
