@@ -251,7 +251,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	
 	// start the DATUM socket server
 	DLOG_DEBUG("Starting listener thread %p",app);
-	ret = pthread_create(&pthread_datum_stratum_socket_server, NULL, datum_gateway_listener_thread, app);
+	ret = datum_thread_create(&pthread_datum_stratum_socket_server, datum_gateway_listener_thread, app);
 	if (ret != 0) {
 		DLOG_FATAL("Could not pthread_create for DATUM socket listener!: %s", strerror(ret));
 		panic_from_thread(__LINE__);

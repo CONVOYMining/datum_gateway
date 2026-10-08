@@ -190,6 +190,27 @@ static void datum_utils_tests_buf(void) {
 	free(buf.s);
 }
 
+/* Uses 1 MiB of stack, more than musl (128 KiB) and macOS (512 KiB) give a
+ * thread by default. */
+static void *datum_utils_tests_large_stack_thread(void *arg) {
+	volatile unsigned char buf[1024 * 1024];
+	
+	buf[0] = 1;
+	buf[sizeof(buf) - 1] = 2;
+	*(int *)arg = buf[0] + buf[sizeof(buf) - 1];
+	return NULL;
+}
+
+void datum_utils_tests_thread_stack(void) {
+	pthread_t thread;
+	int result = 0;
+	
+	if (datum_test(datum_thread_create(&thread, datum_utils_tests_large_stack_thread, &result) == 0)) {
+		datum_test(pthread_join(thread, NULL) == 0);
+		datum_test(result == 3);
+	}
+}
+
 void datum_utils_tests(void) {
 	datum_utils_tests_hex();
 	datum_utils_tests_bytes_to_hex();
@@ -198,4 +219,5 @@ void datum_utils_tests(void) {
 	datum_utils_tests_pdiff_to_bdiff();
 	datum_utils_tests_network_difficulty_blake2b();
 	datum_utils_tests_buf();
+	datum_utils_tests_thread_stack();
 }

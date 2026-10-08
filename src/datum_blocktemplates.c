@@ -470,7 +470,7 @@ void *datum_gateway_template_thread(void *args) {
 	if (datum_config.bitcoind_notify_fallback) {
 		// start getbestblockhash poller thread as a backup for notifications
 		DLOG_DEBUG("Starting fallback block notifier");
-		pthread_create(&pthread_datum_gateway_fallback_notifier, NULL, datum_gateway_fallback_notifier, NULL);
+		datum_thread_create(&pthread_datum_gateway_fallback_notifier, datum_gateway_fallback_notifier, NULL);
 	}
 	
 	DLOG_DEBUG("Template fetcher thread ready.");

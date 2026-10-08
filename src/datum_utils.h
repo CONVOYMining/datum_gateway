@@ -36,6 +36,7 @@
 #ifndef _DATUM_UTILS_H_
 #define _DATUM_UTILS_H_
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -97,6 +98,12 @@ unsigned long long block_reward(unsigned int block_height);
 int append_bitcoin_varint_hex(uint64_t n, char *s);
 int append_UNum(uint64_t n, uint8_t *s);
 void panic_from_thread(int a);
+
+// The stack size of every thread the gateway starts: glibc's usual default
+// (RLIMIT_STACK), set explicitly because musl starts threads with 128 KiB and
+// macOS with 512 KiB, and some functions keep more than 128 KiB on the stack.
+#define DATUM_THREAD_STACK_SIZE (8 * 1024 * 1024)
+int datum_thread_create(pthread_t *thread, void *(*start_routine)(void *), void *arg);
 bool double_sha256(void *out, const void *in, size_t length);
 void hex_to_bin_le(const char *hex, unsigned char *bin);
 void hex_to_bin(const char *hex, unsigned char *bin);

@@ -465,7 +465,7 @@ int datum_logger_init(void) {
 		}
 	}
 	
-	const int result = pthread_create(&pthread_datum_logger_thread, NULL, datum_logger_thread, log_handle);
+	const int result = datum_thread_create(&pthread_datum_logger_thread, datum_logger_thread, log_handle);
 	if (result != 0) {
 		DLOG_FATAL("datum_logger_init: pthread_create failed with code %d", result);
 		return -1;
