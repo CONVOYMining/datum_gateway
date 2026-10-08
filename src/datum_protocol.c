@@ -177,6 +177,27 @@ extern DATUM_QUEUE pow_queue;
 // may be used by this thread when crafting replies to server commands
 unsigned char temp_data[DATUM_PROTOCOL_TEMP_DATA_SIZE];
 
+void datum_protocol_reset_server_knowledge(void) {
+	pthread_rwlock_wrlock(&datum_jobs_rwlock);
+	for(int i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {
+		datum_jobs[i].server_has_merkle_branches = false;
+		memset(datum_jobs[i].server_has_coinbase, 0, sizeof(datum_jobs[i].server_has_coinbase));
+		datum_jobs[i].server_has_coinbase_empty = false;
+		datum_jobs[i].server_has_short_txnlist = false;
+		datum_jobs[i].server_has_validated_block = false;
+	}
+	pthread_rwlock_unlock(&datum_jobs_rwlock);
+}
+
+void datum_protocol_clear_validation_context(void) {
+	pthread_rwlock_wrlock(&datum_jobs_rwlock);
+	for(int i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {
+		datum_jobs[i].server_sjob = NULL;
+		memset(datum_jobs[i].server_job_id, 0, sizeof(datum_jobs[i].server_job_id));
+	}
+	pthread_rwlock_unlock(&datum_jobs_rwlock);
+}
+
 unsigned char datum_protocol_setup_new_job_idx(void *sx) {
 	// Called by the stratum job updater.  Must be thread safe.
 	// give the stratum job updater a new job ID for us to work with
@@ -1493,6 +1514,7 @@ err:
 		!(config_flags & DATUM_CONFIG_FLAG_ABW_DISABLED);
 	const bool abw_policy_changed = pool_abw_enabled !=
 		atomic_load(&datum_pool_abw_enabled);
+	if (first_configuration && !resumed) datum_protocol_clear_validation_context();
 	if ((first_configuration && !resumed) || abw_policy_changed) {
 		datum_queue_clear(&pow_queue);
 		datum_protocol_replay_clear();
@@ -2968,20 +2990,7 @@ void *datum_protocol_client(void *args) {
 	datum_connection_configured = false;
 	datum_protocol_abw_deactivate();
 	
-	pthread_rwlock_wrlock(&datum_jobs_rwlock);
-	for(i=0;i<MAX_DATUM_PROTOCOL_JOBS;i++) {
-		datum_jobs[i].server_sjob = NULL;
-		memset(datum_jobs[i].server_job_id, 0,
-			sizeof(datum_jobs[i].server_job_id));
-		datum_jobs[i].server_has_merkle_branches = false;
-		datum_jobs[i].server_has_coinbase_empty = false;
-		datum_jobs[i].server_has_short_txnlist = false;
-		datum_jobs[i].server_has_validated_block = false;
-		for(n=0;n<8;n++) {
-			datum_jobs[i].server_has_coinbase[n] = false;
-		}
-	}
-	pthread_rwlock_unlock(&datum_jobs_rwlock);
+	datum_protocol_reset_server_knowledge();
 	pthread_mutex_lock(&datum_protocol_sender_stage1_lock);
 	pthread_mutex_lock(&datum_protocol_send_buffer_lock);
 	uint64_t next_session_generation =

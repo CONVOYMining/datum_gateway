@@ -877,6 +877,10 @@ cleanup:
 
 static void datum_protocol_resume_tests(void) {
 	T_DATUM_PROTOCOL_POW pow = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	T_DATUM_TEMPLATE_TXN txn = {0};
+	uint8_t txn_data[] = {0x01, 0x02, 0x03, 0x04};
 	const unsigned char message[] = {0x27, 0xFE};
 	
 	datum_protocol_replay_clear();
@@ -920,6 +924,58 @@ static void datum_protocol_resume_tests(void) {
 	datum_test(sending_header_key == header_key_before);
 	datum_test(!memcmp(session_nonce_sender, nonce_before, sizeof(nonce_before)));
 	datum_test(server_out_buf == buffered_before);
+	
+	// A reconnect forgets what the server has received without discarding the local context needed to answer validation requests.
+	datum_protocol_replay_clear();
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	strcpy(job.job_id, "replayed-job");
+	job.block_template = &block_template;
+	block_template.txn_count = 1;
+	block_template.txns = &txn;
+	txn.size = sizeof(txn_data);
+	txn.txn_data_binary = txn_data;
+	pow.sjob = &job;
+	pow.coinbase_id = 2;
+	memcpy(pow.stratum_job_id, job.job_id, sizeof(pow.stratum_job_id));
+	T_DATUM_PROTOCOL_JOB *protocol_job = &datum_jobs[pow.datum_job_id];
+	protocol_job->server_sjob = &job;
+	memcpy(protocol_job->server_job_id, job.job_id, sizeof(protocol_job->server_job_id));
+	protocol_job->server_has_merkle_branches = true;
+	memset(protocol_job->server_has_coinbase, true, sizeof(protocol_job->server_has_coinbase));
+	protocol_job->server_has_coinbase_empty = true;
+	protocol_job->server_has_short_txnlist = true;
+	protocol_job->server_has_validated_block = true;
+	datum_protocol_reset_server_knowledge();
+	datum_test(protocol_job->server_sjob == &job);
+	datum_test(!memcmp(protocol_job->server_job_id, job.job_id, sizeof(protocol_job->server_job_id)));
+	datum_test(!protocol_job->server_has_merkle_branches);
+	for(size_t i=0;i<MAX_COINBASE_TYPES;i++) datum_test(!protocol_job->server_has_coinbase[i]);
+	datum_test(!protocol_job->server_has_coinbase_empty);
+	datum_test(!protocol_job->server_has_short_txnlist);
+	datum_test(!protocol_job->server_has_validated_block);
+	uint8_t validation_request[] = {pow.datum_job_id};
+	memset(temp_data, 0, 14);
+	datum_test(datum_protocol_job_validation_sblock(sizeof(validation_request), validation_request));
+	datum_test(temp_data[0] == 0x50 && temp_data[1] == 0x92);
+	datum_test(temp_data[2] == pow.datum_job_id && temp_data[3] == 0x01);
+	datum_test(upk_u16le(temp_data, 4) == 1);
+	datum_test(upk_u16le(temp_data, 6) == sizeof(txn_data));
+	datum_test(temp_data[8] == 0);
+	datum_test(!memcmp(temp_data + 9, txn_data, sizeof(txn_data)));
+	datum_test(temp_data[13] == 0xFE);
+	
+	// Preserving the pointer remains safe when its stratum storage is reused because validation also checks the exact job generation.
+	strcpy(job.job_id, "replacement-job");
+	memset(temp_data, 0, 4);
+	datum_test(datum_protocol_job_validation_sblock(sizeof(validation_request), validation_request));
+	datum_test(temp_data[0] == 0x50 && temp_data[1] == 0x92);
+	datum_test(temp_data[2] == pow.datum_job_id && temp_data[3] == 0xF0);
+	datum_protocol_clear_validation_context();
+	datum_test(protocol_job->server_sjob == NULL);
+	for(size_t i=0;i<sizeof(protocol_job->server_job_id);i++) datum_test(protocol_job->server_job_id[i] == 0);
+	datum_protocol_replay_clear();
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	server_out_buf = buffered_before;
 }
 
 static void datum_protocol_migration_tests(void) {

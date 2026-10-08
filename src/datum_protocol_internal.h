@@ -64,6 +64,9 @@ extern T_DATUM_PROTOCOL_JOB datum_jobs[MAX_DATUM_PROTOCOL_JOBS];
 extern unsigned char temp_data[DATUM_PROTOCOL_TEMP_DATA_SIZE];
 bool datum_protocol_stxlist_reply_fits(size_t offset, size_t txn_size);
 int datum_protocol_job_validation_stxlist_byid(const int len, const unsigned char * const data);
+int datum_protocol_job_validation_sblock(const int len, const unsigned char * const data);
+void datum_protocol_reset_server_knowledge(void);
+void datum_protocol_clear_validation_context(void);
 
 uint32_t datum_header_xor_feedback(uint32_t i);
 void datum_header_upk(T_DATUM_PROTOCOL_HEADER *h, const uint8_t *src, size_t offset, uint32_t *xor_key);
