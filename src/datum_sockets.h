@@ -40,6 +40,7 @@
 	#include "datum_blocktemplates.h"
 #endif
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <sys/epoll.h>
 #include <pthread.h>
@@ -119,7 +120,7 @@ typedef struct {
 	// TODO: Dynamically allocate client_data and events
 	T_DATUM_THREAD_DATA *datum_threads;
 	
-	int datum_active_threads;
+	atomic_int datum_active_threads;
 } T_DATUM_SOCKET_APP;
 
 typedef struct {

@@ -154,6 +154,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	ram_allocated += sizeof(T_DATUM_SOCKET_APP);
 	
 	memset(app, 0, sizeof(T_DATUM_SOCKET_APP));
+	atomic_init(&app->datum_active_threads, 0);
 	
 	strcpy(app->name, "Stratum V1 Server");
 	
