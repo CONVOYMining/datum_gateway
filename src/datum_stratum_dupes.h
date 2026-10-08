@@ -36,23 +36,15 @@
 #ifndef _DATUM_STRATUM_DUPES_H_
 #define _DATUM_STRATUM_DUPES_H_
 
-#ifndef uint64_t
-	#include <stdint.h>
-#endif
-
-#ifndef bool
-	#include <stdbool.h>
-#endif
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 typedef struct T_DATUM_STRATUM_DUPE_ITEM {
 	// things to compare against, in order, to check our list
 	// in most cases, we shouldn't get beyond nonce, but we need the rest for completeness
-	uint64_t nonce;
-	unsigned short job_index;
-	uint64_t ntime;
-	unsigned int version_bits;
-	uint64_t extra_nonce_a;  // extranonce1 + first 32 bits of extranonce2
-	uint32_t extra_nonce_b;  // last 32 bits of extranonce2
+	uint64_t job_tsms;
+	uint8_t share_hash[28];
 	
 	struct T_DATUM_STRATUM_DUPE_ITEM *next;
 } T_DATUM_STRATUM_DUPE_ITEM;
@@ -62,17 +54,17 @@ typedef struct T_DATUM_STRATUM_DUPES {
 	T_DATUM_STRATUM_DUPE_ITEM *index[65536];
 	
 	// memory - we target 8 shares per minute per connection.
-	// suggested items: datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16
+	// suggested items: datum_expected_n_global_nonstale_shares(&datum_config)
 	T_DATUM_STRATUM_DUPE_ITEM *ptr;
-	int max_items;
-	int current_items;
+	size_t max_items;
+	size_t current_items;
 } T_DATUM_STRATUM_DUPES;
 
 void datum_stratum_dupes_init(void *vsdata);
 
 #include "datum_stratum.h"
 
-bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int bver, unsigned char *extranonce_bin);
+bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, const uint8_t *share_hash, uint64_t job_tsms);
 void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe);
 
 #endif

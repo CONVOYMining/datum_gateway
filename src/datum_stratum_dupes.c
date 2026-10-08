@@ -33,6 +33,7 @@
  *
  */
 
+#include <assert.h>
 #include <stddef.h>
 #include <string.h>
 #include <pthread.h>
@@ -45,8 +46,10 @@
 #include "datum_conf.h"
 #include "datum_utils.h"
 
-// TODO: Refactor to just use the block header sanely.
-// This is more contrived than it needs to be, although it profiles quite well
+static inline
+uint16_t datum_stratum_dupes_bucket(const uint8_t * const share_hash) {
+	return (uint16_t)(share_hash[0] | ((uint16_t)share_hash[1] << 8));
+}
 
 void datum_stratum_dupes_init(void *sdata_v) {
 	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = sdata_v;
@@ -59,29 +62,24 @@ void datum_stratum_dupes_init(void *sdata_v) {
 	}
 	
 	dupes = sdata->dupes;
-
-	// Sized once, then allocated, so the array and max_items cannot disagree.
-	//
-	// The floor is because stratum.max_clients_per_thread is range checked for an upper
-	// bound and not a lower one, and this is the product of three configured values. A zero
-	// or a negative sizes the table at nothing, and nothing is not a table that merely
-	// overflows quickly: the expand grows it by 25%, 25% of zero is zero, and the gateway
-	// takes a share it then has nowhere to put. Sixteen is also the point below which the
-	// same rounding stops the table growing at all.
-	int max_items = datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16;
-	if (max_items < 16) max_items = 16;
-
-	dupes->ptr = calloc(max_items, sizeof(T_DATUM_STRATUM_DUPE_ITEM) );
-	if (!dupes->ptr) {
-		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %lu bytes)",(unsigned long)max_items * sizeof(T_DATUM_STRATUM_DUPE_ITEM));
+	
+	dupes->max_items = datum_expected_n_global_nonstale_shares(&datum_config);
+	if (!dupes->max_items) {
+		DLOG_FATAL("Dupe struct requires more RAM than we have virtual memory space!");
 		panic_from_thread(__LINE__);
 		return;
 	}
-
-	dupes->max_items = max_items;
+	
+	dupes->ptr = calloc(dupes->max_items, sizeof(T_DATUM_STRATUM_DUPE_ITEM));
+	if (!dupes->ptr) {
+		DLOG_FATAL("Could not allocate RAM for dupe struct (big one, %zu * %zu bytes)", dupes->max_items, sizeof(T_DATUM_STRATUM_DUPE_ITEM));
+		panic_from_thread(__LINE__);
+		return;
+	}
+	
 	dupes->current_items = 0;
 	
-	DLOG_DEBUG("Initialized dupe check thread data. %"PRIu64" bytes of RAM used for %d max entries @ %p for %p", (uint64_t)dupes->max_items * (uint64_t)sizeof(T_DATUM_STRATUM_DUPE_ITEM), dupes->max_items, dupes, sdata);
+	DLOG_DEBUG("Initialized dupe check thread data. %zu bytes of RAM used for %zu max entries @ %p for %p", dupes->max_items * sizeof(T_DATUM_STRATUM_DUPE_ITEM), dupes->max_items, dupes, sdata);
 	
 	return;
 }
@@ -94,47 +92,32 @@ int datum_stratum_dupes_cleanup_sort_compare(const void *a, const void *b) {
 	if (item1 == NULL) return 1;
 	if (item2 == NULL) return -1;
 	
-	if (item1->job_index >= MAX_STRATUM_JOBS) return 1;
-	if (item2->job_index >= MAX_STRATUM_JOBS) return -1;
-	
-	if (global_cur_stratum_jobs[item1->job_index] == NULL && global_cur_stratum_jobs[item2->job_index] == NULL) return 0;
-	if (global_cur_stratum_jobs[item1->job_index] == NULL) return 1;
-	if (global_cur_stratum_jobs[item2->job_index] == NULL) return -1;
-	
-	uint64_t tsms1 = global_cur_stratum_jobs[item1->job_index]->tsms;
-	uint64_t tsms2 = global_cur_stratum_jobs[item2->job_index]->tsms;
-	
-	if (tsms1 > tsms2) return -1;
-	if (tsms1 < tsms2) return 1;
+	if (item1->job_tsms > item2->job_tsms) return -1;
+	if (item1->job_tsms < item2->job_tsms) return 1;
 	return 0;
 }
 
-int find_first_less_than(T_DATUM_STRATUM_DUPE_ITEM *ptr, size_t max_items, uint64_t given_tsms) {
-	int low = 0;
-	int high = max_items - 1;
-	int result = -1;
+size_t find_first_less_than(T_DATUM_STRATUM_DUPE_ITEM * const ptr, const size_t max_items, const uint64_t given_tsms) {
+	assert(max_items > 0);
+	size_t low = 0;
+	size_t high_pp = max_items;
+	size_t result = (size_t)-1;
 	uint64_t tsms;
 	
-	while (low <= high) {
-		int mid = low + (high - low) / 2;
+	while (low < high_pp) {
+		size_t mid = low + (high_pp - low - 1) / 2;
 		
 		// sanity
 		if (mid < 0) mid = 0;
 		if (mid > (max_items-1)) mid = max_items-1;
 		
 		// more sanity
-		if (ptr[mid].job_index < 0 || ptr[mid].job_index >= MAX_STRATUM_JOBS) {
-			tsms = 0;
-		} else if (global_cur_stratum_jobs[ptr[mid].job_index] != NULL) {
-			tsms = global_cur_stratum_jobs[ptr[mid].job_index]->tsms;
-		} else {
-			tsms = 0;  // Treat NULL as the smallest possible value... we can trim NULLs
-		}
+		tsms = ptr[mid].job_tsms;
 		
 		// bsearch until we find the first entry < given
 		if (tsms < given_tsms) {
 			result = mid;
-			high = mid - 1;
+			high_pp = mid;
 		} else {
 			low = mid + 1;
 		}
@@ -145,15 +128,15 @@ int find_first_less_than(T_DATUM_STRATUM_DUPE_ITEM *ptr, size_t max_items, uint6
 
 void datum_stratum_dupes_expand(T_DATUM_STRATUM_DUPES *dupes) {
 	T_DATUM_STRATUM_DUPE_ITEM *new_ptr;
-	int new_max = ((dupes->max_items * 125)/100);
+	size_t new_max = ((dupes->max_items * 125)/100);
 	new_ptr = realloc(dupes->ptr, sizeof(T_DATUM_STRATUM_DUPE_ITEM) * new_max);
 	if (!new_ptr) {
-		DLOG_FATAL("Could not reallocate dupes ptr %p of %d items to %d items!", dupes->ptr, dupes->max_items, new_max);
+		DLOG_FATAL("Could not reallocate dupes ptr %p of %zu items to %zu items!", dupes->ptr, dupes->max_items, new_max);
 		panic_from_thread(__LINE__);
 		return;
 	}
 	memset(&new_ptr[dupes->max_items], 0, sizeof(T_DATUM_STRATUM_DUPE_ITEM) * (new_max - dupes->max_items));
-	DLOG_DEBUG("INFO: Had to allocate more RAM to duplicate share checking for thread.  %d to %d items (%"PRIu64" bytes)", dupes->max_items, new_max, (uint64_t)sizeof(T_DATUM_STRATUM_DUPE_ITEM) * (uint64_t)new_max);
+	DLOG_DEBUG("INFO: Had to allocate more RAM to duplicate share checking for thread.  %zu to %zu items (%zu bytes)", dupes->max_items, new_max, sizeof(T_DATUM_STRATUM_DUPE_ITEM) * new_max);
 	
 	dupes->max_items = new_max;
 	dupes->ptr = new_ptr;
@@ -162,31 +145,32 @@ void datum_stratum_dupes_expand(T_DATUM_STRATUM_DUPES *dupes) {
 }
 
 void datum_stratum_dupes_reorganize(T_DATUM_STRATUM_DUPES *dupes) {
-	int i;
+	size_t i;
 	T_DATUM_STRATUM_DUPE_ITEM *q,*p=NULL;
 	
 	for(i=0;i<dupes->max_items;i++) {
-		// we'll use ntime as an indicator, since obvious ntime cant be zero
-		if (dupes->ptr[i].ntime == 0) break;
+		// we'll use job_tsms as an indicator, since obviously it can't be zero
+		if (dupes->ptr[i].job_tsms == 0) break;
 		
-		const uint16_t nonce_index = dupes->ptr[i].nonce & 0xffff;
-		if (!dupes->index[nonce_index]) {
+		const uint16_t bucket = datum_stratum_dupes_bucket(dupes->ptr[i].share_hash);
+		if (!dupes->index[bucket]) {
 			// easy. this is the first
-			dupes->index[nonce_index] = &dupes->ptr[i];
+			dupes->index[bucket] = &dupes->ptr[i];
 			dupes->ptr[i].next = NULL;
 			continue;
 		}
 		
-		q = dupes->index[nonce_index];
+		q = dupes->index[bucket];
 		p = NULL;
 		do {
-			if (q->nonce > dupes->ptr[i].nonce) {
+			int cmp = memcmp(q->share_hash, dupes->ptr[i].share_hash, sizeof(q->share_hash));
+			if (cmp > 0) {
 				if (p) {
 					// insert after p
 					p->next = &dupes->ptr[i];
 				} else {
 					// insert as first entry, before this one
-					dupes->index[nonce_index] = &dupes->ptr[i];
+					dupes->index[bucket] = &dupes->ptr[i];
 				}
 				dupes->ptr[i].next = q;
 				break;
@@ -213,7 +197,7 @@ void datum_stratum_dupes_reorganize(T_DATUM_STRATUM_DUPES *dupes) {
 }
 
 void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe) {
-	int i;
+	size_t i;
 	
 	if (full_wipe) {
 		// we're just cleaning up after a new block or whatever
@@ -240,10 +224,12 @@ void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe) {
 	// links all broken, so wipe out the starting table
 	memset(dupes->index, 0, sizeof(T_DATUM_STRATUM_DUPE_ITEM *) * 65536);
 	
-	// find the first stale index
-	i = find_first_less_than(dupes->ptr, dupes->max_items, current_time_millis() - (datum_config.stratum_v1_share_stale_seconds*1000));
+	const uint64_t job_stale_seconds = datum_config.stratum_v1_share_stale_seconds + datum_config.bitcoind_work_update_seconds;
 	
-	if ((i == -1) || (i == dupes->max_items-1)) {
+	// find the first stale index
+	i = find_first_less_than(dupes->ptr, dupes->max_items, current_time_millis() - (uint64_t)(job_stale_seconds * 1000));
+	
+	if ((i == (size_t)-1) || (i == dupes->max_items-1)) {
 		// none of the items are stale...
 		datum_stratum_dupes_expand(dupes);
 	} else {
@@ -263,7 +249,7 @@ void datum_stratum_dupes_cleanup(T_DATUM_STRATUM_DUPES *dupes, bool full_wipe) {
 	datum_stratum_dupes_reorganize(dupes);
 }
 
-T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dupes, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int version_bits, unsigned char *extranonce_bin, T_DATUM_STRATUM_DUPE_ITEM *insert_after) {
+T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES * const dupes, const uint8_t * const share_hash, const uint64_t job_tsms, T_DATUM_STRATUM_DUPE_ITEM * const insert_after) {
 	T_DATUM_STRATUM_DUPE_ITEM *i;
 
 	// The caller makes room before it walks the list, so this is a bug rather than a
@@ -275,7 +261,7 @@ T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dup
 		static bool reported = false;
 		if (!reported) {
 			reported = true;
-			DLOG_ERROR("Dupe table full at insert (%d/%d); dropping the entry rather than writing past it. This should not be reachable; please report it.", dupes->current_items, dupes->max_items);
+			DLOG_ERROR("Dupe table full at insert (%zu/%zu); dropping the entry rather than writing past it. This should not be reachable; please report it.", dupes->current_items, dupes->max_items);
 		}
 		return NULL;
 	}
@@ -286,12 +272,8 @@ T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dup
 		panic_from_thread(__LINE__);
 		return NULL;
 	}
-	i->nonce = nonce;
-	i->job_index = job_index;
-	i->ntime = ntime_val;
-	i->version_bits = version_bits;
-	i->extra_nonce_a = upk_u64le(extranonce_bin, 0);
-	i->extra_nonce_b = upk_u32le(extranonce_bin, 8);
+	memcpy(i->share_hash, share_hash, sizeof(i->share_hash));
+	i->job_tsms = job_tsms;
 	if (!insert_after) {
 		// is a new entry
 		i->next = NULL;
@@ -311,12 +293,14 @@ T_DATUM_STRATUM_DUPE_ITEM *datum_stratum_add_new_dupe(T_DATUM_STRATUM_DUPES *dup
 	return i;
 }
 
-bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, uint64_t nonce, unsigned short job_index, uint64_t ntime_val, unsigned int version_bits, unsigned char *extranonce_bin) {
+bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, const uint8_t * const share_hash, const uint64_t job_tsms) {
 	// check if a share is a dupe
 	// if so, say so
 	// if not, add to the
 	T_DATUM_STRATUM_DUPES *dupes;
-	const uint16_t nonce_index = nonce & 0xffff;
+	const uint16_t bucket = datum_stratum_dupes_bucket(share_hash);
+	
+	assert(job_tsms);  // 0 job_tsms indicates empty slots
 	
 	T_DATUM_STRATUM_DUPE_ITEM *i, *p = NULL;
 	
@@ -335,54 +319,39 @@ bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, uint64_t n
 		datum_stratum_dupes_cleanup(dupes, false);
 	}
 
-	if (dupes->index[nonce_index] == NULL) {
-		// first nonce of its kind!
+	if (dupes->index[bucket] == NULL) {
+		// first of its kind!
 		// not a duplicate
 		// add the new first entry!
-		dupes->index[nonce_index] = datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, NULL);
+		dupes->index[bucket] = datum_stratum_add_new_dupe(dupes, share_hash, job_tsms, NULL);
 		return false;
 	}
 	
 	// ok, there's an entry.  go through the list
-	i = dupes->index[nonce_index];
+	i = dupes->index[bucket];
 	
 	do {
-		if (i->nonce > nonce) {
-			// we've reached a nonce higher than ours, so we can't be a dupe
+		int cmp = memcmp(i->share_hash, share_hash, sizeof(i->share_hash));
+		if (cmp > 0) {
+			// we've reached a hash higher than ours, so we can't be a dupe
 			// we need to keep the list in order, so we need to insert ourselves before this entry (so, the previous entry)
 			if (p) {
-				datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, p);
+				datum_stratum_add_new_dupe(dupes, share_hash, job_tsms, p);
 			} else {
 				// we need to replace the first item in a list, so... let's make a new entry
-				p = datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, NULL);
+				p = datum_stratum_add_new_dupe(dupes, share_hash, job_tsms, NULL);
 				// A refused entry leaves the bucket as it was rather than unlinking it
 				if (!p) return false;
-				dupes->index[nonce_index] = p;
+				dupes->index[bucket] = p;
 				p->next = i;
 			}
 			//LOG_PRINTF("DEBUG: Not dupe");
 			return false;
 		}
 		
-		// there can be more than one nonce that's equal, so can't just assume until we pass it or
-		if (i->nonce == nonce) {
-			// same nonce as us, so need to do the slow checks
-			if (job_index == i->job_index) {
-				// same job index...
-				if (ntime_val == i->ntime) {
-					// same ntime....!
-					if (version_bits == i->version_bits) {
-						// same version bits?!?!?!?
-						if (i->extra_nonce_a == upk_u64le(extranonce_bin, 0)) {
-							// same extra nonce 1?!?!?!??!
-							if (i->extra_nonce_b == upk_u32le(extranonce_bin, 8)) {
-								// ok, this is a duplicate :(
-								return true;
-							}
-						}
-					}
-				}
-			}
+		if (cmp == 0) {
+			// ok, this is a duplicate :(
+			return true;
 		}
 		
 		// store the current ptr for the next loop
@@ -394,9 +363,9 @@ bool datum_stratum_check_for_dupe(T_DATUM_STRATUM_THREADPOOL_DATA *t, uint64_t n
 	} while (i);
 	
 	// we reached the end of the list, and haven't found a dupe
-	// means that all of the nonces in the list are lower than us, or the last nonce is equal but doesn't match us
+	// means that all of the hashes in the list are lower than us
 	// so we should be safe to insert ourselves on to the end of the list and return
-	datum_stratum_add_new_dupe(dupes, nonce, job_index, ntime_val, version_bits, extranonce_bin, p);
+	datum_stratum_add_new_dupe(dupes, share_hash, job_tsms, p);
 	return false;
 }
 
@@ -430,7 +399,7 @@ void datum_stratum_dupes_codetest(void) {
 		t+=1000000000;
 	}
 	
-	for(i=0;i<(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16)*80;i++) {
+	for(i=0;i<datum_expected_n_global_nonstale_shares(&datum_config)*80;i++) {
 		en[0]=i%256;
 		en[7]=en[0]^0xAA;
 		nonce = ((i&0xFFFF)<<16)|(((i>>2)&0xFFFF)^0xFFFF);
@@ -446,11 +415,11 @@ void datum_stratum_dupes_codetest(void) {
 	}
 	
 	r = datum_stratum_check_for_dupe(&tp, 0xdeadc0de, 12, t, 0x20000001, &en[0]);
-	DLOG_DEBUG("B %d %d %d",r?1:0, dupes->current_items, dupes->max_items);
+	DLOG_DEBUG("B %d %zu %zu",r?1:0, dupes->current_items, dupes->max_items);
 	
 	uint64_t starttsms, endtsms;
 	starttsms = current_time_millis();
-	for(i=0;i<(datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16)*8;i++) {
+	for(i=0;i<datum_expected_n_global_nonstale_shares(&datum_config)*8;i++) {
 		en[0]=i%256;
 		en[7]=en[0]^0xAA;
 		nonce = ((i&0xFFFF)<<16)|(((i>>2)&0xFFFF)^0xFFFF);
@@ -460,7 +429,7 @@ void datum_stratum_dupes_codetest(void) {
 		}
 	}
 	endtsms = current_time_millis();
-	DLOG_DEBUG("%d dupe checks took %"PRIu64" miliseconds", (datum_config.stratum_v1_max_clients_per_thread * datum_config.stratum_v1_vardiff_target_shares_min * (datum_config.stratum_v1_share_stale_seconds/60) * 16)*80, endtsms-starttsms);
+	DLOG_DEBUG("%zu dupe checks took %"PRIu64" miliseconds", datum_expected_n_global_nonstale_shares(&datum_config)*80, endtsms-starttsms);
 	
 	free(stratum_job_list);
 }
