@@ -1064,11 +1064,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	const char *nonce_s;
 	
 	uint16_t g_job_index;
-	uint32_t bver;
 	uint32_t ntime_val;
 	uint32_t nonce_val;
-	uint64_t ntime64 = 0;
-	uint64_t nonce64 = 0;
 	uint64_t check_time;
 	size_t ntime_len, nonce_len;
 	unsigned char ntime8[8] = {0};
@@ -1099,7 +1096,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// construct block header
-	bver = job->version_uint;
 	
 	// 36 - 67 = merkle root
 	// need to get the extranonce together
@@ -1162,7 +1158,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		for(i=0;i<8;i++) ntime8[i] = hex2bin_uchar(&ntime_s[i << 1]);
 		ntime_val = upk_u32le(ntime8, 0);
 	}
-	ntime64 = upk_u64le(ntime8, 0);
 	
 	// nonce
 	nonce = json_array_get(params_obj, 4);
@@ -1180,7 +1175,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		for(i=0;i<8;i++) nonce8[i] = hex2bin_uchar(&nonce_s[i << 1]);
 		nonce_val = upk_u32le(nonce8, 0);
 	}
-	nonce64 = upk_u64le(nonce8, 0);
 	
 	const size_t full_cb_txn_size =
 		(size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len;
@@ -1297,8 +1291,7 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// check if duplicate submission
-	// if this is a quickdiff share, invert ntime here as a way to prevent unlikely collisions.
-	if (datum_stratum_check_for_dupe(m->sdata, nonce64, g_job_index, quickdiff?(~ntime64):(ntime64), bver, &extranonce_bin[0])) {
+	if (datum_stratum_check_for_dupe(m->sdata, share_hash, job->tsms)) {
 		send_rejected_duplicate(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
