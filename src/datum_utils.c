@@ -81,6 +81,17 @@ bool datum_test_fail_(const char *expr, const char *file, unsigned int line, con
 	return false;
 }
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+	#include <sanitizer/lsan_interface.h>
+	#define LSAN_IGNORE(ptr) __lsan_ignore_object(ptr)
+#else
+	#define LSAN_IGNORE(ptr) (void)(ptr)
+#endif
+
 uint64_t get_process_uptime_seconds() {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -93,6 +104,7 @@ void datum_utils_init(void) {
 	build_hex_lookup();
 	process_start_time = monotonic_time_seconds();
 	datum_executable_path = datum_get_executable_path();
+	LSAN_IGNORE(datum_executable_path);
 }
 
 #ifdef __GNUC__

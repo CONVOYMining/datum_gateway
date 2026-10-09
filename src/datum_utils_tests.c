@@ -40,7 +40,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
+#include "datum_gateway.h"
 #include "datum_utils.h"
 
 void datum_utils_tests_hex_to_bin(const uint8_t c, char * const x, const char * const fmt) {
@@ -211,7 +215,41 @@ void datum_utils_tests_thread_stack(void) {
 	}
 }
 
+static void datum_utils_tests_executable_path(void) {
+	char * const path = datum_executable_path;
+	if (!datum_test(path != NULL)) return;
+	datum_test(path[0] == '/');
+	struct stat st;
+	if (datum_test(stat(path, &st) == 0)) {
+		datum_test(S_ISREG(st.st_mode));
+#ifdef __linux__
+		struct stat executable;
+		if (datum_test(stat("/proc/self/exe", &executable) == 0)) {
+			datum_test(st.st_dev == executable.st_dev && st.st_ino == executable.st_ino);
+		}
+#endif
+	}
+	datum_test(access(path, X_OK) == 0);
+
+	const pid_t child = fork();
+	if (!datum_test(child >= 0)) return;
+	if (!child) {
+		const char * const args[] = {"datum-gateway-invalid-argv0", "--example-conf", NULL};
+		datum_argv = args;
+		if (chdir("/") != 0 || !freopen("/dev/null", "w", stdout)) {
+			_exit(1);
+		}
+		datum_reexec();
+		_exit(1);
+	}
+	int status;
+	if (datum_test(waitpid(child, &status, 0) == child)) {
+		datum_test(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	}
+}
+
 void datum_utils_tests(void) {
+	datum_utils_init();
 	datum_utils_tests_hex();
 	datum_utils_tests_bytes_to_hex();
 	datum_utils_tests_secure_strequals();
@@ -220,4 +258,5 @@ void datum_utils_tests(void) {
 	datum_utils_tests_network_difficulty_blake2b();
 	datum_utils_tests_buf();
 	datum_utils_tests_thread_stack();
+	datum_utils_tests_executable_path();
 }
