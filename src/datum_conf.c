@@ -617,6 +617,11 @@ int datum_read_config(const char *conffile) {
 	}
 	
 #ifdef ENABLE_API
+	if (datum_config.api_modify_conf && !datum_executable_path) {
+		DLOG_ERROR("Could not resolve executable path for restart (%s); api.modify_conf will not be available", strerror(errno));
+		datum_config.api_modify_conf = false;
+	}
+	
 	if (datum_config.api_modify_conf) {
 		datum_config.config_json = config;
 	} else

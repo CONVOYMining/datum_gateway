@@ -53,6 +53,8 @@
 
 struct buf;
 
+extern char *datum_executable_path;
+
 void datum_utils_init(void);
 
 #ifndef ckd_add
