@@ -35,6 +35,7 @@
 
 #include <assert.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -863,6 +864,15 @@ char *datum_get_executable_path(void) {
 	errno = ENOSYS;
 	return NULL;
 #endif
+}
+
+int datum_reexec_check(void) {
+	if (!datum_executable_path) return ENOENT;
+	struct stat st;
+	if (stat(datum_executable_path, &st) != 0) return errno;
+	if (!S_ISREG(st.st_mode)) return EACCES;
+	if (faccessat(AT_FDCWD, datum_executable_path, X_OK, AT_EACCESS) != 0) return errno;
+	return 0;
 }
 
 void datum_reexec() {
