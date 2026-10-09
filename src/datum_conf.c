@@ -664,11 +664,7 @@ int datum_read_config(const char *conffile) {
 		return 0;
 	}
 	
-#ifndef ENABLE_API
-	if (datum_config.api_listen_port) {
-		DLOG_WARN("API is enabled in configuration, but this build was compiled without API support");
-	}
-#else
+#ifdef ENABLE_API
 	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
 	if (datum_config.api_admin_password_len) {
 		static const char hash_tag[] = "DATUM Anti-CSRF Token";
@@ -723,12 +719,6 @@ int datum_read_config(const char *conffile) {
 		return 0;
 	}
 	
-	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
-		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
-		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
-		datum_config.stratum_v1_vardiff_min = nv;
-	}
-	
 	if (datum_config.stratum_v1_max_clients > (datum_config.stratum_v1_max_clients_per_thread*datum_config.stratum_v1_max_threads)) {
 		DLOG_FATAL("Stratum server configuration error. Max clients too high for thread settings");
 		return 0;
@@ -761,6 +751,20 @@ int datum_read_config(const char *conffile) {
 	strcpy(datum_config.override_mining_coinbase_tag_primary, datum_config.mining_coinbase_tag_primary);
 	
 	return 1;
+}
+
+void datum_conf_check_warnings(void) {
+#ifndef ENABLE_API
+	if (datum_config.api_listen_port) {
+		DLOG_WARN("API is enabled in configuration, but this build was compiled without API support");
+	}
+#endif
+	
+	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
+		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
+		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
+		datum_config.stratum_v1_vardiff_min = nv;
+	}
 }
 
 void datum_gateway_help(const char * const argv0) {

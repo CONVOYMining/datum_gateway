@@ -201,6 +201,8 @@ int main(const int argc, const char * const * const argv) {
 		exit(1);
 	}
 	
+	datum_conf_check_warnings();
+	
 	if (datum_protocol_init()) {
 		DLOG_FATAL("Error initializing the DATUM protocol!");
 		usleep(100000);

@@ -184,6 +184,7 @@ typedef struct {
 extern global_config_t datum_config;
 
 int datum_read_config(const char *conffile);
+void datum_conf_check_warnings(void);
 void datum_gateway_help(const char *argv0);
 void datum_gateway_example_conf(void);
 
