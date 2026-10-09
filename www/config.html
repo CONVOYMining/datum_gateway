@@ -174,17 +174,11 @@
 		<div class="table-wrapper">
 			<div class="table-container">
 				<h2>Advanced</h2>
-				<input type="hidden" name="checkboxes" value="stratum_fingerprint_miners datum_always_pay_self mining_allow_hasher_time_rolling"></input>
+				<input type="hidden" name="checkboxes" value="stratum_fingerprint_miners mining_allow_hasher_time_rolling"></input>
 				<div class="setting-row">
 					<div class="flex-row">
 						<input type="checkbox" name="stratum_fingerprint_miners" id="stratum_fingerprint_miners" value="1"${checked:stratum_fingerprint_miners}${disabled:*ro}></input>
 						<label for="stratum_fingerprint_miners" class="label" style="flex:1">Fingerprint and workaround known miner bugs</label>
-					</div>
-				</div>
-				<div class="setting-row">
-					<div class="flex-row">
-						<input type="checkbox" name="datum_always_pay_self" id="datum_always_pay_self" value="1"${checked:datum_always_pay_self}${disabled:*ro}></input>
-						<label for="datum_always_pay_self" class="label" style="flex:1">Always include your own "Bitcoin Address" above in generated payouts if possible</label>
 					</div>
 				</div>
 				<div class="setting-row">
