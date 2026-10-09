@@ -1425,6 +1425,105 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 
 static const char datum_api_config_errors_fmt[] = "<div class='err'>%s</div>";
 
+static void datum_api_test_config_var(const char * const name, const struct datum_api_config_page_context * const context, const char * const expected) {
+	struct buf output = BUF_INIT;
+	datum_test(datum_api_fill_config_var(name, strlen(name), &output, (const void*)context));
+	datum_test(!output.err);
+	const size_t len = strlen(expected);
+	datum_test(output.len == len);
+	if (len && output.len == len) datum_test(memcmp(output.s, expected, len) == 0);
+	buf_destroy(&output);
+}
+
+void datum_api_tests(void) {
+	char * const executable_path = datum_executable_path;
+	datum_executable_path = NULL;
+	datum_test(datum_reexec_check() == ENOENT);
+	const global_config_t saved_config = datum_config;
+	memset(&datum_config, 0, sizeof(datum_config));
+	datum_config.config_json = json_object();
+	strcpy(datum_config.datum_pool_host, "pool.example");
+	datum_config.datum_pool_port = 1234;
+	strcpy(datum_config.datum_pool_pubkey, "old-key");
+	datum_config.bitcoind_work_update_seconds = 40;
+	datum_config.datum_protocol_global_timeout = 60;
+	const global_config_t original_config = datum_config;
+	json_t * const errors = json_array();
+	struct datum_api_config_set_status status = {
+		.errors = errors,
+		.cannot_restart = datum_reexec_check(),
+	};
+	const char * const changes[][2] = {
+		{"reward_sharing", "require"},
+		{"reward_sharing", "never"},
+		{"datum_pool_host", "other.example"},
+		{"datum_pool_port", "4321"},
+		{"datum_pool_pubkey", "new-key"},
+		{"bitcoind_work_update_seconds", "120"},
+	};
+	for (size_t i = 0; i < sizeof(changes) / sizeof(changes[0]); ++i) {
+		datum_test(!datum_api_config_set(changes[i][0], changes[i][1], &status));
+		datum_test(json_array_size(errors) == i + 1);
+		datum_test(!status.modified_config && !status.need_restart);
+		datum_test(memcmp(&datum_config, &original_config, sizeof(datum_config)) == 0);
+		datum_test(json_object_size(datum_config.config_json) == 0);
+	}
+	datum_config.datum_pooled_mining_only = true;
+	datum_test(!datum_api_config_set("reward_sharing", "prefer", &status));
+	datum_test(datum_config.datum_pooled_mining_only);
+	datum_test(datum_api_config_set("reward_sharing", "require", &status));
+	datum_test(datum_api_config_set("datum_pool_host", "pool.example", &status));
+	datum_test(datum_api_config_set("datum_pool_port", "1234", &status));
+	datum_test(datum_api_config_set("datum_pool_pubkey", "old-key", &status));
+	datum_test(datum_api_config_set("bitcoind_work_update_seconds", "40", &status));
+	datum_test(!status.modified_config && !status.need_restart);
+	datum_test(datum_api_config_set("stratum_fingerprint_miners", "1", &status));
+	datum_test(datum_config.stratum_v1_fingerprint_miners && status.modified_config && !status.need_restart);
+	datum_config.datum_pool_host[0] = '\0';
+	datum_config.datum_pooled_mining_only = false;
+	datum_test(!datum_api_config_set("reward_sharing", "prefer", &status));
+	datum_test(!datum_config.datum_pool_host[0]);
+	datum_test(datum_api_config_set("datum_pool_host", "future.example", &status));
+	datum_test(!datum_config.datum_pool_host[0] && !status.need_restart);
+	datum_test(strcmp(json_string_value(json_object_get(json_object_get(datum_config.config_json, "datum"), "pool_host(old)")), "future.example") == 0);
+
+	datum_config.api_modify_conf = true;
+	datum_config.api_admin_password_len = 1;
+	struct datum_api_config_page_context context = {
+		.cannot_restart = status.cannot_restart,
+	};
+	datum_api_test_config_var("*restart_warning_aria_id", &context, " restart-unavailable-description");
+	datum_api_test_config_var("disabled:*restart_ro", &context, " disabled");
+	datum_api_test_config_var("*restart_ro", &context, " readonly");
+	struct buf message = BUF_INIT;
+	datum_test(datum_api_fill_config_var("*restart_message", 16, &message, (const void*)&context));
+	if (datum_test(message.len >= 6 && !message.err)) {
+		datum_test(buf_nullterminate(&message));
+		datum_test(strstr(message.s, "<div id=\"restart-unavailable-description\"") == message.s);
+		datum_test(strstr(message.s, "Automatic restart unavailable") != NULL);
+		datum_test(strcmp(&message.s[message.len - 6], "</div>") == 0);
+	}
+	buf_destroy(&message);
+	status.cannot_restart = 0;
+	context.cannot_restart = 0;
+	datum_api_test_config_var("*restart_ro", &context, "");
+	datum_api_test_config_var("*restart_warning_aria_id", &context, "");
+	datum_api_test_config_var("disabled:*restart_ro", &context, "");
+	datum_api_test_config_var("*restart_message", &context, "");
+	datum_config.api_modify_conf = false;
+	datum_api_test_config_var("*restart_ro", &context, " readonly");
+	datum_api_test_config_var("disabled:*restart_ro", &context, " disabled");
+	datum_test(datum_api_config_set("datum_pool_port", "4321", &status));
+	datum_test(datum_config.datum_pool_port == 4321 && status.need_restart);
+	status.cannot_restart = EACCES;
+	datum_test(!datum_api_config_require_restart(&status));
+	datum_test(status.need_restart);
+	json_decref(errors);
+	json_decref(datum_config.config_json);
+	datum_config = saved_config;
+	datum_executable_path = executable_path;
+}
+
 bool datum_api_fill_config_errors(const char *var_start, const size_t var_name_len, struct buf * const buf, const T_DATUM_API_DASH_VARS * const vardata) {
 	const json_t * const errors = (void*)vardata;
 	size_t index;

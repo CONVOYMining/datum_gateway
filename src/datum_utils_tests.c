@@ -216,6 +216,7 @@ void datum_utils_tests_thread_stack(void) {
 }
 
 static void datum_utils_tests_executable_path(void) {
+	datum_test(datum_reexec_check() == 0);
 	char * const path = datum_executable_path;
 	if (!datum_test(path != NULL)) return;
 	datum_test(path[0] == '/');

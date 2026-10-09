@@ -81,6 +81,7 @@ struct arguments {
 	char *config_file;
 };
 
+void datum_api_tests(void);
 void datum_blocktemplates_tests(void);
 void datum_coinbaser_tests(void);
 void datum_stratum_tests(void);
@@ -112,6 +113,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 		case 0x101:  // test
 			datum_utils_tests();
 			datum_conf_tests();
+#ifdef ENABLE_API
+			datum_api_tests();
+#endif
 			datum_blocktemplates_tests();
 			datum_coinbaser_tests();
 			datum_parent_fetch_tests();
