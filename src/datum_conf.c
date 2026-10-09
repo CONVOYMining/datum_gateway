@@ -549,7 +549,7 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 						DLOG_WARN("%s.%s rounded up to %s", c->category, c->name, diffstr);
 						break;
 					case 3:
-						DLOG_WARN("%s.%s uses legacy integer syntax; use \"%s\" instead", c->category, c->name, diffstr);
+						DLOG_WARN("%s.%s is set incorrectly; use \"%s\" instead", c->category, c->name, diffstr);
 						break;
 				}
 			}
