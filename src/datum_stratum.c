@@ -1054,6 +1054,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// 3 = ntime
 	// 4 = nonce
 	
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	// Shares before subscribe share extranonce1=0 and have no job state.
+	if (!m || !m->subscribed) {
+		send_error_to_client(c, id, "[25,\"not-subscribed\",null]");
+		return 0;
+	}
+	
 	json_t *username;
 	json_t *extranonce2;
 	json_t *ntime;
@@ -1084,7 +1091,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	unsigned char block_header[80];
 	unsigned char share_hash[40];
 	unsigned char full_cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
-	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	int i;
 	bool quickdiff;
 	bool empty_work;
