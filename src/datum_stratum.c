@@ -1054,6 +1054,13 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// 3 = ntime
 	// 4 = nonce
 	
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	// Shares before subscribe share extranonce1=0 and have no job state.
+	if (!m || !m->subscribed) {
+		send_error_to_client(c, id, "[25,\"not-subscribed\",null]");
+		return 0;
+	}
+	
 	json_t *username;
 	json_t *extranonce2;
 	json_t *ntime;
@@ -1084,7 +1091,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	unsigned char block_header[80];
 	unsigned char share_hash[40];
 	unsigned char full_cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
-	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	int i;
 	bool quickdiff;
 	bool empty_work;
@@ -1125,6 +1131,14 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	if (!cb) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
+		return 0;
+	}
+	
+	// Never-generated coinbase slots have coinb1_len==0; quickdiff patches at len-2.
+	if (cb->coinb1_len < 2) {
+		send_unknown_work_error(c, id);
+		m->share_count_rejected++;
+		m->share_diff_rejected += job_diff;
 		return 0;
 	}
 	
