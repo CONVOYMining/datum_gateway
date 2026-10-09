@@ -1134,6 +1134,14 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	
+	// Never-generated coinbase slots have coinb1_len==0; quickdiff patches at len-2.
+	if (cb->coinb1_len < 2) {
+		send_unknown_work_error(c, id);
+		m->share_count_rejected++;
+		m->share_diff_rejected += job_diff;
+		return 0;
+	}
+	
 	memcpy(&full_cb_txn[0], cb->coinb1_bin, cb->coinb1_len);
 	// Hasher extranonce lives in the v2 header, not the Bitcoin coinbase.
 	memset(&full_cb_txn[cb->coinb1_len], 0, 12);
