@@ -36,6 +36,7 @@
 // This is quick and dirty for now.  Will be improved over time.
 
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -961,7 +962,17 @@ enum MHD_Result datum_api_client_dashboard(struct MHD_Connection *connection) {
 	return datum_api_submit_uncached_response(connection, MHD_HTTP_OK, response);
 }
 
+static const char *datum_api_restart_unavailable_reason(const int err) {
+	if (!datum_executable_path) return "executable path unknown at startup";
+	return strerror(err);
+}
+
+struct datum_api_config_page_context {
+	int cannot_restart;
+};
+
 bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len, struct buf * const buf, const T_DATUM_API_DASH_VARS * const vardata) {
+	const struct datum_api_config_page_context * const context = (const void*)vardata;
 	const char *colon_pos = memchr(var_start, ':', var_name_len);
 	const char *var_start_2 = colon_pos ? &colon_pos[1] : var_start;
 	const char * const var_end = &var_start[var_name_len];
@@ -974,6 +985,15 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 			var_start = "readonly:";
 			colon_pos = &var_start[8];
 		}
+	} else if (var_name_len_2 == 11 && 0 == strncmp(var_start_2, "*restart_ro", 11)) {
+		val = !(datum_config.api_modify_conf && datum_config.api_admin_password_len) || context->cannot_restart;
+		if (!colon_pos) {
+			var_start = "readonly:";
+			colon_pos = &var_start[8];
+		}
+	} else if (var_name_len_2 == 24 && 0 == strncmp(var_start_2, "*restart_warning_aria_id", 24)) {
+		if (!context->cannot_restart) return true;
+		return buf_strcat(buf, " restart-unavailable-description");
 	} else if (var_name_len_2 == 24 && 0 == strncmp(var_start_2, "*datum_pool_pass_workers", 24)) {
 		val = datum_config.datum_pool_pass_workers && !datum_config.datum_pool_pass_full_users;
 	} else if (var_name_len_2 == 16 && 0 == strncmp(var_start_2, "*datum_pool_host", 16)) {
@@ -1004,6 +1024,11 @@ bool datum_api_fill_config_var(const char *var_start, const size_t var_name_len,
 		if (val > 60) val = 60;
 	} else if (var_name_len_2 == 11 && 0 == strncmp(var_start_2, "*CSRF_TOKEN", 11)) {
 		return buf_strcat(buf, datum_config.api_csrf_token);
+	} else if (var_name_len_2 == 16 && 0 == strncmp(var_start_2, "*restart_message", 16)) {
+		if (!context->cannot_restart) return true;
+		if (!buf_strcat(buf, "<div id=\"restart-unavailable-description\" class=\"restart-warning\" role=\"status\">Automatic restart unavailable (")) return false;
+		if (!buf_strcat_html_escape(buf, datum_api_restart_unavailable_reason(context->cannot_restart))) return false;
+		return buf_strcat(buf, "). Restart-required settings are disabled; other settings can still be saved. Check the executable and its permissions, then reload this page. If its path could not be identified at startup, restart DATUM Gateway manually after resolving that problem.</div>");
 	} else if (underscore_pos) {
 		const T_DATUM_CONFIG_ITEM * const item = datum_config_get_option_info(var_start_2, (size_t)(underscore_pos - var_start_2), &underscore_pos[1], (size_t)(var_end - &underscore_pos[1]));
 		if (item) {
@@ -1092,7 +1117,10 @@ enum MHD_Result datum_api_config_dashboard(struct MHD_Connection *connection) {
 	struct buf output = BUF_INIT;
 	buf_reserve(&output, max_sz);
 	
-	datum_api_fill_vars(www_config_html, &output, datum_api_fill_config_var, NULL);
+	const struct datum_api_config_page_context context = {
+		.cannot_restart = datum_reexec_check(),
+	};
+	datum_api_fill_vars(www_config_html, &output, datum_api_fill_config_var, (const void*)&context);
 	if (output.err) {
 		buf_destroy(&output);
 		return MHD_NO;
@@ -1146,7 +1174,19 @@ struct datum_api_config_set_status {
 	json_t *errors;
 	bool modified_config;
 	bool need_restart;
+	int cannot_restart;
 };
+
+static bool datum_api_config_require_restart(struct datum_api_config_set_status * const status) {
+	if (!status->cannot_restart) {
+		status->need_restart = true;
+		return true;
+	}
+	char error[512];
+	snprintf(error, sizeof(error), "Restart-required setting not saved: automatic restart unavailable (%s). Check the executable and its permissions, then reload this page. If its path could not be identified at startup, restart DATUM Gateway manually after resolving that problem.", datum_api_restart_unavailable_reason(status->cannot_restart));
+	json_array_append_new(status->errors, json_string(error));
+	return false;
+}
 
 // This does several steps:
 // - If the value is unchanged, return true without doing anything
@@ -1212,14 +1252,17 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		bool want_datum_pool_host = false;
 		if (0 == strcmp(val, "require")) {
 			if (datum_config.datum_pool_host[0] && datum_config.datum_pooled_mining_only) return true;
+			if (!datum_api_config_require_restart(status)) return false;
 			datum_config.datum_pooled_mining_only = true;
 			want_datum_pool_host = true;
 		} else if (0 == strcmp(val, "prefer")) {
 			if (datum_config.datum_pool_host[0] && !datum_config.datum_pooled_mining_only) return true;
+			if (!datum_api_config_require_restart(status)) return false;
 			datum_config.datum_pooled_mining_only = false;
 			want_datum_pool_host = true;
 		} else if (0 == strcmp(val, "never")) {
 			if (!(datum_config.datum_pool_host[0] || datum_config.datum_pooled_mining_only)) return true;
+			if (!datum_api_config_require_restart(status)) return false;
 			datum_config.datum_pooled_mining_only = false;
 			datum_config.datum_pool_host[0] = '\0';
 			
@@ -1253,7 +1296,6 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		}
 		datum_api_json_modify_new("datum", "pooled_mining_only", json_boolean(datum_config.datum_pooled_mining_only));
 		// TODO: apply change without restarting
-		status->need_restart = true;
 	} else if (0 == strcmp(key, "datum_pool_host")) {
 		if (0 == strcmp(val, datum_config.datum_pool_host)) return true;
 		if (strlen(val) > 1023) {
@@ -1261,11 +1303,11 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 			return false;
 		}
 		if (datum_config.datum_pool_host[0]) {
+			if (!datum_api_config_require_restart(status)) return false;
 			strcpy(datum_config.datum_pool_host, val);
 			datum_api_json_modify_new("datum", "pool_host", json_string(val));
 			// TODO: apply change without restarting
 			// TODO: switch pools smoother (keep old connection alive for share submissions until those jobs expire)
-			status->need_restart = true;
 		} else {
 			json_t * const config = datum_config.config_json;
 			assert(config);
@@ -1284,22 +1326,22 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 			json_array_append_new(errors, json_string_nocheck("Pool Port must be between 1 and 65535"));
 			return false;
 		}
+		if (!datum_api_config_require_restart(status)) return false;
 		datum_config.datum_pool_port = val_int;
 		datum_api_json_modify_new("datum", "pool_port", json_integer(val_int));
 		// TODO: apply change without restarting
 		// TODO: switch pools smoother (keep old connection alive for share submissions until those jobs expire)
-		status->need_restart = true;
 	} else if (0 == strcmp(key, "datum_pool_pubkey")) {
 		if (0 == strcmp(val, datum_config.datum_pool_pubkey)) return true;
 		if (strlen(val) > 1023) {
 			json_array_append_new(errors, json_string_nocheck("Pool Pubkey is too long"));
 			return false;
 		}
+		if (!datum_api_config_require_restart(status)) return false;
 		strcpy(datum_config.datum_pool_pubkey, val);
 		datum_api_json_modify_new("datum", "pool_pubkey", json_string(val));
 		// TODO: apply change without restarting
 		// TODO: switch pools smoother (keep old connection alive for share submissions until those jobs expire)
-		status->need_restart = true;
 	} else if (0 == strcmp(key, "stratum_fingerprint_miners")) {
 		bool val_bool;
 		if (!datum_str_to_bool_strict(val, &val_bool)) {
@@ -1335,6 +1377,7 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 			json_array_append_new(errors, json_string_nocheck("bitcoind work update interval must be between 5 and 120"));
 			return false;
 		}
+		if (!datum_api_config_require_restart(status)) return false;
 		datum_config.bitcoind_work_update_seconds = val_int;
 		datum_api_json_modify_new("bitcoind", "work_update_seconds", json_integer(val_int));
 		if (datum_config.bitcoind_work_update_seconds >= datum_config.datum_protocol_global_timeout - 5) {
@@ -1342,7 +1385,6 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 			datum_api_json_modify_new("datum", "protocol_global_timeout", json_integer(val_int + 5));
 		}
 		// TODO: apply change without restarting (and don't interfere with existing jobs)
-		status->need_restart = true;
 	} else if (0 == strcmp(key, "bitcoind_rpcurl")) {
 		if (0 == strcmp(val, datum_config.bitcoind_rpcurl)) return true;
 		if (strlen(val) >= sizeof(datum_config.bitcoind_rpcurl)) {
@@ -1468,6 +1510,7 @@ enum MHD_Result datum_api_config_post(struct MHD_Connection * const connection, 
 	json_t * const errors = json_array();
 	struct datum_api_config_set_status status = {
 		.errors = errors,
+		.cannot_restart = datum_reexec_check(),
 	};
 	json_object_foreach(j, key, j_it) {
 		datum_api_config_set(key, json_string_value(j_it), &status);
