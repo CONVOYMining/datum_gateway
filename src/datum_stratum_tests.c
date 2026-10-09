@@ -231,11 +231,11 @@ static void datum_blake2b_coinbase_selection_tests(void) {
 
 static void datum_stratum_test_coinbaser_locks(void) {
 	// Normally set up when the stratum server starts
-	if (need_coinbaser_rwlocks_init_done) return;
+	if (atomic_load_explicit(&need_coinbaser_rwlocks_init_done, memory_order_acquire)) return;
 	for (int i = 0; i < MAX_STRATUM_JOBS; ++i) {
 		pthread_rwlock_init(&need_coinbaser_rwlocks[i], NULL);
 	}
-	need_coinbaser_rwlocks_init_done = true;
+	atomic_store_explicit(&need_coinbaser_rwlocks_init_done, true, memory_order_release);
 }
 
 static void datum_stratum_coinbaser_ready_tests(void) {
