@@ -600,16 +600,16 @@ int datum_read_config(const char *conffile) {
 		// item might be valid
 		j = datum_config_parse_value(&datum_config_options[i], item);
 		if (j == -1) {
-			DLOG_ERROR("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, datum_conf_var_type_text[datum_config_options[i].var_type]);
+			DLOG_FATAL("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, datum_conf_var_type_text[datum_config_options[i].var_type]);
 			return -1;
 		} else if (j == -2) {
-			DLOG_ERROR("Configuration option %s.%s exceeds maximum length of %d", datum_config_options[i].category, datum_config_options[i].name, datum_config_options[i].max_string_len - 1);
+			DLOG_FATAL("Configuration option %s.%s exceeds maximum length of %d", datum_config_options[i].category, datum_config_options[i].name, datum_config_options[i].max_string_len - 1);
 			return -1;
 		} else if (j == -3) {
-			DLOG_ERROR("Configuration option %s.%s exceeds maximum list size of %u", datum_config_options[i].category, datum_config_options[i].name, (unsigned int)(DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1));
+			DLOG_FATAL("Configuration option %s.%s exceeds maximum list size of %u", datum_config_options[i].category, datum_config_options[i].name, (unsigned int)(DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1));
 			return -1;
 		} else if (j == -4) {
-			DLOG_ERROR("Configuration option %s.%s cannot include empty strings", datum_config_options[i].category, datum_config_options[i].name);
+			DLOG_FATAL("Configuration option %s.%s cannot include empty strings", datum_config_options[i].category, datum_config_options[i].name);
 			return -1;
 		}
 	}
@@ -656,11 +656,11 @@ int datum_read_config(const char *conffile) {
 		update_rpc_cookie(&datum_config);
 	} else {
 		const T_DATUM_CONFIG_ITEM *opt;
-		DLOG_ERROR("Either bitcoind.rpcuser (and bitcoind.rpcpassword) or bitcoind.rpccookiefile is required.");
+		DLOG_FATAL("Either bitcoind.rpcuser (and bitcoind.rpcpassword) or bitcoind.rpccookiefile is required.");
 		opt = datum_config_get_option_info2("bitcoind", "rpcuser");
-		DLOG_ERROR("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
+		DLOG_FATAL("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
 		opt = datum_config_get_option_info2("bitcoind", "rpccookiefile");
-		DLOG_ERROR("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
+		DLOG_FATAL("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
 		return 0;
 	}
 	
