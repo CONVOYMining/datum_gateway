@@ -43,6 +43,32 @@
 			display: flex;
 			flex-direction: row;
 		}
+		.restart-symbol {
+			width: 1em;
+			height: 1em;
+			color: #f0ad4e;
+			vertical-align: -0.125em;
+		}
+		.restart-field-icon {
+			flex: 0 0 28px;
+			width: 28px;
+			height: 28px;
+			box-sizing: border-box;
+			margin-left: auto;
+			padding-left: 6px;
+			align-self: center;
+		}
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 		
 		label.label {
 			padding: 10px;
@@ -74,6 +100,12 @@
 			font-size: 80%;
 			font-style: italic;
 		}
+		.restart-warning {
+			max-width: 780px;
+			margin: 10px auto;
+			padding: 10px;
+			background-color: #2a2a3b;
+		}
 	</style>
 </head>
 <body>
@@ -92,8 +124,10 @@
 	
 	<form action='/config' method='post'>
 	<input type='hidden' name='csrf' value='${*CSRF_TOKEN}' />
+	<span id="restart-required-description" class="visually-hidden">Requires Gateway restart when saved.</span>
 	<div class="tables-container">
 		<div style="margin-top: 20px; text-align: center;">
+			<div class="restart-warning"><strong><svg class="restart-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> Restart on save:</strong> Changes to settings with this symbol restart DATUM Gateway when saved, briefly interrupting the web interface and miner, pool, and node connections. The restarted process uses the Gateway binary currently installed on disk.</div>
 			<button${disabled:*ro}>Save</button>
 			${msg:*ro}
 		</div>
@@ -136,11 +170,12 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="reward_sharing" class="label">Collaborative reward sharing (pooled mining):</label>
-						<select name="reward_sharing" id="reward_sharing"${*ro} onchange="reward_sharing_changed()">
+						<select name="reward_sharing" id="reward_sharing" aria-describedby="restart-required-description"${*ro} onchange="reward_sharing_changed()">
 							<option value="require"${selected:datum_pooled_mining_only}${disabled:*ro}>require (pooled mining only)</option>
 							<option value="prefer"${selected:*reward_sharing_prefer}${disabled:*ro}>prefer (failover to non-pooled)</option>
 							<option value="never"${selected:*reward_sharing_never}${disabled:*ro}>never (non-pooled only)</option>
 						</select>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 					<label for="reward_sharing" class="tip">You can share rewards and share in others' rewards - or only get rewarded when you find a block yourself.</label>
 				</div>
@@ -153,19 +188,22 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="datum_pool_host" class="label">Host:</label>
-						<input maxlength="1023" name="datum_pool_host" id="datum_pool_host" value="${*datum_pool_host}"${*ro}></input>
+						<input maxlength="1023" name="datum_pool_host" id="datum_pool_host" value="${*datum_pool_host}" aria-describedby="restart-required-description"${*ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="datum_pool_port" class="label">Port:</label>
-						<input maxlength="5" name="datum_pool_port" id="datum_pool_port" value="${datum_pool_port}"${*ro}></input>
+						<input maxlength="5" name="datum_pool_port" id="datum_pool_port" value="${datum_pool_port}" aria-describedby="restart-required-description"${*ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="datum_pool_pubkey" class="label">Pubkey:</label>
-						<input maxlength="1023" name="datum_pool_pubkey" id="datum_pool_pubkey" value="${datum_pool_pubkey}"${*ro}></input>
+						<input maxlength="1023" name="datum_pool_pubkey" id="datum_pool_pubkey" value="${datum_pool_pubkey}" aria-describedby="restart-required-description"${*ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 			</div>
@@ -196,7 +234,8 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="bitcoind_work_update_seconds" class="label">Typical interval between job updates:</label>
-						<input maxlength="3" name="bitcoind_work_update_seconds" id="bitcoind_work_update_seconds" value="${bitcoind_work_update_seconds}"${*ro}></input>
+						<input maxlength="3" name="bitcoind_work_update_seconds" id="bitcoind_work_update_seconds" value="${bitcoind_work_update_seconds}" aria-describedby="restart-required-description"${*ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 					<label for="bitcoind_work_update_seconds" class="tip">5-120 seconds. 40 suggested.</label>
 				</div>
@@ -222,6 +261,7 @@
 		</div>
 		
 		<div style="margin-bottom: 20px; text-align: center;">
+			<div class="restart-warning"><svg class="restart-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> Changes to settings with this symbol restart the Gateway when saved.</div>
 			<button${disabled:*ro}>Save</button>
 			${msg:*ro}
 		</div>
