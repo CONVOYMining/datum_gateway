@@ -176,7 +176,9 @@ static void datum_blake2b_unmasked_block_tests(void) {
 
 static void datum_blake2b_h_not_zero_tests(void) {
 	T_DATUM_CLIENT_DATA client = {0};
-	T_DATUM_MINER_DATA miner = {0};
+	T_DATUM_MINER_DATA miner = {
+		.subscribed = true,
+	};
 	T_DATUM_STRATUM_JOB job = {0};
 	T_DATUM_TEMPLATE_DATA tdata = {0};
 	T_DATUM_STRATUM_JOB *saved_job = global_cur_stratum_jobs[0];
@@ -190,8 +192,8 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	client.app_client_data = &miner;
 	job.block_template = &tdata;
 	job.target_pot_index = 0;
-	job.coinbase[0].coinb1_len = 1;
-	job.coinbase[0].coinb1_bin[0] = 0xff;
+	job.coinbase[0].coinb1_len = 2;
+	job.coinbase[0].coinb1_bin[0] = job.coinbase[0].coinb1_bin[1] = 0xff;
 	tdata.abw_enabled = true;
 	tdata.abw_assignment_id = 1;
 	datum_test(datum_blake2b_xor_key_hash(tdata.xor_key_hash,
