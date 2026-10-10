@@ -111,6 +111,7 @@ void datum_utils_init(void) {
 #ifdef __GNUC__
 // faster, less portable
 uint64_t roundDownToPowerOfTwo_64(uint64_t x) {
+	assert(x);  // __builtin_clzll(0) is undefined
 	return 1ULL << (63 - __builtin_clzll(x));
 }
 
@@ -125,6 +126,7 @@ unsigned char floorPoT(uint64_t x) {
 #else
 // More portable but slower
 uint64_t roundDownToPowerOfTwo_64(uint64_t x) {
+	assert(x);
 	x |= x >> 1;
 	x |= x >> 2;
 	x |= x >> 4;
