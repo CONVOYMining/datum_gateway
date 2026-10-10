@@ -53,6 +53,8 @@
 
 struct buf;
 
+extern char *datum_executable_path;
+
 void datum_utils_init(void);
 
 #ifndef ckd_add
@@ -136,6 +138,7 @@ uint64_t datum_atoi_strict_u64(const char *s, size_t size);
 int datum_atoi_strict(const char *s, size_t size);
 bool datum_str_to_bool_strict(const char *s, bool *out);
 char **datum_deepcopy_charpp(const char * const *p);
+int datum_reexec_check(void);
 void datum_reexec();
 bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess);
 const char *dynamic_hash_unit(double *inout_hashrate);

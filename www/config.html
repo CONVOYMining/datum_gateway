@@ -43,6 +43,32 @@
 			display: flex;
 			flex-direction: row;
 		}
+		.restart-symbol {
+			width: 1em;
+			height: 1em;
+			color: #f0ad4e;
+			vertical-align: -0.125em;
+		}
+		.restart-field-icon {
+			flex: 0 0 28px;
+			width: 28px;
+			height: 28px;
+			box-sizing: border-box;
+			margin-left: auto;
+			padding-left: 6px;
+			align-self: center;
+		}
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 		
 		label.label {
 			padding: 10px;
@@ -74,6 +100,12 @@
 			font-size: 80%;
 			font-style: italic;
 		}
+		.restart-warning {
+			max-width: 780px;
+			margin: 10px auto;
+			padding: 10px;
+			background-color: #2a2a3b;
+		}
 	</style>
 </head>
 <body>
@@ -90,11 +122,14 @@
 		</div>
 	</div>
 	
-	<form action='/config' method='post'>
+	<form action='/config' method='post' id='config_form'>
 	<input type='hidden' name='csrf' value='${*CSRF_TOKEN}' />
+	<span id="restart-required-description" class="visually-hidden">Requires Gateway restart when saved.</span>
+	${*restart_message}
 	<div class="tables-container">
 		<div style="margin-top: 20px; text-align: center;">
-			<button${disabled:*ro}>Save</button>
+			<div class="restart-warning"><strong><svg class="restart-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> Restart on save:</strong> Changes to settings with this symbol restart DATUM Gateway when saved, briefly interrupting the web interface and miner, pool, and node connections. The restarted process uses the Gateway binary currently installed on disk.</div>
+			<button class="save-button"${disabled:*ro}>Save</button>
 			${msg:*ro}
 		</div>
 		
@@ -136,11 +171,12 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="reward_sharing" class="label">Collaborative reward sharing (pooled mining):</label>
-						<select name="reward_sharing" id="reward_sharing"${*ro} onchange="reward_sharing_changed()">
-							<option value="require"${selected:datum_pooled_mining_only}${disabled:*ro}>require (pooled mining only)</option>
-							<option value="prefer"${selected:*reward_sharing_prefer}${disabled:*ro}>prefer (failover to non-pooled)</option>
-							<option value="never"${selected:*reward_sharing_never}${disabled:*ro}>never (non-pooled only)</option>
+						<select name="reward_sharing" id="reward_sharing" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro} onchange="reward_sharing_changed()">
+							<option value="require"${selected:datum_pooled_mining_only}${disabled:*restart_ro}>require (pooled mining only)</option>
+							<option value="prefer"${selected:*reward_sharing_prefer}${disabled:*restart_ro}>prefer (failover to non-pooled)</option>
+							<option value="never"${selected:*reward_sharing_never}${disabled:*restart_ro}>never (non-pooled only)</option>
 						</select>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 					<label for="reward_sharing" class="tip">You can share rewards and share in others' rewards - or only get rewarded when you find a block yourself.</label>
 				</div>
@@ -153,19 +189,22 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="datum_pool_host" class="label">Host:</label>
-						<input maxlength="1023" name="datum_pool_host" id="datum_pool_host" value="${*datum_pool_host}"${*ro}></input>
+						<input maxlength="1023" name="datum_pool_host" id="datum_pool_host" value="${*datum_pool_host}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="datum_pool_port" class="label">Port:</label>
-						<input maxlength="5" name="datum_pool_port" id="datum_pool_port" value="${datum_pool_port}"${*ro}></input>
+						<input maxlength="5" name="datum_pool_port" id="datum_pool_port" value="${datum_pool_port}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="datum_pool_pubkey" class="label">Pubkey:</label>
-						<input maxlength="1023" name="datum_pool_pubkey" id="datum_pool_pubkey" value="${datum_pool_pubkey}"${*ro}></input>
+						<input maxlength="1023" name="datum_pool_pubkey" id="datum_pool_pubkey" value="${datum_pool_pubkey}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 			</div>
@@ -190,7 +229,8 @@
 				<div class="setting-row">
 					<div class="flex-row">
 						<label for="bitcoind_work_update_seconds" class="label">Typical interval between job updates:</label>
-						<input maxlength="3" name="bitcoind_work_update_seconds" id="bitcoind_work_update_seconds" value="${bitcoind_work_update_seconds}"${*ro}></input>
+						<input maxlength="3" name="bitcoind_work_update_seconds" id="bitcoind_work_update_seconds" value="${bitcoind_work_update_seconds}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 					<label for="bitcoind_work_update_seconds" class="tip">5-120 seconds. 40 suggested.</label>
 				</div>
@@ -216,16 +256,40 @@
 		</div>
 		
 		<div style="margin-bottom: 20px; text-align: center;">
-			<button${disabled:*ro}>Save</button>
+			<div class="restart-warning"><svg class="restart-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> Changes to settings with this symbol restart the Gateway when saved.</div>
+			<button class="save-button"${disabled:*ro}>Save</button>
 			${msg:*ro}
 		</div>
 	</div>
 	</form>
 	<script>
+		var config_form = document.getElementById('config_form');
+		var restart_fields = config_form.querySelectorAll('[data-restart-required]');
+		var save_buttons = config_form.getElementsByClassName('save-button');
+		for (var i = 0; i < restart_fields.length; ++i) {
+			restart_fields[i].setAttribute('data-initial-value', restart_fields[i].value);
+		}
+
+		function config_restart_required() {
+			for (var i = 0; i < restart_fields.length; ++i) {
+				if (!restart_fields[i].disabled && restart_fields[i].value != restart_fields[i].getAttribute('data-initial-value')) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		function update_save_buttons() {
+			var text = config_restart_required() ? 'Save & Restart' : 'Save';
+			for (var i = 0; i < save_buttons.length; ++i) {
+				save_buttons[i].textContent = text;
+			}
+		}
+
 		function reward_sharing_changed() {
 			var newvalue = document.getElementById('reward_sharing').value;
 			var fields = document.getElementById('pool_settings').getElementsByTagName('input');
-			if (newvalue == 'never') {
+			if (newvalue == 'never' || document.getElementById('reward_sharing').getAttribute('readonly') != null) {
 				for (var i = 0; i < fields.length; ++i) {
 					fields[i].setAttribute('disabled', true);
 				}
@@ -234,7 +298,18 @@
 					fields[i].removeAttribute('disabled');
 				}
 			}
+			update_save_buttons();
 		}
+
+		for (var i = 0; i < restart_fields.length; ++i) {
+			restart_fields[i].addEventListener('input', update_save_buttons);
+			restart_fields[i].addEventListener('change', update_save_buttons);
+		}
+		config_form.addEventListener('submit', function(event) {
+			if (config_restart_required() && !window.confirm('Save these changes and restart DATUM Gateway now?\n\nThe web interface and mining, pool, and node connections will be briefly interrupted. The restart will run the Gateway binary currently installed on disk, which may differ from the running version.')) {
+				event.preventDefault();
+			}
+		});
 		reward_sharing_changed();
 	</script>
 </body>

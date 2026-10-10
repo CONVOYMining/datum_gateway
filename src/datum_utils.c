@@ -35,8 +35,11 @@
 
 #include <assert.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sodium.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -54,6 +57,12 @@
 #include <inttypes.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#elif defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#endif
+
 #include "datum_gateway.h"
 #include "datum_logger.h"
 #include "datum_utils.h"
@@ -64,6 +73,7 @@
 unsigned int datum_test_failed = 0;
 volatile int panic_mode = 0;
 static uint64_t process_start_time = 0;
+char *datum_executable_path = NULL;
 
 bool datum_test_fail_(const char *expr, const char *file, unsigned int line, const char *func) {
 	fprintf(stderr, "ERROR: TEST FAILED at %s:%u (%s): %s\n", file, line, func, expr);
@@ -72,15 +82,30 @@ bool datum_test_fail_(const char *expr, const char *file, unsigned int line, con
 	return false;
 }
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+	#include <sanitizer/lsan_interface.h>
+	#define LSAN_IGNORE(ptr) __lsan_ignore_object(ptr)
+#else
+	#define LSAN_IGNORE(ptr) (void)(ptr)
+#endif
+
 uint64_t get_process_uptime_seconds() {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (uint64_t)ts.tv_sec - process_start_time;
 }
 
+static char *datum_get_executable_path(void);
+
 void datum_utils_init(void) {
 	build_hex_lookup();
 	process_start_time = monotonic_time_seconds();
+	datum_executable_path = datum_get_executable_path();
+	LSAN_IGNORE(datum_executable_path);
 }
 
 #ifdef __GNUC__
@@ -811,6 +836,45 @@ char **datum_deepcopy_charpp(const char * const * const p) {
 	return out;
 }
 
+static
+char *datum_get_executable_path(void) {
+#ifdef __linux__
+	return realpath("/proc/self/exe", NULL);
+#elif defined(__APPLE__)
+	char path[PATH_MAX + 1];
+	uint32_t path_size = sizeof(path);
+	if (_NSGetExecutablePath(path, &path_size) != 0) {
+		errno = ENAMETOOLONG;
+		return NULL;
+	}
+	return realpath(path, NULL);
+#elif defined(__FreeBSD__)
+	char path[PATH_MAX + 1];
+	size_t path_size = sizeof(path);
+	const int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
+	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), path, &path_size, NULL, 0) != 0) {
+		return NULL;
+	}
+	if (!path_size || path_size > sizeof(path) || path[path_size - 1] != '\0' || !path[0]) {
+		errno = ENOENT;
+		return NULL;
+	}
+	return realpath(path, NULL);
+#else
+	errno = ENOSYS;
+	return NULL;
+#endif
+}
+
+int datum_reexec_check(void) {
+	if (!datum_executable_path) return ENOENT;
+	struct stat st;
+	if (stat(datum_executable_path, &st) != 0) return errno;
+	if (!S_ISREG(st.st_mode)) return EACCES;
+	if (faccessat(AT_FDCWD, datum_executable_path, X_OK, AT_EACCESS) != 0) return errno;
+	return 0;
+}
+
 void datum_reexec() {
 	// FIXME: kill other threads (except logging?) before closing fds
 	
@@ -838,7 +902,8 @@ void datum_reexec() {
 			" mounted?)", __func__);
 	}
 	
-	execv((void*)datum_argv[0], (void*)datum_argv);
+	assert(datum_executable_path);
+	execv(datum_executable_path, (void*)datum_argv);
 	// execv shouldn't return!
 	
 	DLOG_FATAL("Failed to restart! We're too deep in to recover!");
