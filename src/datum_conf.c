@@ -195,8 +195,6 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pool_pass_full_users",			.description = "Pass stratum miner usernames as raw usernames to the pool (use if putting multiple payout addresses on miners behind this gateway)",
 		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pool_pass_full_users, 	.default_bool = true },
-	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "always_pay_self",				.description = "Always include my datum.pool_username payout in my blocks if possible",
-		.required = false, .ptr = &datum_config.datum_always_pay_self, 	.default_bool = true },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pooled_mining_only",			.description = "If the DATUM pool server becomes unavailable, terminate miner connections (otherwise, 100% of any blocks you find pay mining.pool_address)",
 		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pooled_mining_only, 	.default_bool = true },
@@ -551,7 +549,7 @@ int datum_config_parse_value(const T_DATUM_CONFIG_ITEM *c, json_t *item) {
 						DLOG_WARN("%s.%s rounded up to %s", c->category, c->name, diffstr);
 						break;
 					case 3:
-						DLOG_WARN("%s.%s uses legacy integer syntax; use \"%s\" instead", c->category, c->name, diffstr);
+						DLOG_WARN("%s.%s is set incorrectly; use \"%s\" instead", c->category, c->name, diffstr);
 						break;
 				}
 			}
@@ -602,16 +600,16 @@ int datum_read_config(const char *conffile) {
 		// item might be valid
 		j = datum_config_parse_value(&datum_config_options[i], item);
 		if (j == -1) {
-			DLOG_ERROR("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, datum_conf_var_type_text[datum_config_options[i].var_type]);
+			DLOG_FATAL("Could not parse configuration option %s.%s.  Type should be %s", datum_config_options[i].category, datum_config_options[i].name, datum_conf_var_type_text[datum_config_options[i].var_type]);
 			return -1;
 		} else if (j == -2) {
-			DLOG_ERROR("Configuration option %s.%s exceeds maximum length of %d", datum_config_options[i].category, datum_config_options[i].name, datum_config_options[i].max_string_len - 1);
+			DLOG_FATAL("Configuration option %s.%s exceeds maximum length of %d", datum_config_options[i].category, datum_config_options[i].name, datum_config_options[i].max_string_len - 1);
 			return -1;
 		} else if (j == -3) {
-			DLOG_ERROR("Configuration option %s.%s exceeds maximum list size of %u", datum_config_options[i].category, datum_config_options[i].name, (unsigned int)(DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1));
+			DLOG_FATAL("Configuration option %s.%s exceeds maximum list size of %u", datum_config_options[i].category, datum_config_options[i].name, (unsigned int)(DATUM_CONFIG_MAX_ARRAY_ENTRIES - 1));
 			return -1;
 		} else if (j == -4) {
-			DLOG_ERROR("Configuration option %s.%s cannot include empty strings", datum_config_options[i].category, datum_config_options[i].name);
+			DLOG_FATAL("Configuration option %s.%s cannot include empty strings", datum_config_options[i].category, datum_config_options[i].name);
 			return -1;
 		}
 	}
@@ -658,19 +656,15 @@ int datum_read_config(const char *conffile) {
 		update_rpc_cookie(&datum_config);
 	} else {
 		const T_DATUM_CONFIG_ITEM *opt;
-		DLOG_ERROR("Either bitcoind.rpcuser (and bitcoind.rpcpassword) or bitcoind.rpccookiefile is required.");
+		DLOG_FATAL("Either bitcoind.rpcuser (and bitcoind.rpcpassword) or bitcoind.rpccookiefile is required.");
 		opt = datum_config_get_option_info2("bitcoind", "rpcuser");
-		DLOG_ERROR("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
+		DLOG_FATAL("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
 		opt = datum_config_get_option_info2("bitcoind", "rpccookiefile");
-		DLOG_ERROR("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
+		DLOG_FATAL("--- Config description for %s.%s: \"%s\"", opt->category, opt->name, opt->description);
 		return 0;
 	}
 	
-#ifndef ENABLE_API
-	if (datum_config.api_listen_port) {
-		DLOG_WARN("API is enabled in configuration, but this build was compiled without API support");
-	}
-#else
+#ifdef ENABLE_API
 	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
 	if (datum_config.api_admin_password_len) {
 		static const char hash_tag[] = "DATUM Anti-CSRF Token";
@@ -725,12 +719,6 @@ int datum_read_config(const char *conffile) {
 		return 0;
 	}
 	
-	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
-		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
-		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
-		datum_config.stratum_v1_vardiff_min = nv;
-	}
-	
 	if (datum_config.stratum_v1_max_clients > (datum_config.stratum_v1_max_clients_per_thread*datum_config.stratum_v1_max_threads)) {
 		DLOG_FATAL("Stratum server configuration error. Max clients too high for thread settings");
 		return 0;
@@ -763,6 +751,20 @@ int datum_read_config(const char *conffile) {
 	strcpy(datum_config.override_mining_coinbase_tag_primary, datum_config.mining_coinbase_tag_primary);
 	
 	return 1;
+}
+
+void datum_conf_check_warnings(void) {
+#ifndef ENABLE_API
+	if (datum_config.api_listen_port) {
+		DLOG_WARN("API is enabled in configuration, but this build was compiled without API support");
+	}
+#endif
+	
+	if (roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min) != datum_config.stratum_v1_vardiff_min) {
+		const int nv = roundDownToPowerOfTwo_64(datum_config.stratum_v1_vardiff_min);
+		DLOG_WARN("stratum.vardiff_min MUST be a power of two. adjusting from %d to %d", datum_config.stratum_v1_vardiff_min, nv);
+		datum_config.stratum_v1_vardiff_min = nv;
+	}
 }
 
 void datum_gateway_help(const char * const argv0) {

@@ -78,7 +78,7 @@ uint64_t stratum_latest_empty_job_index = 0;
 uint64_t stratum_latest_empty_sent_count = 0;
 
 pthread_rwlock_t need_coinbaser_rwlocks[MAX_STRATUM_JOBS];
-bool need_coinbaser_rwlocks_init_done = false;
+atomic_bool need_coinbaser_rwlocks_init_done = false;
 
 uint64_t stratum_client_accepted_share_count = 0;
 uint64_t stratum_client_accepted_share_diff = 0;
@@ -222,7 +222,7 @@ void *datum_stratum_v1_socket_server(void *arg) {
 	for (i = 0; i < MAX_STRATUM_JOBS; i++) {
 		pthread_rwlock_init(&need_coinbaser_rwlocks[i], NULL);
 	}
-	need_coinbaser_rwlocks_init_done = true;
+	atomic_store_explicit(&need_coinbaser_rwlocks_init_done, true, memory_order_release);
 	
 	// Backup thread for submitting blocks found to our node and additional nodes.
 	DLOG_DEBUG("Starting submitblock thread");

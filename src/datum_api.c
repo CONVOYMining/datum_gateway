@@ -1310,15 +1310,6 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		datum_config.stratum_v1_fingerprint_miners = val_bool;
 		datum_api_json_modify_new("stratum", "fingerprint_miners", json_boolean(val_bool));
 		// TODO: apply change to connected miners?
-	} else if (0 == strcmp(key, "datum_always_pay_self")) {
-		bool val_bool;
-		if (!datum_str_to_bool_strict(val, &val_bool)) {
-			json_array_append_new(errors, json_string_nocheck("\"Always pay self\" must be 0 or 1"));
-			return false;
-		}
-		if (val_bool == datum_config.datum_always_pay_self) return true;
-		datum_config.datum_always_pay_self = val_bool;
-		datum_api_json_modify_new("datum", "always_pay_self", json_boolean(val_bool));
 	} else if (0 == strcmp(key, "mining_allow_hasher_time_rolling")) {
 		bool val_bool;
 		if (!datum_str_to_bool_strict(val, &val_bool)) {
