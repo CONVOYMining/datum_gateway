@@ -53,7 +53,7 @@
 #define DATUM_ABW_ASSIGNMENT_SLOTS 16
 #define DATUM_ABW_ASSIGNMENT_ACTIVE 0x01
 
-#define DATUM_PROTOCOL_VERSION "v0.4.1-beta" // this is sent to the server as a UA
+#define DATUM_PROTOCOL_VERSION "v0.5.0-beta" // this is sent to the server as a UA
 #define DATUM_PROTOCOL_CONNECT_TIMEOUT 30
 
 #define DATUM_PROTOCOL_MAX_CMD_DATA_SIZE 4194304 // 2^22 - protocol limit!
