@@ -914,7 +914,7 @@ void *datum_coinbaser_thread(void *ptr) {
 			if (i>=0) {
 				DLOG_DEBUG("Generating coinbases for up to %d outputs", i);
 				generate_coinbase_txns_for_stratum_job(s, false);
-				if (need_coinbaser_rwlocks_init_done) {
+				if (__builtin_expect(atomic_load_explicit(&need_coinbaser_rwlocks_init_done, memory_order_acquire), 1)) {
 					pthread_rwlock_wrlock(&need_coinbaser_rwlocks[sjob]);
 					s->need_coinbaser = false;
 					pthread_rwlock_unlock(&need_coinbaser_rwlocks[sjob]);

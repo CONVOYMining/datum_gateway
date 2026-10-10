@@ -37,6 +37,7 @@
 #define _DATUM_STRATUM_H_
 
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 
 #ifndef T_DATUM_CLIENT_DATA
@@ -307,7 +308,7 @@ void datum_stratum_v1_shutdown_all(void);
 extern T_DATUM_SOCKET_APP *global_stratum_app;
 
 extern pthread_rwlock_t need_coinbaser_rwlocks[MAX_STRATUM_JOBS];
-extern bool need_coinbaser_rwlocks_init_done;
+extern atomic_bool need_coinbaser_rwlocks_init_done;
 
 // Gateway-local share totals from connected stratum miners (not pool responses)
 extern uint64_t stratum_client_accepted_share_count;

@@ -169,7 +169,6 @@ typedef struct {
 	int datum_pool_migration_max_seconds;
 	bool datum_pool_pass_workers;
 	bool datum_pool_pass_full_users;
-	bool datum_always_pay_self;
 	bool datum_pooled_mining_only;
 	char datum_pool_pubkey[1024];
 	int datum_protocol_global_timeout;
@@ -185,6 +184,7 @@ typedef struct {
 extern global_config_t datum_config;
 
 int datum_read_config(const char *conffile);
+void datum_conf_check_warnings(void);
 void datum_gateway_help(const char *argv0);
 void datum_gateway_example_conf(void);
 
