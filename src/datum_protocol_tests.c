@@ -1103,6 +1103,21 @@ static void datum_protocol_migration_tests(void) {
 	pk_u16le(home_payload, home_i, datum_config.datum_pool_port); home_i += 2;
 	for (size_t j = 0; j < 64; ++j) home_payload[home_i++] = j;
 	home_payload[home_i++] = 0xFE;
+	datum_config.datum_pool_migration_host[0] = 'x';
+	datum_config.datum_pool_migration_host[1] = '\0';
+	datum_config.datum_pool_migration_port = 1;
+	datum_config.datum_pool_migration_deadline_ms = 1;
+	datum_test(datum_protocol_migration_request((int)home_i, home_payload) == -1);
+	datum_test(datum_config.datum_pool_migration_deadline_ms == 0);
+	datum_test(!strcmp(datum_config.datum_pool_migration_host, datum_config.datum_pool_host));
+	datum_test(datum_config.datum_pool_migration_port == datum_config.datum_pool_port);
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, datum_config.datum_pool_host));
+	datum_test(port == datum_config.datum_pool_port);
+	datum_test(!strcmp(endpoint_pubkey, datum_config.datum_pool_pubkey));
+	datum_test(!datum_protocol_migration_expired(UINT64_MAX));
 	datum_test(datum_protocol_migration_request((int)home_i, home_payload) == -1);
 	datum_test(datum_config.datum_pool_migration_deadline_ms == 0);
 	datum_test(datum_protocol_take_connect_endpoint(
@@ -1111,8 +1126,8 @@ static void datum_protocol_migration_tests(void) {
 	datum_test(!strcmp(endpoint, datum_config.datum_pool_host));
 	datum_test(port == datum_config.datum_pool_port);
 	datum_test(!strcmp(endpoint_pubkey, datum_config.datum_pool_pubkey));
+	datum_test(!datum_config.datum_pool_migration_host[0]);
 	datum_test(!datum_protocol_migration_expired(UINT64_MAX));
-	datum_test(datum_protocol_migration_request((int)home_i, home_payload) == 1);
 	
 	datum_config.datum_pool_migration_host[0] = 'x';
 	datum_config.datum_pool_migration_host[1] = '\0';
