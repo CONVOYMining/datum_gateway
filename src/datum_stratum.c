@@ -519,7 +519,7 @@ void datum_stratum_v1_socket_thread_loop(T_DATUM_THREAD_DATA *my) {
 						for(i=0;i<my->app->max_clients_thread;i++) {
 							m = my->client_data[i].app_client_data;
 							if (my->client_data[i].fd && m->subscribed) {
-								send_mining_notify(&my->client_data[i],false,false,false);
+								send_mining_notify(&my->client_data[i], datum_stratum_notify_replaces_job(job->job_state, true), false, false);
 							}
 						}
 						
@@ -558,7 +558,7 @@ void datum_stratum_v1_socket_thread_loop(T_DATUM_THREAD_DATA *my) {
 					for(i=0;i<my->app->max_clients_thread;i++) {
 						m = my->client_data[i].app_client_data;
 						if (my->client_data[i].fd && m->subscribed) {
-							send_mining_notify(&my->client_data[i],false,false,false);
+							send_mining_notify(&my->client_data[i], datum_stratum_notify_replaces_job(job->job_state, true), false, false);
 						}
 					}
 					
@@ -584,7 +584,7 @@ void datum_stratum_v1_socket_thread_loop(T_DATUM_THREAD_DATA *my) {
 						for(i=0;i<my->app->max_clients_thread;i++) {
 							m = my->client_data[i].app_client_data;
 							if (my->client_data[i].fd && m->subscribed) {
-								send_mining_notify(&my->client_data[i],false,false,false);
+								send_mining_notify(&my->client_data[i], datum_stratum_notify_replaces_job(job->job_state, sdata->last_was_empty), false, false);
 							}
 						}
 					} else {
@@ -1436,6 +1436,16 @@ unsigned int datum_stratum_coinbase_index(
 	    !sdata->full_coinbase_ready ||
 	    miner->coinbase_selection >= MAX_COINBASE_TYPES) return 0;
 	return miner->coinbase_selection;
+}
+
+bool datum_stratum_notify_replaces_job(int job_state, bool opening_job_still_current) {
+	/* State 2's second send is the template. State 4 is the split.
+	 * State 5 replaces only while miners are still on the opening job.
+	 * The paced refresh passes opening_job_still_current false. */
+	if (job_state == JOB_STATE_EMPTY_PLUS && opening_job_still_current) return true;
+	if (job_state == JOB_STATE_FULL_PRIORITY_WAIT_COINBASER) return true;
+	if (job_state == JOB_STATE_FULL_NORMAL_WAIT_COINBASER && opening_job_still_current) return true;
+	return false;
 }
 
 int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool new_block) {

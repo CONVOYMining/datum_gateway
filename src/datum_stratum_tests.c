@@ -690,7 +690,21 @@ void datum_stratum_mod_username_tests() {
 	datum_test(0 == strcmp(res, "def.ghi"));
 }
 
+static void datum_stratum_notify_replaces_job_tests(void) {
+	/* Template reply and split reply replace the opening job. */
+	datum_test(datum_stratum_notify_replaces_job(JOB_STATE_EMPTY_PLUS, true));
+	datum_test(datum_stratum_notify_replaces_job(JOB_STATE_FULL_PRIORITY_WAIT_COINBASER, false));
+	datum_test(datum_stratum_notify_replaces_job(JOB_STATE_FULL_PRIORITY_WAIT_COINBASER, true));
+	/* The opening job itself is not this path, and a normal refresh stays alongside. */
+	datum_test(!datum_stratum_notify_replaces_job(JOB_STATE_EMPTY_ONLY, true));
+	datum_test(!datum_stratum_notify_replaces_job(JOB_STATE_EMPTY_PLUS, false));
+	datum_test(!datum_stratum_notify_replaces_job(JOB_STATE_FULL_NORMAL_WAIT_COINBASER, false));
+	datum_test(datum_stratum_notify_replaces_job(JOB_STATE_FULL_NORMAL_WAIT_COINBASER, true));
+	datum_test(!datum_stratum_notify_replaces_job(JOB_STATE_FULL_PRIORITY, false));
+}
+
 void datum_stratum_tests(void) {
+	datum_stratum_notify_replaces_job_tests();
 	datum_stratum_mod_username_tests();
 	datum_stratum_minimum_difficulty_configure_tests();
 	datum_stratum_string_request_id_tests();
