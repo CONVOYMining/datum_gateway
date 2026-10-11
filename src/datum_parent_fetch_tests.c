@@ -56,7 +56,7 @@
 
 typedef struct {
 	int listen_fd;
-	bool saw_getblock;
+	unsigned getblock_requests;
 	char expected_hash[65];
 } T_DATUM_PARENT_FETCH_TEST_SERVER;
 
@@ -80,38 +80,57 @@ static bool parent_test_send_all(int fd, const char *data, size_t len) {
 
 static void *parent_test_server(void *arg) {
 	T_DATUM_PARENT_FETCH_TEST_SERVER *server = arg;
-	const int client = accept(server->listen_fd, NULL, NULL);
-	if (client < 0) return NULL;
-	char request[4096] = {0};
-	size_t used = 0;
-	while (used + 1 < sizeof(request)) {
-		const ssize_t n = recv(client, request + used,
-		                       sizeof(request) - used - 1, 0);
-		if (n <= 0) break;
-		used += (size_t)n;
-		request[used] = 0;
-		char *body = strstr(request, "\r\n\r\n");
-		char *length = strstr(request, "Content-Length:");
-		if (!body || !length) continue;
-		unsigned long body_size = 0;
-		if (sscanf(length, "Content-Length: %lu", &body_size) == 1 &&
-		    used >= (size_t)(body + 4 - request) + body_size) break;
+	for (unsigned request_index = 0; request_index < 2; ++request_index) {
+		const int client = accept(server->listen_fd, NULL, NULL);
+		if (client < 0) return NULL;
+		char request[4096] = {0};
+		size_t used = 0;
+		while (used + 1 < sizeof(request)) {
+			const ssize_t n = recv(client, request + used,
+			                       sizeof(request) - used - 1, 0);
+			if (n <= 0) break;
+			used += (size_t)n;
+			request[used] = 0;
+			char *body = strstr(request, "\r\n\r\n");
+			char *length = strstr(request, "Content-Length:");
+			if (!body || !length) continue;
+			unsigned long body_size = 0;
+			if (sscanf(length, "Content-Length: %lu", &body_size) == 1 &&
+			    used >= (size_t)(body + 4 - request) + body_size) break;
+		}
+		if (strstr(request, "\"method\":\"getblock\"") &&
+		    strstr(request, server->expected_hash) && strstr(request, ",0]")) {
+			++server->getblock_requests;
+		}
+		if (request_index == 1) sleep(2);
+		const char body[] =
+			"{\"result\":\"aabbcc\",\"error\":null,\"id\":\"datum-parent-fetch\"}";
+		char response[512];
+		const int response_size = snprintf(
+			response, sizeof(response),
+			"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+			"Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+			strlen(body), body);
+		if (response_size > 0 && (size_t)response_size < sizeof(response)) {
+			parent_test_send_all(client, response, (size_t)response_size);
+		}
+		close(client);
 	}
-	server->saw_getblock = strstr(request, "\"method\":\"getblock\"") &&
-		strstr(request, server->expected_hash) && strstr(request, ",0]");
-	const char body[] =
-		"{\"result\":\"aabbcc\",\"error\":null,\"id\":\"datum-parent-fetch\"}";
-	char response[512];
-	const int response_size = snprintf(
-		response, sizeof(response),
-		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-		"Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-		strlen(body), body);
-	if (response_size > 0 && (size_t)response_size < sizeof(response)) {
-		parent_test_send_all(client, response, (size_t)response_size);
-	}
-	close(client);
 	return NULL;
+}
+
+static bool parent_test_wait_for_reply(unsigned timeout_seconds) {
+	pthread_mutex_lock(&parent_test_lock);
+	struct timespec deadline;
+	clock_gettime(CLOCK_REALTIME, &deadline);
+	deadline.tv_sec += timeout_seconds;
+	while (!parent_test_replied) {
+		if (pthread_cond_timedwait(
+		        &parent_test_cond, &parent_test_lock, &deadline) == ETIMEDOUT) break;
+	}
+	const bool replied = parent_test_replied;
+	pthread_mutex_unlock(&parent_test_lock);
+	return replied;
 }
 
 static void parent_test_reply(
@@ -166,25 +185,30 @@ void datum_parent_fetch_tests(void) {
 	         "http://127.0.0.1:%u", ntohs(bound.sin_port));
 	strcpy(datum_config.bitcoind_rpcuser, "test");
 	strcpy(datum_config.bitcoind_rpcuserpass, "test:test");
+	datum_config.bitcoind_parent_fetch_timeout_seconds = 15;
 	datum_test(!datum_parent_fetch_init(parent_test_reply));
 	datum_test(datum_parent_fetch_enqueue(2, UINT64_C(0x1122334455667788), parent_hash) == DATUM_PARENT_FETCH_STATUS_QUEUED);
 	
-	pthread_mutex_lock(&parent_test_lock);
-	struct timespec deadline;
-	clock_gettime(CLOCK_REALTIME, &deadline);
-	deadline.tv_sec += 5;
-	while (!parent_test_replied) {
-		if (pthread_cond_timedwait(
-		        &parent_test_cond, &parent_test_lock, &deadline) == ETIMEDOUT) break;
-	}
-	pthread_mutex_unlock(&parent_test_lock);
-	datum_test(parent_test_replied);
+	datum_test(parent_test_wait_for_reply(5));
 	datum_test(parent_test_status == DATUM_PARENT_FETCH_STATUS_SUCCESS);
 	datum_test(parent_test_session_generation == UINT64_C(0x1122334455667788));
 	datum_test(parent_test_block_size == 3);
 	datum_test(!memcmp(parent_test_block, "\xaa\xbb\xcc", 3));
+	
+	pthread_mutex_lock(&parent_test_lock);
+	parent_test_replied = false;
+	parent_test_status = 0;
+	parent_test_session_generation = 0;
+	parent_test_block_size = 0;
+	pthread_mutex_unlock(&parent_test_lock);
+	datum_config.bitcoind_parent_fetch_timeout_seconds = 1;
+	datum_test(datum_parent_fetch_enqueue(3, UINT64_C(0x8877665544332211), parent_hash) == DATUM_PARENT_FETCH_STATUS_QUEUED);
+	datum_test(parent_test_wait_for_reply(3));
+	datum_test(parent_test_status == DATUM_PARENT_FETCH_STATUS_UNAVAILABLE);
+	datum_test(parent_test_session_generation == UINT64_C(0x8877665544332211));
+	datum_test(parent_test_block_size == 0);
 	pthread_join(server_thread, NULL);
-	datum_test(server.saw_getblock);
+	datum_test(server.getblock_requests == 2);
 	close(server.listen_fd);
 	datum_config = saved_config;
 }

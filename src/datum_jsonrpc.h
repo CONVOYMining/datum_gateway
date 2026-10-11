@@ -68,5 +68,6 @@ char *basic_http_call(CURL *curl, const char *url);
 bool update_rpc_cookie(global_config_t *cfg);
 void update_rpc_auth(global_config_t *cfg);
 json_t *bitcoind_json_rpc_call(CURL *curl, global_config_t *cfg, const char *rpc_req);
+json_t *bitcoind_json_rpc_call_with_timeout(CURL *curl, global_config_t *cfg, const char *rpc_req, long timeout_seconds);
 
 #endif

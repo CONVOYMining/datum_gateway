@@ -109,6 +109,7 @@ typedef struct {
 	char bitcoind_rpcuser[128];
 	char bitcoind_rpcpassword[128];
 	char bitcoind_rpcurl[256];
+	int bitcoind_parent_fetch_timeout_seconds;
 	int bitcoind_work_update_seconds;
 	bool bitcoind_notify_fallback;
 	

@@ -139,7 +139,7 @@ err_out:
 	return NULL;
 }
 
-json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, const char *rpc_req, const char *extra_header, long * const http_resp_code_out) {
+static json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, const char *rpc_req, const char *extra_header, long * const http_resp_code_out, const long timeout_seconds) {
 	json_t *val, *err_val, *res_val;
 	CURLcode rc;
 	struct data_buffer all_data = { };
@@ -158,8 +158,8 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_data_cb);
 	curl_easy_setopt(curl, CURLOPT_READDATA, &upload_data);
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_err_str);
-	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L); // quick timeout!
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L); // quick timeout!
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, timeout_seconds);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 	
 	if (userpass) {
@@ -240,7 +240,7 @@ err_out:
 }
 
 json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass, const char *rpc_req) {
-	return json_rpc_call_full(curl, url, userpass, rpc_req, NULL, NULL);
+	return json_rpc_call_full(curl, url, userpass, rpc_req, NULL, NULL, 5L);
 }
 
 bool update_rpc_cookie(global_config_t * const cfg) {
@@ -265,14 +265,18 @@ void update_rpc_auth(global_config_t * const cfg) {
 	}
 }
 
-json_t *bitcoind_json_rpc_call(CURL * const curl, global_config_t * const cfg, const char * const rpc_req) {
+json_t *bitcoind_json_rpc_call_with_timeout(CURL * const curl, global_config_t * const cfg, const char * const rpc_req, const long timeout_seconds) {
 	long http_resp_code = -1;
-	json_t *j = json_rpc_call_full(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req, NULL, &http_resp_code);
+	json_t *j = json_rpc_call_full(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req, NULL, &http_resp_code, timeout_seconds);
 	if (j) return j;
 	if (cfg->bitcoind_rpcuser[0]) return NULL;
 	if (http_resp_code != 401) return NULL;
 	
 	// Authentication failure using cookie; reload cookie file and try again
 	if (!update_rpc_cookie(cfg)) return NULL;
-	return json_rpc_call(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req);
+	return json_rpc_call_full(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req, NULL, NULL, timeout_seconds);
+}
+
+json_t *bitcoind_json_rpc_call(CURL * const curl, global_config_t * const cfg, const char * const rpc_req) {
+	return bitcoind_json_rpc_call_with_timeout(curl, cfg, rpc_req, 5L);
 }

@@ -103,7 +103,7 @@ static uint8_t parent_fetch_get(
 	uint8_t ** const block_out, size_t * const block_size_out) {
 	char *rpc = parent_fetch_rpc_request(request->parent_hash);
 	if (!rpc) return DATUM_PARENT_FETCH_STATUS_RPC_FAILED;
-	json_t *response = bitcoind_json_rpc_call(curl, &datum_config, rpc);
+	json_t *response = bitcoind_json_rpc_call_with_timeout(curl, &datum_config, rpc, datum_config.bitcoind_parent_fetch_timeout_seconds);
 	free(rpc);
 	if (!response) return DATUM_PARENT_FETCH_STATUS_UNAVAILABLE;
 	json_t *result = json_object_get(response, "result");
