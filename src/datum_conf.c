@@ -198,6 +198,9 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "pooled_mining_only",			.description = "If the DATUM pool server becomes unavailable, terminate miner connections (otherwise, 100% of any blocks you find pay mining.pool_address)",
 		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pooled_mining_only, 	.default_bool = true },
+	{ .var_type = DATUM_CONF_BOOL, 		.category = "datum", 		.name = "coinbaser_refetch",			.description = "While connected to a DATUM pool, if a coinbaser answer has fewer than 2 outputs, keep the current job and ask again. Set false to publish the one-output coinbase and stop asking until the next job. Ignored when the pool link is down.",
+		.example_default = true,
+		.required = false, .ptr = &datum_config.datum_coinbaser_refetch, 	.default_bool = true },
 	{ .var_type = DATUM_CONF_INT, 		.category = "datum", 		.name = "protocol_global_timeout",		.description = "If no valid messages are received from the DATUM server in this many seconds, give up and try to reconnect",
 		.required = false, .ptr = &datum_config.datum_protocol_global_timeout, 	.default_int = 60 },
 };
