@@ -54,19 +54,14 @@
 #define bitcoin_rpc_url global_config.bitcoind_url
 #define bitcoin_rpc_userpass global_config.bitcoind_userpass
 
-struct data_buffer {
-	void            *buf;
-	size_t          len;
-};
 struct upload_buffer {
 	const void      *buf;
 	size_t          len;
 };
 
-json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass, const char *rpc_req);
-char *basic_http_call(CURL *curl, const char *url);
+json_t *json_rpc_call(CURL **curl, const char *url, const char *userpass, const char *rpc_req);
 bool update_rpc_cookie(global_config_t *cfg);
 void update_rpc_auth(global_config_t *cfg);
-json_t *bitcoind_json_rpc_call(CURL *curl, global_config_t *cfg, const char *rpc_req);
+json_t *bitcoind_json_rpc_call(CURL **curl, global_config_t *cfg, const char *rpc_req);
 
 #endif

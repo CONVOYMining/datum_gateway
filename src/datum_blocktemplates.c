@@ -402,7 +402,7 @@ void *datum_gateway_fallback_notifier(void *args) {
 	
 	while(1) {
 		snprintf(req, sizeof(req), "{\"jsonrpc\":\"1.0\",\"id\":\"%"PRIu64"\",\"method\":\"getbestblockhash\",\"params\":[]}", current_time_millis());
-		gbbh = bitcoind_json_rpc_call(tcurl, &datum_config, req);
+		gbbh = bitcoind_json_rpc_call(&tcurl, &datum_config, req);
 		if (gbbh) {
 			res_val = json_object_get(gbbh, "result");
 			if (!res_val) {
@@ -483,7 +483,7 @@ void *datum_gateway_template_thread(void *args) {
 		
 		// fetch latest template
 		snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
-		gbt = bitcoind_json_rpc_call(tcurl, &datum_config, gbt_req);
+		gbt = bitcoind_json_rpc_call(&tcurl, &datum_config, gbt_req);
 		
 		if (!gbt) {
 			datum_blocktemplates_error = "Could not fetch new template!";

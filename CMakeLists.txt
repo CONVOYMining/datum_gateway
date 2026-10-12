@@ -26,6 +26,7 @@ add_executable(datum_gateway
 	src/datum_conf_tests.c
 	src/datum_gateway.c
 	src/datum_jsonrpc.c
+	src/datum_jsonrpc_tests.c
 	src/datum_logger.c
 	src/datum_parent_fetch.c
 	src/datum_parent_fetch_tests.c

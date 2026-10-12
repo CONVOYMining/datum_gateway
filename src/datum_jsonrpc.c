@@ -46,41 +46,16 @@
 #include "datum_jsonrpc.h"
 #include "datum_utils.h"
 
-// TODO: Clean this up.  Most of this is very old code from other parts of Eligius/OCEAN internal tools and needs
-// a solid makeover.
-// However, it's all quite functional, so not a top priority.
-
-static void databuf_free(struct data_buffer *db) {
-	if (!db) {
-		return;
-	}
-	
-	free(db->buf);
-	memset(db, 0, sizeof(*db));
-}
-
 static size_t all_data_cb(const void *ptr, size_t size, size_t nmemb, void *user_data) {
-	struct data_buffer *db = user_data;
-	size_t len, oldlen, newlen;
-	void *newmem;
+	struct buf * const buf = user_data;
+	size_t len;
 	
 	if (SIZE_MAX / size < nmemb) abort();
 	len = size * nmemb;
 	
-	oldlen = db->len;
-	if (SIZE_MAX - oldlen < len) abort();
-	newlen = oldlen + len;
+	if (!buf_append(buf, ptr, len)) return 0;
 	
-	newmem = realloc(db->buf, newlen + 1);
-	if (!newmem) {
-		return 0;
-	}
-	
-	db->buf = newmem;
-	db->len = newlen;
-	memcpy(&((char *)db->buf)[oldlen], ptr, len);
-	((char *)db->buf)[newlen] = 0;
-	
+	// NOTE: libcurl expects a different return value than write(2)
 	return len;
 }
 
@@ -101,60 +76,40 @@ static size_t upload_data_cb(void *ptr, size_t size, size_t nmemb, void *user_da
 	return len;
 }
 
-char *basic_http_call(CURL *curl, const char *url) {
-	CURLcode rc;
-	struct data_buffer all_data = { };
-	char curl_err_str[CURL_ERROR_SIZE];
-	char *out;
-	
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_ENCODING, "");
-	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-	curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, all_data_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &all_data);
-	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_err_str);
-	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L); // quick timeout!
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L); // quick timeout!
-	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-	
-	rc = curl_easy_perform(curl);
-	if (rc) {
-		DLOG_DEBUG("HTTP request failed: %s", curl_err_str);
-		goto err_out;
+static
+bool replace_curl_handle(CURL ** const curl) {
+	assert(curl);
+	curl_easy_cleanup(*curl);
+	*curl = curl_easy_init();
+	if (*curl) {
+		DLOG_DEBUG("Reinitialized cURL handle after JSON-RPC failure");
+		return true;
 	}
-	
-	out = calloc(strlen(all_data.buf)+20,1);
-	if (!out) goto err_out;
-	
-	strcpy(out, all_data.buf);
-	
-	databuf_free(&all_data);
-	curl_easy_reset(curl);
-	return out;
-
-err_out:
-	databuf_free(&all_data);
-	curl_easy_reset(curl);
-	return NULL;
+	DLOG_ERROR("Could not reinitialize cURL after JSON-RPC failure");
+	return false;
 }
 
-json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, const char *rpc_req, const char *extra_header, long * const http_resp_code_out) {
+static
+json_t *json_rpc_call_once(CURL ** const curl_handle, const char * const url, const char * const userpass, const char * const rpc_req, const char * const extra_header, long * const http_resp_code_out) {
 	json_t *val, *err_val, *res_val;
 	CURLcode rc;
-	struct data_buffer all_data = { };
+	struct buf resp_buf = BUF_INIT;
 	struct upload_buffer upload_data;
 	json_error_t err = { };
 	struct curl_slist *headers = NULL;
 	char curl_err_str[CURL_ERROR_SIZE];
 	bool check_for_result = true;
+	assert(curl_handle);
+	if (!*curl_handle && !replace_curl_handle(curl_handle)) return NULL;
+	CURL * const curl = *curl_handle;
 	
+	curl_err_str[0] = '\0';
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_ENCODING, "");
 	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
 	curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, all_data_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &all_data);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp_buf);
 	curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_data_cb);
 	curl_easy_setopt(curl, CURLOPT_READDATA, &upload_data);
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_err_str);
@@ -186,12 +141,18 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 	rc = curl_easy_perform(curl);
 	if (rc) {
 		if (http_resp_code_out) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_resp_code_out);
-		DLOG_DEBUG("json_rpc_call: HTTP request failed: %s", curl_err_str);
+		DLOG_DEBUG("json_rpc_call: HTTP request failed: %s", curl_err_str[0] ? curl_err_str : curl_easy_strerror(rc));
 		DLOG_DEBUG("json_rpc_call: Request was: %s",rpc_req);
 		goto err_out;
 	}
 	
-	val = JSON_LOADS(all_data.buf, &err);
+	if (resp_buf.len && buf_nullterminate(&resp_buf)) {
+		val = JSON_LOADS(resp_buf.s, &err);
+	} else {
+		DLOG_DEBUG("HTTP request returned 0 bytes");
+		DLOG_DEBUG("Request was: %s", rpc_req);
+		goto err_out;
+	}
 	if (!val) {
 		DLOG_DEBUG("JSON decode failed(%d): %s", err.line, err.text);
 		goto err_out;
@@ -227,20 +188,33 @@ json_t *json_rpc_call_full(CURL *curl, const char *url, const char *userpass, co
 		}
 	}
 	
-	databuf_free(&all_data);
+	free(resp_buf.s);
 	curl_slist_free_all(headers);
 	curl_easy_reset(curl);
 	return val;
 
 err_out:
-	databuf_free(&all_data);
+	free(resp_buf.s);
 	curl_slist_free_all(headers);
-	curl_easy_reset(curl);
+	replace_curl_handle(curl_handle);
 	return NULL;
 }
 
-json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass, const char *rpc_req) {
-	return json_rpc_call_full(curl, url, userpass, rpc_req, NULL, NULL);
+static
+json_t *json_rpc_call_retry(CURL ** const curl, const char * const url, const char * const userpass, const char * const rpc_req, global_config_t * const cookie_cfg) {
+	for (int attempt = 0; attempt < 2; ++attempt) {
+		long http_resp_code = -1;
+		json_t * const result = json_rpc_call_once(curl, url, userpass, rpc_req, NULL, &http_resp_code);
+		if (result) return result;
+		if (attempt) return NULL;
+		if (cookie_cfg && !cookie_cfg->bitcoind_rpcuser[0] && http_resp_code == 401 && !update_rpc_cookie(cookie_cfg)) return NULL;
+		DLOG_DEBUG("JSON-RPC request failed; retrying once with a fresh cURL handle");
+	}
+	return NULL;
+}
+
+json_t *json_rpc_call(CURL ** const curl, const char * const url, const char * const userpass, const char * const rpc_req) {
+	return json_rpc_call_retry(curl, url, userpass, rpc_req, NULL);
 }
 
 bool update_rpc_cookie(global_config_t * const cfg) {
@@ -265,14 +239,6 @@ void update_rpc_auth(global_config_t * const cfg) {
 	}
 }
 
-json_t *bitcoind_json_rpc_call(CURL * const curl, global_config_t * const cfg, const char * const rpc_req) {
-	long http_resp_code = -1;
-	json_t *j = json_rpc_call_full(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req, NULL, &http_resp_code);
-	if (j) return j;
-	if (cfg->bitcoind_rpcuser[0]) return NULL;
-	if (http_resp_code != 401) return NULL;
-	
-	// Authentication failure using cookie; reload cookie file and try again
-	if (!update_rpc_cookie(cfg)) return NULL;
-	return json_rpc_call(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req);
+json_t *bitcoind_json_rpc_call(CURL ** const curl, global_config_t * const cfg, const char * const rpc_req) {
+	return json_rpc_call_retry(curl, cfg->bitcoind_rpcurl, cfg->bitcoind_rpcuserpass, rpc_req, cfg);
 }

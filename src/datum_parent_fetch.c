@@ -99,7 +99,7 @@ static char *parent_fetch_rpc_request(const uint8_t parent_hash[32]) {
 }
 
 static uint8_t parent_fetch_get(
-	CURL * const curl, const T_DATUM_PARENT_FETCH_REQUEST * const request,
+	CURL ** const curl, const T_DATUM_PARENT_FETCH_REQUEST * const request,
 	uint8_t ** const block_out, size_t * const block_size_out) {
 	char *rpc = parent_fetch_rpc_request(request->parent_hash);
 	if (!rpc) return DATUM_PARENT_FETCH_STATUS_RPC_FAILED;
@@ -152,7 +152,7 @@ static void *datum_parent_fetch_worker(void *unused) {
 		uint8_t *block = NULL;
 		size_t block_size = 0;
 		const uint8_t status = parent_fetch_get(
-			curl, &request, &block, &block_size);
+			&curl, &request, &block, &block_size);
 		if (parent_fetch_reply) {
 			parent_fetch_reply(request.job_id, request.session_generation, status,
 				request.parent_hash, block, block_size);

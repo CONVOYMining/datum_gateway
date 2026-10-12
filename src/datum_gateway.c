@@ -86,6 +86,7 @@ void datum_blocktemplates_tests(void);
 void datum_coinbaser_tests(void);
 void datum_stratum_tests(void);
 void datum_conf_tests(void);
+void datum_jsonrpc_tests(void);
 void datum_parent_fetch_tests(void);
 void datum_pow_tests(void);
 void datum_protocol_tests(void);
@@ -113,6 +114,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 		case 0x101:  // test
 			datum_utils_tests();
 			datum_conf_tests();
+			datum_jsonrpc_tests();
 #ifdef ENABLE_API
 			datum_api_tests();
 #endif
