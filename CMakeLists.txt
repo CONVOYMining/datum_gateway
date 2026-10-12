@@ -67,12 +67,12 @@ set(WEB_RESOURCES
 )
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(CURL REQUIRED libcurl)
-pkg_check_modules(JANSSON REQUIRED jansson)
+pkg_check_modules(CURL REQUIRED libcurl>=7.12.1)
+pkg_check_modules(JANSSON REQUIRED jansson>=2.7)
 if(ENABLE_API)
-pkg_check_modules(MICROHTTPD REQUIRED libmicrohttpd)
+pkg_check_modules(MICROHTTPD REQUIRED libmicrohttpd>=0.9.71)
 endif()
-pkg_check_modules(SODIUM REQUIRED libsodium)
+pkg_check_modules(SODIUM REQUIRED libsodium>=1.0.7)
 find_package(Threads REQUIRED)
 
 include(CheckFunctionExists)
@@ -132,6 +132,7 @@ if(HAVE_EPOLL_WAIT)
 	set(EPOLL_SHIM_INCLUDE_DIRS "")
 	set(EPOLL_SHIM_LIBRARIES "")
 else()
+	# epoll-shim does not publish a version in its pkg-config metadata; its first tagged release provides all APIs used here.
 	pkg_check_modules(EPOLL_SHIM REQUIRED epoll-shim)
 endif()
 

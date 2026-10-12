@@ -550,7 +550,7 @@ static void datum_stratum_minimum_difficulty_configure_tests(void) {
 void datum_stratum_mod_username_tests() {
 	const char * const s_umods = "{\"x\":{\"addrA\": 0.3}, \"abc\":{\"addrB\":0.3,\"addrC\":0.3},\":)\":{\"\":0.5},\"a.c\":{\"addrD\":1.0}}";
 	json_error_t err;
-	json_t * const j_umods = JSON_LOADS(s_umods, &err);
+	json_t * const j_umods = json_loads(s_umods, 0, &err);
 	assert(j_umods);
 	struct datum_username_mod *umods = NULL;
 	int ret = datum_config_parse_username_mods(&umods, j_umods, false);

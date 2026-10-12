@@ -42,12 +42,7 @@
 #include "datum_conf.h"
 
 #ifndef JSON_INTEGER_IS_LONG_LONG
-#       error "Jansson 2.0 with long long support required!"
-#endif
-#if JANSSON_MAJOR_VERSION >= 2
-#define JSON_LOADS(str, err_ptr) json_loads((str), 0, (err_ptr))
-#else
-#define JSON_LOADS(str, err_ptr) json_loads((str), (err_ptr))
+	#error "Jansson with long long support required!"
 #endif
 
 // Legacy functions

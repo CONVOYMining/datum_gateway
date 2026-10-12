@@ -195,7 +195,7 @@ void datum_conf_test_parse_username_mods__(const unsigned int code_line, json_t 
 
 void datum_conf_test_parse_username_mods_(const unsigned int code_line, const char * const input, const int expected_ret, const struct datum_test_username_mods *expected_umods) {
 	json_error_t err;
-	json_t * const j_input = JSON_LOADS(input, &err);
+	json_t * const j_input = json_loads(input, 0, &err);
 	assert(j_input);
 	datum_conf_test_parse_username_mods__(code_line, j_input, input, expected_ret, expected_umods);
 }
