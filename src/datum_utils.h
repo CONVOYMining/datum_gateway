@@ -37,6 +37,7 @@
 #define _DATUM_UTILS_H_
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -130,6 +131,7 @@ bitcoin_difficulty_typ calc_network_difficulty_blake2b(uint32_t nbits);
 #define DATUM_FORMAT_DIFFICULTY_OUT_SZ 8
 int datum_format_difficulty(char *out, size_t out_size, bitcoin_difficulty_typ difficulty);
 bool buf_datum_format_difficulty(struct buf *, bitcoin_difficulty_typ diff);
+bool strncpy_printable(char *out, const char *in, size_t maxlen);
 unsigned char floorPoT(uint64_t x);
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]);
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]);
@@ -138,6 +140,17 @@ uint64_t datum_atoi_strict_u64(const char *s, size_t size);
 int datum_atoi_strict(const char *s, size_t size);
 bool datum_str_to_bool_strict(const char *s, bool *out);
 char **datum_deepcopy_charpp(const char * const *p);
+
+// A string that is never changed once made, shared by reference count
+typedef struct {
+	atomic_size_t refs;
+	char s[];
+} T_DATUM_REFSTR;
+
+T_DATUM_REFSTR *datum_refstr_new(const char *s);
+T_DATUM_REFSTR *datum_refstr_ref(T_DATUM_REFSTR *rs);
+void datum_refstr_unref(T_DATUM_REFSTR *rs);
+void datum_log_block_finder(const char *block_hash, uint32_t height, const T_DATUM_REFSTR *finder, bool empty_work);
 int datum_reexec_check(void);
 void datum_reexec();
 bool datum_secure_strequals(const char *secret, const size_t secret_len, const char *guess);

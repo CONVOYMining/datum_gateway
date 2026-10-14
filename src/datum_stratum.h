@@ -48,6 +48,8 @@
 	#include "datum_blocktemplates.h"
 #endif
 
+#include "datum_utils.h"
+
 #define MAX_STRATUM_JOBS 256
 
 #define MAX_COINBASE_TYPES 6
@@ -223,6 +225,11 @@ typedef struct {
 	char useragent[128];
 	char last_auth_username[192];
 	
+	// Describes this client for a block log line, made again only when the
+	// username it submits under changes (datum_stratum_client_finder)
+	T_DATUM_REFSTR *finder;
+	char finder_username[192];
+	
 	bool extension_minimum_difficulty;
 	double extension_minimum_difficulty_value;
 	
@@ -280,6 +287,7 @@ void stratum_job_merkle_root_calc(T_DATUM_STRATUM_JOB *s, unsigned char *coinbas
 int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce);
 size_t datum_stratum_coinbase_for_block_hex(char *out, size_t out_size, const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness);
 bool datum_stratum_block_needs_witness(const T_DATUM_STRATUM_JOB *job, bool subsidy_only);
+T_DATUM_REFSTR *datum_stratum_client_finder(T_DATUM_CLIENT_DATA *c, const char *username);
 size_t datum_stratum_build_block_request_parts(char *out, size_t out_size,
 	const uint8_t *block_header,
 	const uint8_t *coinbase_txn, size_t coinbase_txn_size, bool add_witness,

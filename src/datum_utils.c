@@ -614,6 +614,25 @@ bool strncpy_workerchars(char *out, const char *in, size_t maxlen) {
 	return true;
 }
 
+bool strncpy_printable(char *out, const char *in, size_t maxlen) {
+	// copy a string from in to out for the log, replacing anything outside
+	// printable ASCII with '?' so a client cannot put line breaks or terminal
+	// escapes into the log
+	// copy a max of maxlen-1 chars from in to out
+	size_t i = 0;
+
+	if (in == NULL || out == NULL || maxlen == 0) {
+		return false;
+	}
+
+	for (; in[i] != 0 && i + 1 < maxlen; i++) {
+		const unsigned char c = (unsigned char)in[i];
+		out[i] = (c >= 0x20 && c <= 0x7e) ? (char)c : '?';
+	}
+	out[i] = 0;
+	return true;
+}
+
 bool strncpy_uachars(char *out, const char *in, size_t maxlen) {
 	// copy a string from in to out, stripping out unwanted characters
 	// copy a max of maxlen chars from in to out
@@ -834,6 +853,31 @@ char **datum_deepcopy_charpp(const char * const * const p) {
 	}
 	assert(p3 - (char*)out == sz);
 	return out;
+}
+
+T_DATUM_REFSTR *datum_refstr_new(const char * const s) {
+	if (!s) return NULL;
+	const size_t sz = strlen(s) + 1;
+	T_DATUM_REFSTR * const rs = malloc(sizeof(*rs) + sz);
+	if (!rs) return NULL;
+	atomic_init(&rs->refs, 1);
+	memcpy(rs->s, s, sz);
+	return rs;
+}
+
+T_DATUM_REFSTR *datum_refstr_ref(T_DATUM_REFSTR * const rs) {
+	if (rs) atomic_fetch_add(&rs->refs, 1);
+	return rs;
+}
+
+void datum_refstr_unref(T_DATUM_REFSTR * const rs) {
+	if (rs && atomic_fetch_sub(&rs->refs, 1) == 1) free(rs);
+}
+
+// Name the client behind a found block, for both the local and the ABW path
+void datum_log_block_finder(const char * const block_hash, const uint32_t height, const T_DATUM_REFSTR * const finder, const bool empty_work) {
+	if (!finder) return;
+	DLOG_WARN("Block %s at height %lu found by %s%s", block_hash, (unsigned long)height, finder->s, empty_work ? " on empty work" : "");
 }
 
 static

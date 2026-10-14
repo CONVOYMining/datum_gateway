@@ -161,6 +161,7 @@ int datum_protocol_pow_submit(
 	const T_DATUM_CLIENT_DATA *c,
 	const T_DATUM_STRATUM_JOB *job,
 	const char *username,
+	T_DATUM_REFSTR *finder,
 	const bool was_block,
 	const bool subsidy_only,
 	const bool quickdiff,

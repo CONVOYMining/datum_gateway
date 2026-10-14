@@ -348,8 +348,15 @@ double datum_stratum_v1_est_total_th_sec(void) {
 	return thr;
 }
 
+static void datum_stratum_client_forget_finder(T_DATUM_MINER_DATA * const m) {
+	datum_refstr_unref(m->finder);
+	m->finder = NULL;
+	m->finder_username[0] = 0;
+}
+
 void datum_stratum_v1_socket_thread_client_closed(T_DATUM_CLIENT_DATA *c, const char *msg) {
 	DLOG_DEBUG("Stratum client connection closed. (%s)", msg);
+	if (c->app_client_data) datum_stratum_client_forget_finder(c->app_client_data);
 }
 
 void datum_stratum_v1_socket_thread_client_new(T_DATUM_CLIENT_DATA *c) {
@@ -1046,6 +1053,35 @@ static void stratum_note_share(T_DATUM_MINER_DATA *m, bool accepted, uint64_t di
 	}
 }
 
+// Name the client behind a block for the log, for the local path below and
+// for the ABW candidates datum_protocol.c keeps until the pool reveals them.
+// It is made again only when the username changes, so a candidate holds a
+// reference rather than a copy. The username comes straight from
+// mining.submit, so it is filtered here and cut to finder_username's size;
+// the user agent was already filtered by strncpy_uachars at subscribe.
+// The client keeps the reference. NULL if it could not be made.
+T_DATUM_REFSTR *datum_stratum_client_finder(T_DATUM_CLIENT_DATA *c, const char *username) {
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	char who[sizeof(m->finder_username)];
+	char desc[320];
+	
+	if (!username) username = "NULL";
+	if (m->finder && !strncmp(m->finder_username, username, sizeof(m->finder_username) - 1)) {
+		return m->finder;
+	}
+	datum_stratum_client_forget_finder(m);
+	strncpy_printable(who, username, sizeof(who));
+	if (snprintf(desc, sizeof(desc), "%s from %s (client %d/%d, session %08x, agent %s)", who, c->rem_host, c->datum_thread->thread_id, c->cid, m->sid, m->useragent[0] ? m->useragent : "unknown") < 0) {
+		return NULL;
+	}
+	m->finder = datum_refstr_new(desc);
+	if (m->finder) {
+		strncpy(m->finder_username, username, sizeof(m->finder_username) - 1);
+		m->finder_username[sizeof(m->finder_username) - 1] = 0;
+	}
+	return m->finder;
+}
+
 int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
 	// {"params": ["username", "job", "extranonce2", "time", "nonce"], "id": 1, "method": "mining.submit"}
 	// 0 = username
@@ -1231,6 +1267,10 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		}
 	}
 	
+	// As sent, before any username modifier, so the client description
+	// stays the same while a modifier rotates the name
+	const char * const submitted_username = username_s;
+	
 	if (datum_config.stratum_username_mod) {
 		const char * const tilde = strchr(username_s, '~');
 		if (tilde) {
@@ -1250,9 +1290,11 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		DLOG_WARN("************************************************************************************************");
 		DLOG_WARN("******** BLOCK FOUND - %s ********", new_notify_blockhash);
 		DLOG_WARN("************************************************************************************************");
+		T_DATUM_REFSTR * const finder = datum_stratum_client_finder(c, submitted_username);
+		datum_log_block_finder(new_notify_blockhash, (uint32_t)job->height, finder, empty_work);
 		
 		if (job->is_datum_job) {
-			(void)datum_protocol_pow_submit(c, job, username_s, true,
+			(void)datum_protocol_pow_submit(c, job, username_s, finder, true,
 				empty_work, quickdiff, block_header, job_diff,
 				full_cb_txn, full_cb_txn_size, share_hash, cb,
 				extranonce_bin, coinbase_index);
@@ -1317,7 +1359,8 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	
 	// work accepted
 	if (job->is_datum_job && !was_block && datum_protocol_pow_submit(c, job,
-		username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
+		username_s, datum_stratum_client_finder(c, submitted_username),
+		false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
 		full_cb_txn_size, share_hash, cb, extranonce_bin,
 		coinbase_index) != 0) {
 		send_unknown_work_error(c, id);

@@ -210,6 +210,56 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	global_cur_stratum_jobs[0] = saved_job;
 }
 
+static void datum_stratum_client_finder_tests(void) {
+	// Only thread_id is read from the (very large) thread data
+	T_DATUM_THREAD_DATA * const thread = calloc(1, sizeof(*thread));
+	T_DATUM_CLIENT_DATA client = {0};
+	T_DATUM_MINER_DATA miner = {
+		.sid = 0x00400001,
+		.useragent = "test/1.0",
+	};
+	char long_name[300];
+	
+	if (!datum_test(thread != NULL)) return;
+	thread->thread_id = 2;
+	client.datum_thread = thread;
+	client.cid = 5;
+	client.app_client_data = &miner;
+	strcpy(client.rem_host, "192.0.2.1");
+	
+	T_DATUM_REFSTR * const first = datum_stratum_client_finder(&client, "worker\n1");
+	datum_test(first && !strcmp(first->s, "worker?1 from 192.0.2.1 (client 2/5, session 00400001, agent test/1.0)"));
+	datum_test(datum_stratum_client_finder(&client, "worker\n1") == first);
+	datum_test(first && atomic_load(&first->refs) == 1);
+	
+	// A candidate holding the old description keeps it when the name changes
+	datum_refstr_ref(first);
+	T_DATUM_REFSTR * const second = datum_stratum_client_finder(&client, "worker\n12");
+	datum_test(second && second != first && !strncmp(second->s, "worker?12 from ", 15));
+	datum_test(first && atomic_load(&first->refs) == 1);
+	datum_test(first && !strncmp(first->s, "worker?1 from ", 14));
+	datum_refstr_unref(first);
+	
+	T_DATUM_REFSTR * const null_name = datum_refstr_ref(datum_stratum_client_finder(&client, NULL));
+	datum_test(null_name && !strncmp(null_name->s, "NULL from ", 10));
+	
+	// Only the part of the name that reaches the description is compared
+	memset(long_name, 'a', sizeof(long_name) - 1);
+	long_name[sizeof(long_name) - 1] = 0;
+	T_DATUM_REFSTR * const long_desc = datum_refstr_ref(datum_stratum_client_finder(&client, long_name));
+	datum_test(long_desc && long_desc != null_name);
+	long_name[sizeof(miner.finder_username) - 1] = 'b';
+	datum_test(datum_stratum_client_finder(&client, long_name) == long_desc);
+	long_name[sizeof(miner.finder_username) - 2] = 'b';
+	datum_test(datum_stratum_client_finder(&client, long_name) != long_desc);
+	
+	datum_stratum_v1_socket_thread_client_closed(&client, "test");
+	datum_test(!miner.finder && !miner.finder_username[0]);
+	datum_refstr_unref(null_name);
+	datum_refstr_unref(long_desc);
+	free(thread);
+}
+
 static void datum_blake2b_coinbase_selection_tests(void) {
 	T_DATUM_STRATUM_THREADPOOL_DATA *sdata = calloc(1, sizeof(*sdata));
 	T_DATUM_STRATUM_JOB job = {0};
@@ -694,6 +744,7 @@ void datum_stratum_tests(void) {
 	datum_stratum_mod_username_tests();
 	datum_stratum_minimum_difficulty_configure_tests();
 	datum_stratum_string_request_id_tests();
+	datum_stratum_client_finder_tests();
 	datum_blake2b_coinbase_selection_tests();
 	datum_stratum_coinbaser_ready_tests();
 	datum_stratum_new_thread_job_tests();

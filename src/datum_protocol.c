@@ -706,6 +706,8 @@ typedef struct {
 	T_DATUM_ABW_TEMPLATE *block_template;
 	bool subsidy_only;
 	bool pool_handled;
+	uint32_t height;
+	T_DATUM_REFSTR *finder;
 } T_DATUM_ABW_PENDING;
 
 static pthread_mutex_t datum_abw_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -738,6 +740,7 @@ static void datum_protocol_abw_deactivate(void) {
 static void datum_protocol_abw_pending_clear(T_DATUM_ABW_PENDING *pending) {
 	if (!pending) return;
 	free(pending->coinbase);
+	datum_refstr_unref(pending->finder);
 	if (pending->block_template && pending->block_template->refs) {
 		pending->block_template->refs--;
 		if (!pending->block_template->refs) {
@@ -860,11 +863,13 @@ static bool datum_protocol_abw_template_matches_source(
 }
 
 // Caller holds datum_abw_mutex and transfers ownership of coinbase.
+// finder describes the client for the log; the entry keeps a reference.
 static void datum_protocol_abw_populate_pending(
 	T_DATUM_ABW_PENDING *pending, T_DATUM_ABW_TEMPLATE *block_template,
 	const T_DATUM_PROTOCOL_POW *pow, unsigned char *coinbase,
 	size_t coinbase_size, const unsigned char raw_pow_hash[32],
-	const unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE]) {
+	const unsigned char block_header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE],
+	T_DATUM_REFSTR *finder) {
 	pending->assignment_id = pow->abw_assignment_id;
 	pending->nonce = (uint32_t)pow->nonce;
 	pending->target_pot = pow->target_byte;
@@ -875,6 +880,8 @@ static void datum_protocol_abw_populate_pending(
 		DATUM_BLAKE2B_BLOCK_HEADER_SIZE);
 	pending->coinbase = coinbase;
 	pending->coinbase_size = coinbase_size;
+	pending->finder = datum_refstr_ref(finder);
+	pending->height = (uint32_t)pow->sjob->height;
 	pending->block_template = block_template;
 	pending->subsidy_only = pow->subsidy_only;
 	if (block_template) block_template->refs++;
@@ -882,7 +889,7 @@ static void datum_protocol_abw_populate_pending(
 
 bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	const unsigned char *full_cb_tx, size_t full_cb_tx_size,
-	const unsigned char *raw_pow_hash) {
+	const unsigned char *raw_pow_hash, T_DATUM_REFSTR *finder) {
 	static const unsigned char no_xor_key[16] = {0};
 	if (!pow || !pow->sjob || !pow->sjob->block_template ||
 	    !full_cb_tx || !raw_pow_hash || !pow->abw_assignment_id ||
@@ -945,13 +952,13 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	}
 	if (pending && block_template) {
 		datum_protocol_abw_populate_pending(pending, block_template, pow,
-			coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+			coinbase, full_cb_tx_size, raw_pow_hash, block_header, finder);
 		pthread_mutex_unlock(&datum_abw_mutex);
 		return true;
 	}
 	if (pending && pow->subsidy_only) {
 		datum_protocol_abw_populate_pending(pending, NULL, pow,
-			coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+			coinbase, full_cb_tx_size, raw_pow_hash, block_header, finder);
 		pthread_mutex_unlock(&datum_abw_mutex);
 		return true;
 	}
@@ -1044,7 +1051,7 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	}
 	free(transactions_hex);
 	datum_protocol_abw_populate_pending(pending, block_template, pow,
-		coinbase, full_cb_tx_size, raw_pow_hash, block_header);
+		coinbase, full_cb_tx_size, raw_pow_hash, block_header, finder);
 	pthread_mutex_unlock(&datum_abw_mutex);
 	return true;
 }
@@ -1160,7 +1167,8 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 static char *datum_protocol_abw_take_revealed_candidate_locked(
 	uint8_t assignment_id, const unsigned char xor_key[16],
 	const unsigned char expected_pow_hash[32], char block_hash[65],
-	bool *pool_handled) {
+	bool *pool_handled, T_DATUM_REFSTR **finder, uint32_t *height,
+	bool *subsidy_only) {
 	for (size_t i = 0; i < DATUM_ABW_PENDING_CACHE; ++i) {
 		T_DATUM_ABW_PENDING *pending = &datum_abw_pending[i];
 		if (pending->assignment_id != assignment_id) continue;
@@ -1210,6 +1218,12 @@ static char *datum_protocol_abw_take_revealed_candidate_locked(
 			pending->raw_pow_hash, pending->xor_clear_bits, xor_key,
 			actual_pow_hash, block_hash)) {
 			if (pool_handled) *pool_handled = pending->pool_handled;
+			if (finder) {
+				*finder = pending->finder;
+				pending->finder = NULL;
+			}
+			if (height) *height = pending->height;
+			if (subsidy_only) *subsidy_only = pending->subsidy_only;
 			datum_protocol_abw_pending_clear(pending);
 			return candidate;
 		}
@@ -1260,11 +1274,17 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 	while (true) {
 		char block_hash[65] = {0};
 		bool pool_handled = false;
+		T_DATUM_REFSTR *finder = NULL;
+		uint32_t height = 0;
+		bool subsidy_only = false;
 		pthread_mutex_lock(&datum_abw_mutex);
 		char *block_request = datum_protocol_abw_take_revealed_candidate_locked(
-			assignment_id, data + 2, NULL, block_hash, &pool_handled);
+			assignment_id, data + 2, NULL, block_hash, &pool_handled, &finder,
+			&height, &subsidy_only);
 		pthread_mutex_unlock(&datum_abw_mutex);
 		if (!block_request) break;
+		datum_log_block_finder(block_hash, height, finder, subsidy_only);
+		datum_refstr_unref(finder);
 		const bool pool_ignored = datum_config.mining_abw_verify_all_shares_on_disclosure && !pool_handled;
 		if (datum_submitblock_trigger_owned(block_request, block_hash)) {
 			++submitted;
@@ -2664,6 +2684,7 @@ int datum_protocol_pow_submit(
 	const T_DATUM_CLIENT_DATA *c,
 	const T_DATUM_STRATUM_JOB *job,
 	const char *username,
+	T_DATUM_REFSTR *finder,
 	const bool was_block,
 	const bool subsidy_only,
 	const bool quickdiff,
@@ -2711,7 +2732,7 @@ int datum_protocol_pow_submit(
 		return -1;
 	}
 	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
-		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
+		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash, finder)) {
 		atomic_store(&datum_abw_health_latched, false);
 		DLOG_ERROR("Could not retain anti-withholding candidate; non-disclosure detection is compromised");
 	}

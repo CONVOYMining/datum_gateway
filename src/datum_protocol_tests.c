@@ -1214,7 +1214,10 @@ static void datum_protocol_abw_cache_tests(void) {
 	pow.target_byte = 10;
 	pow.nonce = 7;
 	pow.ntime = 1000;
-	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash));
+	T_DATUM_REFSTR * const finder = datum_refstr_new("tester from 192.0.2.1 (client 0/1, session 00400001, agent test)");
+	datum_test(finder);
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash, finder));
+	datum_test(finder && atomic_load(&finder->refs) == 2);
 	
 	datum_config.mining_abw_verify_all_shares_on_disclosure = true;
 	unsigned char receipt[35] = {DATUM_ABW_DRAFT_REVISION, 3};
@@ -1226,7 +1229,7 @@ static void datum_protocol_abw_cache_tests(void) {
 	unsigned char second_hash[32];
 	memset(second_hash, 0xfe, sizeof(second_hash));
 	pow.nonce++;
-	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), second_hash));
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), second_hash, NULL));
 	datum_config.mining_abw_verify_all_shares_on_disclosure = false;
 	memcpy(pow.raw_pow_hash, second_hash, sizeof(pow.raw_pow_hash));
 	static const unsigned char replay_message[] = {0x27, 0xFE};
@@ -1248,7 +1251,7 @@ static void datum_protocol_abw_cache_tests(void) {
 	memset(subsidy_hash, 0xfc, sizeof(subsidy_hash));
 	pow.subsidy_only = true;
 	pow.nonce++;
-	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), subsidy_hash));
+	datum_test(datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), subsidy_hash, NULL));
 	pow.subsidy_only = false;
 	
 	unsigned char zero_hash[32] = {0};
@@ -1259,13 +1262,17 @@ static void datum_protocol_abw_cache_tests(void) {
 	pow.subsidy_only = true;
 	pow.nonce++;
 	datum_test(datum_protocol_abw_cache_candidate(
-		&pow, coinbase, sizeof(coinbase), timely_hash));
+		&pow, coinbase, sizeof(coinbase), timely_hash, finder));
+	datum_test(finder && atomic_load(&finder->refs) == 3);
 	pow.subsidy_only = false;
 	
 	datum_config.mining_abw_verify_all_shares_on_disclosure = true;
 	atomic_store(&new_notify_threadsafe, 0);
 	new_notify_blockhash[0] = '\0';
 	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == -1);
+	/* Both candidates are gone: one was the block, the other was not. */
+	datum_test(finder && atomic_load(&finder->refs) == 1);
+	datum_refstr_unref(finder);
 	datum_test(atomic_load(&new_notify_threadsafe));
 	datum_test(!strcmp((const char *)new_notify_blockhash,
 		"0000000000000000000000000000000000000000000000000000000000000000"));
@@ -1273,7 +1280,7 @@ static void datum_protocol_abw_cache_tests(void) {
 	atomic_store(&new_notify_threadsafe, 0);
 	new_notify_blockhash[0] = '\0';
 	datum_test(datum_protocol_abw_assignment_revealed(4));
-	datum_test(!datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash));
+	datum_test(!datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash, NULL));
 	reveal[18] = 0;
 	datum_test(!datum_protocol_abw_reveal(sizeof(reveal), reveal));
 	reveal[18] = 0xFE;
@@ -1298,7 +1305,7 @@ static void datum_protocol_abw_cache_tests(void) {
 	datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
 		datum_protocol_test_pow_handler) == 0);
 	datum_protocol_test_pow_handler_count = 0;
-	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, true,
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", NULL, false, true,
 		false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
 		extranonce, 0xff) == 0);
 	datum_test(datum_queue_process(&pow_queue) == 1);
