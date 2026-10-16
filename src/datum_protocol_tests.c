@@ -980,6 +980,8 @@ static void datum_protocol_resume_tests(void) {
 
 static void datum_protocol_migration_tests(void) {
 	global_config_t saved_config = datum_config;
+	datum_protocol_reset_pool_failover();
+	datum_config.datum_pool_host_secondary[0] = '\0';
 	unsigned char payload[192] = {0};
 	unsigned char command[193] = {0xA4};
 	unsigned char home_payload[192] = {0};
@@ -1630,6 +1632,149 @@ static void datum_protocol_job_validation_bounds_test(void) {
 	free(req);
 }
 
+static void datum_protocol_failover_tests(void) {
+	global_config_t saved_config = datum_config;
+	char endpoint[sizeof(datum_config.datum_pool_host)];
+	char endpoint_pubkey[sizeof(datum_config.datum_pool_pubkey)];
+	char primary_pk[129];
+	char secondary_pk[129];
+	char bad_pk[129];
+	int port;
+	T_DATUM_POOL_ENDPOINT_VIEW active;
+	
+	memset(primary_pk, 'a', 128);
+	primary_pk[128] = '\0';
+	memset(secondary_pk, 'b', 128);
+	secondary_pk[128] = '\0';
+	memset(bad_pk, 'g', 128);
+	bad_pk[128] = '\0';
+	datum_test(datum_pubkey_hex_is_valid(primary_pk));
+	datum_test(datum_pubkey_hex_is_valid(secondary_pk));
+	datum_test(!datum_pubkey_hex_is_valid(bad_pk));
+	datum_test(!datum_pubkey_hex_is_valid(""));
+	datum_test(!datum_pubkey_hex_is_valid("abcd"));
+	
+	datum_protocol_reset_pool_failover();
+	strcpy(datum_config.datum_pool_host, "primary.example");
+	datum_config.datum_pool_port = 28915;
+	strcpy(datum_config.datum_pool_pubkey, primary_pk);
+	datum_config.datum_pool_host_secondary[0] = '\0';
+	datum_config.datum_pool_port_secondary = 28916;
+	datum_config.datum_pool_pubkey_secondary[0] = '\0';
+	datum_config.datum_pool_migration_host[0] = '\0';
+	datum_config.datum_pool_migration_port = 0;
+	datum_config.datum_pool_migration_pubkey[0] = '\0';
+	
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "primary.example"));
+	datum_test(port == 28915);
+	datum_protocol_note_pool_down(DATUM_POOL_ENDPOINT_PRIMARY);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "primary.example"));
+	
+	strcpy(datum_config.datum_pool_host_secondary, "secondary.example");
+	strcpy(datum_config.datum_pool_pubkey_secondary, secondary_pk);
+	datum_protocol_reset_pool_failover();
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "primary.example"));
+	datum_test(!strcmp(endpoint_pubkey, primary_pk));
+	datum_protocol_active_pool(&active);
+	datum_test(active.role == DATUM_POOL_ENDPOINT_PRIMARY);
+	
+	datum_protocol_note_pool_down(DATUM_POOL_ENDPOINT_PRIMARY);
+	datum_protocol_active_pool(&active);
+	datum_test(active.role == DATUM_POOL_ENDPOINT_SECONDARY);
+	datum_test(!strcmp(active.host, "secondary.example"));
+	datum_test(active.port == 28916);
+	datum_test(!strcmp(active.pubkey, secondary_pk));
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "secondary.example"));
+	datum_test(port == 28916);
+	datum_test(!strcmp(endpoint_pubkey, secondary_pk));
+	
+	strcpy(datum_config.datum_pool_migration_host, "mig.example");
+	datum_config.datum_pool_migration_port = 1111;
+	strcpy(datum_config.datum_pool_migration_pubkey, primary_pk);
+	datum_test(datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "mig.example"));
+	datum_test(port == 1111);
+	datum_protocol_active_pool(&active);
+	datum_test(active.role == DATUM_POOL_ENDPOINT_MIGRATION);
+	datum_test(!datum_config.datum_pool_migration_host[0]);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "secondary.example"));
+	
+	datum_protocol_note_pool_down(DATUM_POOL_ENDPOINT_SECONDARY);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "primary.example"));
+	datum_test(port == 28915);
+	datum_protocol_note_pool_down(DATUM_POOL_ENDPOINT_MIGRATION);
+	datum_test(!datum_protocol_take_connect_endpoint(
+		endpoint, sizeof(endpoint), &port,
+		endpoint_pubkey, sizeof(endpoint_pubkey)));
+	datum_test(!strcmp(endpoint, "primary.example"));
+	
+	{
+		unsigned char migrate[160];
+		const char mig_host[] = "mig-away.example";
+		size_t n = 0;
+		const unsigned char bad_migrate[] = {1, 0, 0xFE};
+		
+		datum_protocol_reset_pool_failover();
+		datum_config.datum_pool_migration_host[0] = '\0';
+		datum_config.datum_pool_migration_port = 0;
+		datum_config.datum_pool_migration_pubkey[0] = '\0';
+		datum_config.datum_pool_migration_deadline_ms = 0;
+		datum_config.datum_pool_migration_max_seconds = 86400;
+		migrate[n++] = 0;
+		migrate[n++] = 0;
+		pk_u16le(migrate, n, sizeof(mig_host) - 1); n += 2;
+		memcpy(migrate + n, mig_host, sizeof(mig_host) - 1); n += sizeof(mig_host) - 1;
+		pk_u16le(migrate, n, 29634); n += 2;
+		for (size_t j = 0; j < 64; ++j) migrate[n++] = (unsigned char)j;
+		migrate[n++] = 0xFE;
+		
+		datum_test(datum_protocol_migration_request((int)n, migrate) == -1);
+		datum_test(!datum_protocol_session_failure_switches_pool(false, false));
+		datum_protocol_active_pool(&active);
+		datum_test(active.role == DATUM_POOL_ENDPOINT_PRIMARY);
+		datum_test(datum_protocol_take_connect_endpoint(
+			endpoint, sizeof(endpoint), &port,
+			endpoint_pubkey, sizeof(endpoint_pubkey)));
+		datum_test(!strcmp(endpoint, mig_host));
+		datum_test(!datum_protocol_take_connect_endpoint(
+			endpoint, sizeof(endpoint), &port,
+			endpoint_pubkey, sizeof(endpoint_pubkey)));
+		datum_test(!strcmp(endpoint, "primary.example"));
+		datum_test(port == 28915);
+		
+		datum_test(datum_protocol_migration_request(
+			(int)sizeof(bad_migrate), bad_migrate) == 0);
+		datum_test(datum_protocol_session_failure_switches_pool(false, false));
+		datum_test(!datum_protocol_session_failure_switches_pool(true, false));
+		datum_test(!datum_protocol_session_failure_switches_pool(false, true));
+		datum_protocol_active_pool(&active);
+		datum_test(active.role == DATUM_POOL_ENDPOINT_PRIMARY);
+	}
+	
+	datum_protocol_reset_pool_failover();
+	datum_config = saved_config;
+}
+
 void datum_protocol_tests(void) {
 	datum_protocol_hello_framing_offer_tests();
 	datum_protocol_receive_mode_tests();
@@ -1639,6 +1784,7 @@ void datum_protocol_tests(void) {
 	datum_protocol_acceptance_watchdog_tests();
 	datum_protocol_config_v3_tests();
 	datum_protocol_migration_tests();
+	datum_protocol_failover_tests();
 	datum_protocol_bulk_tests();
 	datum_protocol_resume_tests();
 	datum_protocol_abw_cache_tests();

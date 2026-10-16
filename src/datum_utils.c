@@ -176,6 +176,14 @@ unsigned char hex2bin_uchar(const char *in) {
 	return hex_lookup[i];
 }
 
+bool datum_pubkey_hex_is_valid(const char *input) {
+	if (!input || strlen(input) != 128) return false;
+	for (size_t i = 0; i < 128; ++i) {
+		if (!isxdigit((unsigned char)input[i])) return false;
+	}
+	return true;
+}
+
 void uchar_to_hex(char *s, const unsigned char b) {
 	// place the ASCII hexidecimal value for the unsigned char into the string at ptr s
 	// this does NOT null terminate the string!

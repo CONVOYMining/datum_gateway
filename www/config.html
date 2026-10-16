@@ -188,22 +188,46 @@
 				<h2>Pool</h2>
 				<div class="setting-row">
 					<div class="flex-row">
-						<label for="datum_pool_host" class="label">Host:</label>
+						<label for="datum_pool_host" class="label">Primary host:</label>
 						<input maxlength="1023" name="datum_pool_host" id="datum_pool_host" value="${*datum_pool_host}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
 						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 				<div class="setting-row">
 					<div class="flex-row">
-						<label for="datum_pool_port" class="label">Port:</label>
+						<label for="datum_pool_port" class="label">Primary port:</label>
 						<input maxlength="5" name="datum_pool_port" id="datum_pool_port" value="${datum_pool_port}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
 						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>
 				<div class="setting-row">
 					<div class="flex-row">
-						<label for="datum_pool_pubkey" class="label">Pubkey:</label>
+						<label for="datum_pool_pubkey" class="label">Primary pubkey:</label>
 						<input maxlength="1023" name="datum_pool_pubkey" id="datum_pool_pubkey" value="${datum_pool_pubkey}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+					</div>
+				</div>
+				<div class="setting-row">
+					<label for="datum_pool_host_secondary" class="tip">If the primary pool cannot be reached, the gateway uses the secondary host. It stays with whichever pool is connected, and tries the other one after that connection fails. Leave the secondary host blank to disable failover.</label>
+				</div>
+				<div class="setting-row">
+					<div class="flex-row">
+						<label for="datum_pool_host_secondary" class="label">Secondary host:</label>
+						<input maxlength="1023" name="datum_pool_host_secondary" id="datum_pool_host_secondary" value="${datum_pool_host_secondary}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+					</div>
+				</div>
+				<div class="setting-row">
+					<div class="flex-row">
+						<label for="datum_pool_port_secondary" class="label">Secondary port:</label>
+						<input maxlength="5" name="datum_pool_port_secondary" id="datum_pool_port_secondary" value="${datum_pool_port_secondary}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
+						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+					</div>
+				</div>
+				<div class="setting-row">
+					<div class="flex-row">
+						<label for="datum_pool_pubkey_secondary" class="label">Secondary pubkey:</label>
+						<input maxlength="1023" name="datum_pool_pubkey_secondary" id="datum_pool_pubkey_secondary" value="${datum_pool_pubkey_secondary}" data-restart-required aria-describedby="restart-required-description${*restart_warning_aria_id}"${*restart_ro}></input>
 						<svg class="restart-symbol restart-field-icon" viewBox="0 0 24 24" aria-hidden="true"><title>Changing this setting requires restarting DATUM Gateway when saved.</title><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
 					</div>
 				</div>

@@ -162,6 +162,10 @@ typedef struct {
 	
 	char datum_pool_host[1024];
 	int datum_pool_port;
+	char datum_pool_pubkey[1024];
+	char datum_pool_host_secondary[1024];
+	int datum_pool_port_secondary;
+	char datum_pool_pubkey_secondary[1024];
 	char datum_pool_migration_host[1024];
 	int datum_pool_migration_port;
 	char datum_pool_migration_pubkey[129];
@@ -170,7 +174,6 @@ typedef struct {
 	bool datum_pool_pass_workers;
 	bool datum_pool_pass_full_users;
 	bool datum_pooled_mining_only;
-	char datum_pool_pubkey[1024];
 	int datum_protocol_global_timeout;
 	uint64_t datum_protocol_global_timeout_ms;
 	

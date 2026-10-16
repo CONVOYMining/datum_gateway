@@ -77,6 +77,7 @@ uint64_t current_time_millis(void);
 uint64_t current_time_micros(void);
 uint64_t get_process_uptime_seconds(void);
 unsigned char hex2bin_uchar(const char *in);
+bool datum_pubkey_hex_is_valid(const char *input);
 void build_hex_lookup(void);
 bool my_sha256(void *digest, const void *buffer, size_t length);
 void nbits_to_target(uint32_t nbits, uint8_t *target);
