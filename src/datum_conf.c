@@ -186,6 +186,15 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.datum_pool_port, .default_int = 28915 },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "datum", 		.name = "pool_pubkey",					.description = "Public key of the DATUM server for initiating encrypted connection. Get from secure location, or set to empty to auto-fetch.",
 		.required = false, .ptr = datum_config.datum_pool_pubkey,		.default_string[0] = "dbb11fa0c2b5403e4f798fa6071bb97e6079d219598366032fdf2ae01962b13c5e66e2be7d6b008f0b2603f3e6f6fc64768fa786c8129c46d3e30a5867734b62", .max_string_len = sizeof(datum_config.datum_pool_pubkey) },
+	{ .var_type = DATUM_CONF_STRING, 	.category = "datum", 		.name = "pool_host_secondary",			.description = "Backup DATUM server host/ip. Used when the primary pool cannot be reached. The gateway stays with whichever pool is connected, and tries the other after that connection fails. Empty disables failover.",
+		.example_default = true,
+		.required = false, .ptr = datum_config.datum_pool_host_secondary,	.default_string[0] = "", .max_string_len = sizeof(datum_config.datum_pool_host_secondary) },
+	{ .var_type = DATUM_CONF_INT, 		.category = "datum",		.name = "pool_port_secondary",			.description = "Backup DATUM server port",
+		.example_default = true,
+		.required = false, .ptr = &datum_config.datum_pool_port_secondary, .default_int = 28915 },
+	{ .var_type = DATUM_CONF_STRING, 	.category = "datum", 		.name = "pool_pubkey_secondary",		.description = "Public key of the backup DATUM server. Required when pool_host_secondary is set.",
+		.example_default = true,
+		.required = false, .ptr = datum_config.datum_pool_pubkey_secondary,	.default_string[0] = "", .max_string_len = sizeof(datum_config.datum_pool_pubkey_secondary) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "datum", 		.name = "migration_max_seconds",		.description = "Maximum time to remain away from the configured DATUM server after a server-requested migration (0 disables migration)",
 		.example_default = true,
 		.required = false, .ptr = &datum_config.datum_pool_migration_max_seconds, .default_int = 86400 },
@@ -742,6 +751,16 @@ int datum_read_config(const char *conffile) {
 	if (datum_config.datum_pool_host[0] == '\0' && datum_config.datum_pooled_mining_only == true) {
 		DLOG_FATAL("Pooled mining only is set to true, but pool host is not specified.");
 		return 0;
+	}
+	if (datum_config.datum_pool_host_secondary[0] != '\0') {
+		if (datum_config.datum_pool_port_secondary < 1 || datum_config.datum_pool_port_secondary > 65535) {
+			DLOG_FATAL("datum.pool_port_secondary must be between 1 and 65535");
+			return 0;
+		}
+		if (!datum_pubkey_hex_is_valid(datum_config.datum_pool_pubkey_secondary)) {
+			DLOG_FATAL("datum.pool_pubkey_secondary must be 128 hexadecimal characters when datum.pool_host_secondary is set");
+			return 0;
+		}
 	}
 	
 	// Save some multiplication later

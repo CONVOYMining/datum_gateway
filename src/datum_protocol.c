@@ -109,6 +109,7 @@ pthread_mutex_t datum_protocol_sender_stage1_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t datum_protocol_send_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t datum_protocol_migration_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t datum_protocol_current_migration_deadline_ms;
+static bool datum_protocol_intentional_reconnect;
 
 #define DATUM_BULK_QUEUE_CAPACITY 2
 typedef struct {
@@ -2105,6 +2106,11 @@ static void datum_protocol_log_migration_target(
 		(unsigned int)port);
 }
 
+static int datum_protocol_reconnect_for_migration(void) {
+	datum_protocol_intentional_reconnect = true;
+	return -1;
+}
+
 int datum_protocol_migration_request(int len, const unsigned char *data) {
 	size_t host_len;
 	size_t expected_len;
@@ -2135,7 +2141,7 @@ int datum_protocol_migration_request(int len, const unsigned char *data) {
 		datum_protocol_current_migration_deadline_ms = 0;
 		pthread_mutex_unlock(&datum_protocol_migration_lock);
 		DLOG_INFO("DATUM server requested return to configured server");
-		return -1;
+		return datum_protocol_reconnect_for_migration();
 	}
 	
 	// revision=0 | action=0 | host_len:u16 | host | port:u16 | pubkey:64 | FE
@@ -2176,7 +2182,7 @@ int datum_protocol_migration_request(int len, const unsigned char *data) {
 		if (deadline_ms <= current_time_millis()) {
 			pthread_mutex_unlock(&datum_protocol_migration_lock);
 			DLOG_WARN("Ignoring DATUM redirect because the migration time limit expired");
-			return -1;
+			return datum_protocol_reconnect_for_migration();
 		}
 	}
 	memcpy(datum_config.datum_pool_migration_host, data + 4, host_len);
@@ -2188,7 +2194,101 @@ int datum_protocol_migration_request(int len, const unsigned char *data) {
 	
 	datum_protocol_log_migration_target(
 		"DATUM server requested migration to", data + 4, host_len, port);
-	return -1;
+	return datum_protocol_reconnect_for_migration();
+}
+
+static T_DATUM_POOL_ENDPOINT_ROLE datum_pool_failover_role = DATUM_POOL_ENDPOINT_PRIMARY;
+static T_DATUM_POOL_ENDPOINT_VIEW datum_pool_active;
+
+static bool datum_protocol_secondary_configured(void) {
+	return datum_config.datum_pool_host_secondary[0] != '\0';
+}
+
+static void datum_protocol_store_endpoint_locked(
+	const char *host, int port, const char *pubkey, T_DATUM_POOL_ENDPOINT_ROLE role) {
+	snprintf(datum_pool_active.host, sizeof(datum_pool_active.host), "%s", host ? host : "");
+	datum_pool_active.port = port;
+	snprintf(datum_pool_active.pubkey, sizeof(datum_pool_active.pubkey), "%s", pubkey ? pubkey : "");
+	datum_pool_active.role = datum_pool_active.host[0] ? role : DATUM_POOL_ENDPOINT_NONE;
+}
+
+static void datum_protocol_store_configured_locked(T_DATUM_POOL_ENDPOINT_ROLE role) {
+	if (role == DATUM_POOL_ENDPOINT_SECONDARY && datum_protocol_secondary_configured()) {
+		datum_pool_failover_role = DATUM_POOL_ENDPOINT_SECONDARY;
+		datum_protocol_store_endpoint_locked(
+			datum_config.datum_pool_host_secondary,
+			datum_config.datum_pool_port_secondary,
+			datum_config.datum_pool_pubkey_secondary,
+			DATUM_POOL_ENDPOINT_SECONDARY);
+		return;
+	}
+	datum_pool_failover_role = DATUM_POOL_ENDPOINT_PRIMARY;
+	datum_protocol_store_endpoint_locked(
+		datum_config.datum_pool_host,
+		datum_config.datum_pool_port,
+		datum_config.datum_pool_pubkey,
+		DATUM_POOL_ENDPOINT_PRIMARY);
+}
+
+void datum_protocol_active_pool(T_DATUM_POOL_ENDPOINT_VIEW *out) {
+	if (!out) return;
+	pthread_mutex_lock(&datum_protocol_migration_lock);
+	if (datum_pool_active.host[0]) {
+		*out = datum_pool_active;
+	} else if (datum_pool_failover_role == DATUM_POOL_ENDPOINT_SECONDARY &&
+		datum_protocol_secondary_configured()) {
+		memset(out, 0, sizeof(*out));
+		snprintf(out->host, sizeof(out->host), "%s", datum_config.datum_pool_host_secondary);
+		out->port = datum_config.datum_pool_port_secondary;
+		snprintf(out->pubkey, sizeof(out->pubkey), "%s", datum_config.datum_pool_pubkey_secondary);
+		out->role = DATUM_POOL_ENDPOINT_SECONDARY;
+	} else if (datum_config.datum_pool_host[0]) {
+		memset(out, 0, sizeof(*out));
+		snprintf(out->host, sizeof(out->host), "%s", datum_config.datum_pool_host);
+		out->port = datum_config.datum_pool_port;
+		snprintf(out->pubkey, sizeof(out->pubkey), "%s", datum_config.datum_pool_pubkey);
+		out->role = DATUM_POOL_ENDPOINT_PRIMARY;
+	} else {
+		memset(out, 0, sizeof(*out));
+	}
+	pthread_mutex_unlock(&datum_protocol_migration_lock);
+}
+
+void datum_protocol_note_pool_down(T_DATUM_POOL_ENDPOINT_ROLE role) {
+	T_DATUM_POOL_ENDPOINT_ROLE next = role;
+	bool changed = false;
+	
+	pthread_mutex_lock(&datum_protocol_migration_lock);
+	if (role == DATUM_POOL_ENDPOINT_PRIMARY && datum_protocol_secondary_configured()) {
+		next = DATUM_POOL_ENDPOINT_SECONDARY;
+		changed = datum_pool_failover_role != DATUM_POOL_ENDPOINT_SECONDARY;
+		datum_protocol_store_configured_locked(DATUM_POOL_ENDPOINT_SECONDARY);
+	} else if (role == DATUM_POOL_ENDPOINT_SECONDARY) {
+		next = DATUM_POOL_ENDPOINT_PRIMARY;
+		changed = datum_pool_failover_role != DATUM_POOL_ENDPOINT_PRIMARY;
+		datum_protocol_store_configured_locked(DATUM_POOL_ENDPOINT_PRIMARY);
+	}
+	pthread_mutex_unlock(&datum_protocol_migration_lock);
+	
+	if (changed && next == DATUM_POOL_ENDPOINT_SECONDARY) {
+		DLOG_WARN("Primary DATUM pool is unavailable. Next connection will use the secondary pool.");
+	} else if (changed && next == DATUM_POOL_ENDPOINT_PRIMARY) {
+		DLOG_WARN("Secondary DATUM pool is unavailable. Next connection will use the primary pool.");
+	}
+}
+
+void datum_protocol_reset_pool_failover(void) {
+	pthread_mutex_lock(&datum_protocol_migration_lock);
+	datum_pool_failover_role = DATUM_POOL_ENDPOINT_PRIMARY;
+	memset(&datum_pool_active, 0, sizeof(datum_pool_active));
+	datum_protocol_intentional_reconnect = false;
+	pthread_mutex_unlock(&datum_protocol_migration_lock);
+}
+
+bool datum_protocol_session_failure_switches_pool(bool migrated, bool migration_return) {
+	const bool intentional = datum_protocol_intentional_reconnect;
+	datum_protocol_intentional_reconnect = false;
+	return !migrated && !migration_return && !intentional;
 }
 
 bool datum_protocol_take_connect_endpoint(
@@ -2210,13 +2310,17 @@ bool datum_protocol_take_connect_endpoint(
 		selected_host = datum_config.datum_pool_migration_host;
 		selected_port = datum_config.datum_pool_migration_port;
 		selected_pubkey = datum_config.datum_pool_migration_pubkey;
+		datum_protocol_store_endpoint_locked(
+			selected_host, selected_port, selected_pubkey,
+			DATUM_POOL_ENDPOINT_MIGRATION);
 		datum_protocol_current_migration_deadline_ms =
 			datum_config.datum_pool_migration_deadline_ms;
 		migrated = true;
 	} else {
-		selected_host = datum_config.datum_pool_host;
-		selected_port = datum_config.datum_pool_port;
-		selected_pubkey = datum_config.datum_pool_pubkey;
+		datum_protocol_store_configured_locked(datum_pool_failover_role);
+		selected_host = datum_pool_active.host;
+		selected_port = datum_pool_active.port;
+		selected_pubkey = datum_pool_active.pubkey;
 		datum_protocol_current_migration_deadline_ms = 0;
 	}
 	
@@ -2980,6 +3084,7 @@ void *datum_protocol_client(void *args) {
 	struct timeval start, now;
 	int ret,i,n;
 	datum_protocol_client_active = 1;
+	datum_protocol_intentional_reconnect = false;
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
@@ -3027,15 +3132,23 @@ void *datum_protocol_client(void *args) {
 	const bool migrated = datum_protocol_take_connect_endpoint(
 		pool_host, sizeof(pool_host), &pool_port,
 		pool_pubkey, sizeof(pool_pubkey));
+	T_DATUM_POOL_ENDPOINT_VIEW chosen_pool;
+	datum_protocol_active_pool(&chosen_pool);
+	const T_DATUM_POOL_ENDPOINT_ROLE connect_role = chosen_pool.role;
+	const char *connect_message = "Connecting to primary DATUM pool";
 	if (migrated) {
-		datum_protocol_log_migration_target(
-			"Connecting to one-time DATUM migration endpoint",
-			(const unsigned char *)pool_host, strlen(pool_host),
-			(uint16_t)pool_port);
+		connect_message = "Connecting to one-time DATUM migration endpoint";
+	} else if (connect_role == DATUM_POOL_ENDPOINT_SECONDARY) {
+		connect_message = "Connecting to secondary DATUM pool";
 	}
+	datum_protocol_log_migration_target(
+		connect_message,
+		(const unsigned char *)pool_host, strlen(pool_host),
+		(uint16_t)pool_port);
 	memset(&pool_keys, 0, sizeof(DATUM_ENC_KEYS));
-	if (datum_pubkey_to_struct(pool_pubkey, &pool_keys) != 0) {
+	if (!datum_pubkey_hex_is_valid(pool_pubkey) || datum_pubkey_to_struct(pool_pubkey, &pool_keys) != 0) {
 		DLOG_ERROR("DATUM connection public key is invalid");
+		if (!migrated) datum_protocol_note_pool_down(connect_role);
 		datum_protocol_client_active = 0;
 		return NULL;
 	}
@@ -3045,6 +3158,7 @@ void *datum_protocol_client(void *args) {
 	
 	if ((ret = getaddrinfo(pool_host, port_str, &hints, &res)) != 0) {
 		DLOG_ERROR("getaddrinfo: %s", gai_strerror(ret));
+		if (!migrated) datum_protocol_note_pool_down(connect_role);
 		datum_protocol_client_active = 0;
 		return NULL;
 	}
@@ -3096,7 +3210,8 @@ void *datum_protocol_client(void *args) {
 	freeaddrinfo(res);
 	
 	if (sockfd == -1) {
-		DLOG_FATAL("Could not connect to DATUM server!");
+		DLOG_FATAL("Could not connect to DATUM server %s:%d", pool_host, pool_port);
+		if (!migrated) datum_protocol_note_pool_down(connect_role);
 		datum_protocol_client_active = 0;
 		return NULL;
 	}
@@ -3123,13 +3238,15 @@ void *datum_protocol_client(void *args) {
 	datum_last_accepted_share_tsms = 0;
 	datum_last_accepted_share_local_tsms = 0;
 	latest_server_msg_tsms = current_time_millis();
+	bool migration_return = false;
 	
 	while (1) {
 		i++;
 		
 		datum_protocol_mainloop_tsms = current_time_millis();
 		if (datum_protocol_migration_expired(datum_protocol_mainloop_tsms)) {
-			DLOG_INFO("DATUM migration time limit reached; returning to configured server");
+			DLOG_INFO("DATUM migration time limit reached; returning to the selected configured pool");
+			migration_return = true;
 			break;
 		}
 		
@@ -3364,6 +3481,9 @@ void *datum_protocol_client(void *args) {
 	
 	// Must clean up this thread, as it can be restarted by the main thread.
 	DLOG_DEBUG("DATUM Protocol Thread is exiting.");
+	if (datum_protocol_session_failure_switches_pool(migrated, migration_return)) {
+		datum_protocol_note_pool_down(connect_role);
+	}
 	close(sockfd);
 	close(epollfd);
 	datum_protocol_client_active = 0;
@@ -3443,14 +3563,35 @@ int datum_protocol_init(void) {
 	DLOG_INFO("Our public keys:");
 	datum_encrypt_log_pubkeys(&local_datum_keys);
 	
-	if (datum_pubkey_to_struct(datum_config.datum_pool_pubkey, &pool_keys) != 0) {
-		DLOG_WARN("Pool pubkey not specified or invalid.");
-		return -1;
+	DATUM_ENC_KEYS secondary_keys;
+	bool secondary_ready = false;
+	memset(&secondary_keys, 0, sizeof(secondary_keys));
+	if (datum_config.datum_pool_host_secondary[0] &&
+		datum_pubkey_hex_is_valid(datum_config.datum_pool_pubkey_secondary) &&
+		datum_pubkey_to_struct(datum_config.datum_pool_pubkey_secondary, &secondary_keys) == 0) {
+		secondary_keys.is_remote = true;
+		secondary_ready = true;
+	}
+	const bool primary_key_ok =
+		datum_pubkey_hex_is_valid(datum_config.datum_pool_pubkey) &&
+		datum_pubkey_to_struct(datum_config.datum_pool_pubkey, &pool_keys) == 0;
+	if (!primary_key_ok) {
+		if (!secondary_ready) {
+			DLOG_WARN("Pool pubkey not specified or invalid.");
+			return -1;
+		}
+		DLOG_WARN("Primary pool pubkey is invalid. Connecting to the secondary pool.");
+		pool_keys = secondary_keys;
+		datum_protocol_note_pool_down(DATUM_POOL_ENDPOINT_PRIMARY);
 	}
 	pool_keys.is_remote = true;
 	
 	DLOG_INFO("Pool's public keys: (You should periodically verify that these are what you expect!)");
 	datum_encrypt_log_pubkeys(&pool_keys);
+	if (secondary_ready && primary_key_ok) {
+		DLOG_INFO("Secondary pool's public keys: (You should periodically verify that these are what you expect!)");
+		datum_encrypt_log_pubkeys(&secondary_keys);
+	}
 	datum_protocol_start_connector();
 	
 	return 0;

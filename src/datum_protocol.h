@@ -141,6 +141,20 @@ typedef struct {
 	uint32_t version;
 } T_DATUM_PROTOCOL_POW;
 
+typedef enum {
+	DATUM_POOL_ENDPOINT_NONE = 0,
+	DATUM_POOL_ENDPOINT_PRIMARY = 1,
+	DATUM_POOL_ENDPOINT_SECONDARY = 2,
+	DATUM_POOL_ENDPOINT_MIGRATION = 3
+} T_DATUM_POOL_ENDPOINT_ROLE;
+
+typedef struct {
+	char host[1024];
+	int port;
+	char pubkey[1024];
+	T_DATUM_POOL_ENDPOINT_ROLE role;
+} T_DATUM_POOL_ENDPOINT_VIEW;
+
 int datum_protocol_init(void);
 int datum_encrypt_generate_keys(DATUM_ENC_KEYS *keys);
 bool datum_protocol_is_active(void);
@@ -149,6 +163,10 @@ void datum_increment_session_nonce(void *s);
 int datum_protocol_fetch_coinbaser(uint64_t value);
 int datum_protocol_coinbaser_fetch(void *s);
 int datum_protocol_migration_request(int len, const unsigned char *data);
+void datum_protocol_active_pool(T_DATUM_POOL_ENDPOINT_VIEW *out);
+void datum_protocol_note_pool_down(T_DATUM_POOL_ENDPOINT_ROLE role);
+void datum_protocol_reset_pool_failover(void);
+bool datum_protocol_session_failure_switches_pool(bool migrated, bool migration_return);
 bool datum_protocol_take_connect_endpoint(
 	char *host,
 	size_t host_size,
