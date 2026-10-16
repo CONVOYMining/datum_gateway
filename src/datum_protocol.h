@@ -60,6 +60,9 @@
 #define DATUM_PROTOCOL_BUFFER_SIZE (DATUM_PROTOCOL_MAX_CMD_DATA_SIZE*3)
 #define DATUM_PROTOCOL_MAX_USERNAME_LEN 384
 
+#define DATUM_PROTOCOL_REPLY_BUSY 0xF6
+#define DATUM_VALIDATION_ERROR_BUSY DATUM_PROTOCOL_REPLY_BUSY
+
 // DRS version 1 HELLO flags. Unknown higher bits remain forward compatible;
 // an incompatible trailer layout requires a new DRS version.
 #define DATUM_DRS_RESUME_TOKEN_FLAG 0x01

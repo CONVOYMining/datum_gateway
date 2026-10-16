@@ -964,6 +964,19 @@ static void datum_protocol_resume_tests(void) {
 	datum_test(!memcmp(temp_data + 9, txn_data, sizeof(txn_data)));
 	datum_test(temp_data[13] == 0xFE);
 	
+	// A validation reply must never disappear behind a full bulk queue.
+	const bool saved_bulk_enabled = atomic_load(&datum_protocol_bulk_enabled);
+	const unsigned char queued_reply[] = {0x50, 0x92, 0, 1, 0xFE};
+	datum_protocol_bulk_reset();
+	atomic_store(&datum_protocol_bulk_enabled, true);
+	datum_test(datum_protocol_bulk_cmd(queued_reply, sizeof(queued_reply)) == 0);
+	datum_test(datum_protocol_bulk_cmd(queued_reply, sizeof(queued_reply)) == 0);
+	datum_test(datum_protocol_job_validation_sblock(sizeof(validation_request), validation_request));
+	datum_test(temp_data[0] == 0x50 && temp_data[1] == 0x92);
+	datum_test(temp_data[2] == pow.datum_job_id && temp_data[3] == DATUM_VALIDATION_ERROR_BUSY);
+	datum_protocol_bulk_reset();
+	atomic_store(&datum_protocol_bulk_enabled, saved_bulk_enabled);
+	
 	// Preserving the pointer remains safe when its stratum storage is reused because validation also checks the exact job generation.
 	strcpy(job.job_id, "replacement-job");
 	memset(temp_data, 0, 4);
