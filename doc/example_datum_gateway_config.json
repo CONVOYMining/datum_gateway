@@ -28,6 +28,9 @@
 		"log_level_file": 1
 	},
 	"datum": {
+		"pool_host_secondary": "",
+		"pool_port_secondary": 28915,
+		"pool_pubkey_secondary": "",
 		"migration_max_seconds": 86400,
 		"pool_pass_workers": true,
 		"pool_pass_full_users": true,

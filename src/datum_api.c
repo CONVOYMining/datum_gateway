@@ -131,6 +131,8 @@ bool datum_api_var_DATUM_CONNECTION_STATUS(struct buf * const buf, const T_DATUM
 	const char *colour = "lime";
 	const char *s, *s2 = "";
 	const char * const bt_err = datum_blocktemplates_error;
+	T_DATUM_POOL_ENDPOINT_VIEW pool_ep;
+	datum_protocol_active_pool(&pool_ep);
 	if (!datum_protocol_abw_health_ok()) {
 		colour = "red";
 		s = "CRITICAL: ";
@@ -144,6 +146,12 @@ bool datum_api_var_DATUM_CONNECTION_STATUS(struct buf * const buf, const T_DATUM
 		s = "Initialising...";
 	} else if (datum_protocol_is_active()) {
 		s = "Connected and Ready";
+		if (pool_ep.role == DATUM_POOL_ENDPOINT_SECONDARY) {
+			colour = "yellow";
+			s2 = " (secondary pool active)";
+		} else if (pool_ep.role == DATUM_POOL_ENDPOINT_MIGRATION) {
+			s2 = " (migrated)";
+		}
 	} else if (datum_config.datum_pooled_mining_only && datum_config.datum_pool_host[0]) {
 		colour = "red";
 		s = "Not Ready";
@@ -156,11 +164,18 @@ bool datum_api_var_DATUM_CONNECTION_STATUS(struct buf * const buf, const T_DATUM
 	return buf_printf(buf, "<svg viewBox='0 0 100 100' role='img' style='width:1em;height:1em'><circle cx='50' cy='60' r='35' style='fill:%s' /></svg> %s%s", colour, s, s2);
 }
 bool datum_api_var_DATUM_POOL_HOST(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	(void)vardata;
 	if (datum_config.datum_pool_host[0]) {
 		return buf_printf(buf, "%s:%u", datum_config.datum_pool_host, (unsigned)datum_config.datum_pool_port);
-	} else {
-		return buf_strcat(buf, "N/A");
 	}
+	return buf_strcat(buf, "N/A");
+}
+bool datum_api_var_DATUM_POOL_SECONDARY(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	(void)vardata;
+	if (datum_config.datum_pool_host_secondary[0]) {
+		return buf_printf(buf, "%s:%u", datum_config.datum_pool_host_secondary, (unsigned)datum_config.datum_pool_port_secondary);
+	}
+	return buf_strcat(buf, "Not configured");
 }
 bool datum_api_var_DATUM_POOL_TAG(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
 	if (!buf_strcat(buf, "\"")) return false;
@@ -179,6 +194,9 @@ bool datum_api_var_DATUM_POOL_DIFF(struct buf * const buf, const T_DATUM_API_DAS
 	return buf_datum_format_difficulty(buf, datum_pdiff_to_diff(datum_config.override_vardiff_min));
 }
 bool datum_api_var_DATUM_POOL_PUBKEY(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
+	T_DATUM_POOL_ENDPOINT_VIEW pool_ep;
+	datum_protocol_active_pool(&pool_ep);
+	if (pool_ep.pubkey[0]) return buf_strcat(buf, pool_ep.pubkey);
 	return buf_strcat(buf, datum_config.datum_pool_pubkey);
 }
 bool datum_api_var_STRATUM_ACTIVE_THREADS(struct buf * const buf, const T_DATUM_API_DASH_VARS *vardata) {
@@ -268,6 +286,7 @@ DATUM_API_VarEntry var_entries[] = {
 	{"DATUM_SHARES_REJECTED", datum_api_var_DATUM_SHARES_REJECTED},
 	{"DATUM_CONNECTION_STATUS", datum_api_var_DATUM_CONNECTION_STATUS},
 	{"DATUM_POOL_HOST", datum_api_var_DATUM_POOL_HOST},
+	{"DATUM_POOL_SECONDARY", datum_api_var_DATUM_POOL_SECONDARY},
 	{"DATUM_POOL_TAG", datum_api_var_DATUM_POOL_TAG},
 	{"DATUM_MINER_TAG", datum_api_var_DATUM_MINER_TAG},
 	{"DATUM_POOL_DIFF", datum_api_var_DATUM_POOL_DIFF},
@@ -1342,6 +1361,38 @@ bool datum_api_config_set(const char * const key, const char * const val, struct
 		datum_api_json_modify_new("datum", "pool_pubkey", json_string(val));
 		// TODO: apply change without restarting
 		// TODO: switch pools smoother (keep old connection alive for share submissions until those jobs expire)
+	} else if (0 == strcmp(key, "datum_pool_host_secondary")) {
+		if (0 == strcmp(val, datum_config.datum_pool_host_secondary)) return true;
+		if (strlen(val) > 1023) {
+			json_array_append_new(errors, json_string_nocheck("Secondary Pool Host is too long"));
+			return false;
+		}
+		if (!datum_api_config_require_restart(status)) return false;
+		strcpy(datum_config.datum_pool_host_secondary, val);
+		datum_api_json_modify_new("datum", "pool_host_secondary", json_string(val));
+	} else if (0 == strcmp(key, "datum_pool_port_secondary")) {
+		const int val_int = datum_atoi_strict(val, strlen(val));
+		if (val_int == datum_config.datum_pool_port_secondary) return true;
+		if (val_int > 65535 || val_int < 1) {
+			json_array_append_new(errors, json_string_nocheck("Secondary Pool Port must be between 1 and 65535"));
+			return false;
+		}
+		if (!datum_api_config_require_restart(status)) return false;
+		datum_config.datum_pool_port_secondary = val_int;
+		datum_api_json_modify_new("datum", "pool_port_secondary", json_integer(val_int));
+	} else if (0 == strcmp(key, "datum_pool_pubkey_secondary")) {
+		if (0 == strcmp(val, datum_config.datum_pool_pubkey_secondary)) return true;
+		if (strlen(val) > 1023) {
+			json_array_append_new(errors, json_string_nocheck("Secondary Pool Pubkey is too long"));
+			return false;
+		}
+		if (val[0] && !datum_pubkey_hex_is_valid(val)) {
+			json_array_append_new(errors, json_string_nocheck("Secondary Pool Pubkey must be empty or 128 hexadecimal characters"));
+			return false;
+		}
+		if (!datum_api_config_require_restart(status)) return false;
+		strcpy(datum_config.datum_pool_pubkey_secondary, val);
+		datum_api_json_modify_new("datum", "pool_pubkey_secondary", json_string(val));
 	} else if (0 == strcmp(key, "stratum_fingerprint_miners")) {
 		bool val_bool;
 		if (!datum_str_to_bool_strict(val, &val_bool)) {
@@ -1426,6 +1477,38 @@ static void datum_api_test_config_var(const char * const name, const struct datu
 	buf_destroy(&output);
 }
 
+static bool datum_api_secondary_pool_change_ok(json_t * const posted, struct datum_api_config_set_status * const status) {
+	const char *host = datum_config.datum_pool_host_secondary;
+	const char *pubkey = datum_config.datum_pool_pubkey_secondary;
+	int port = datum_config.datum_pool_port_secondary;
+	bool ok = true;
+	json_t *j;
+	
+	j = json_object_get(posted, "datum_pool_host_secondary");
+	if (j && json_is_string(j)) host = json_string_value(j);
+	j = json_object_get(posted, "datum_pool_pubkey_secondary");
+	if (j && json_is_string(j)) pubkey = json_string_value(j);
+	j = json_object_get(posted, "datum_pool_port_secondary");
+	if (j && json_is_string(j)) {
+		port = datum_atoi_strict(json_string_value(j), json_string_length(j));
+	}
+	if (!host || !host[0]) return true;
+	if (!pubkey || !datum_pubkey_hex_is_valid(pubkey)) {
+		json_array_append_new(status->errors, json_string_nocheck("Secondary pool pubkey must be 128 hexadecimal characters when a secondary host is set"));
+		ok = false;
+	}
+	if (port < 1 || port > 65535) {
+		json_array_append_new(status->errors, json_string_nocheck("Secondary pool port must be between 1 and 65535"));
+		ok = false;
+	}
+	if (!ok) {
+		json_object_del(posted, "datum_pool_host_secondary");
+		json_object_del(posted, "datum_pool_port_secondary");
+		json_object_del(posted, "datum_pool_pubkey_secondary");
+	}
+	return ok;
+}
+
 void datum_api_tests(void) {
 	char * const executable_path = datum_executable_path;
 	datum_executable_path = NULL;
@@ -1450,6 +1533,9 @@ void datum_api_tests(void) {
 		{"datum_pool_host", "other.example"},
 		{"datum_pool_port", "4321"},
 		{"datum_pool_pubkey", "new-key"},
+		{"datum_pool_host_secondary", "backup.example"},
+		{"datum_pool_port_secondary", "28916"},
+		{"datum_pool_pubkey_secondary", "abcd"},
 		{"bitcoind_work_update_seconds", "120"},
 	};
 	for (size_t i = 0; i < sizeof(changes) / sizeof(changes[0]); ++i) {
@@ -1506,6 +1592,34 @@ void datum_api_tests(void) {
 	datum_api_test_config_var("disabled:*restart_ro", &context, " disabled");
 	datum_test(datum_api_config_set("datum_pool_port", "4321", &status));
 	datum_test(datum_config.datum_pool_port == 4321 && status.need_restart);
+	char secondary_pk[129];
+	memset(secondary_pk, 'a', 128);
+	secondary_pk[128] = '\0';
+	datum_test(!datum_api_config_set("datum_pool_pubkey_secondary", "abcd", &status));
+	datum_test(!datum_config.datum_pool_pubkey_secondary[0]);
+	datum_test(datum_api_config_set("datum_pool_host_secondary", "backup.example", &status));
+	datum_test(!strcmp(datum_config.datum_pool_host_secondary, "backup.example"));
+	datum_test(datum_api_config_set("datum_pool_port_secondary", "28916", &status));
+	datum_test(datum_config.datum_pool_port_secondary == 28916);
+	datum_test(datum_api_config_set("datum_pool_pubkey_secondary", secondary_pk, &status));
+	datum_test(!strcmp(datum_config.datum_pool_pubkey_secondary, secondary_pk));
+	datum_test(status.need_restart);
+	datum_api_test_config_var("datum_pool_host_secondary", &context, "backup.example");
+	datum_api_test_config_var("datum_pool_port_secondary", &context, "28916");
+	datum_api_test_config_var("datum_pool_pubkey_secondary", &context, secondary_pk);
+	json_t *posted = json_object();
+	json_object_set_new(posted, "datum_pool_host_secondary", json_string("other.example"));
+	json_object_set_new(posted, "datum_pool_pubkey_secondary", json_string("zz"));
+	datum_test(!datum_api_secondary_pool_change_ok(posted, &status));
+	datum_test(json_object_get(posted, "datum_pool_host_secondary") == NULL);
+	json_decref(posted);
+	posted = json_object();
+	json_object_set_new(posted, "datum_pool_host_secondary", json_string("other.example"));
+	json_object_set_new(posted, "datum_pool_pubkey_secondary", json_string(secondary_pk));
+	json_object_set_new(posted, "datum_pool_port_secondary", json_string("28915"));
+	datum_test(datum_api_secondary_pool_change_ok(posted, &status));
+	datum_test(json_object_get(posted, "datum_pool_host_secondary") != NULL);
+	json_decref(posted);
 	status.cannot_restart = EACCES;
 	datum_test(!datum_api_config_require_restart(&status));
 	datum_test(status.need_restart);
@@ -1602,6 +1716,7 @@ enum MHD_Result datum_api_config_post(struct MHD_Connection * const connection, 
 		.errors = errors,
 		.cannot_restart = datum_reexec_check(),
 	};
+	datum_api_secondary_pool_change_ok(j, &status);
 	json_object_foreach(j, key, j_it) {
 		datum_api_config_set(key, json_string_value(j_it), &status);
 	}
