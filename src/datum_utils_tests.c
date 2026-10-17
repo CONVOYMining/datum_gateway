@@ -194,6 +194,24 @@ static void datum_utils_tests_buf(void) {
 	free(buf.s);
 }
 
+// SipHash-2-4 reference vectors (key 00..0f, message 00..len-1), with key and
+// message deliberately misaligned: the short txn list hashes hash_bin, which
+// sits at offset 178 of T_DATUM_TEMPLATE_TXN.
+static void datum_utils_tests_siphash(void) {
+	uint64_t storage[8];
+	unsigned char * const key = (unsigned char *)storage + 1;
+	unsigned char * const msg = (unsigned char *)storage + 18;
+	
+	for (int i = 0; i < 16; ++i) key[i] = i;
+	for (int i = 0; i < 32; ++i) msg[i] = i;
+	datum_test(datum_siphash(msg, 0, key) == UINT64_C(0x726fdb47dd0e0e31));
+	datum_test(datum_siphash(msg, 8, key) == UINT64_C(0x93f5f5799a932462));
+	datum_test(datum_siphash(msg, 15, key) == UINT64_C(0xa129ca6149be45e5));
+	datum_test(datum_siphash(msg, 32, key) == UINT64_C(0x7127512f72f27cce));
+	datum_test(datum_siphash_mod8(msg, 8, key) == UINT64_C(0x93f5f5799a932462));
+	datum_test(datum_siphash_mod8(msg, 32, key) == UINT64_C(0x7127512f72f27cce));
+}
+
 /* Uses 1 MiB of stack, more than musl (128 KiB) and macOS (512 KiB) give a
  * thread by default. */
 static void *datum_utils_tests_large_stack_thread(void *arg) {
@@ -258,6 +276,7 @@ void datum_utils_tests(void) {
 	datum_utils_tests_pdiff_to_bdiff();
 	datum_utils_tests_network_difficulty_blake2b();
 	datum_utils_tests_buf();
+	datum_utils_tests_siphash();
 	datum_utils_tests_thread_stack();
 	datum_utils_tests_executable_path();
 }

@@ -691,21 +691,19 @@ bool buf_datum_format_difficulty(struct buf * const buf, const bitcoin_difficult
 } while(0)
 
 uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]) {
-	uint64_t k0 = (*(const uint64_t *)&key[0]);
-	uint64_t k1 = (*(const uint64_t *)&key[8]);
+	uint64_t k0 = upk_u64le(key, 0);
+	uint64_t k1 = upk_u64le(key, 8);
 	uint64_t b = sz<<56;
-	const uint64_t *in = src;
+	const uint8_t *in = src;
 	uint64_t v0 = k0 ^ 0x736f6d6570736575ULL;
 	uint64_t v1 = k1 ^ 0x646f72616e646f6dULL;
 	uint64_t v2 = k0 ^ 0x6c7967656e657261ULL;
 	uint64_t v3 = k1 ^ 0x7465646279746573ULL;
 	uint64_t mi,t;
-	uint8_t *pt;
-	const uint8_t *m;
 	
 	while (sz >= 8) {
-		mi = *in;
-		in += 1;
+		mi = upk_u64le(in, 0);
+		in += 8;
 		sz -= 8;
 		v3 ^= mi;
 		SIPHASH_DOUBLE_ROUND(v0,v1,v2,v3);
@@ -713,17 +711,15 @@ uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]
 	}
 	
 	t = 0;
-	pt = (uint8_t *)&t;
-	m = (const uint8_t *)in;
 	
 	switch (sz) {
-		case 7: pt[6] = m[6]; [[fallthrough]];
-		case 6: pt[5] = m[5]; [[fallthrough]];
-		case 5: pt[4] = m[4]; [[fallthrough]];
-		case 4: pt[3] = m[3]; [[fallthrough]];
-		case 3: pt[2] = m[2]; [[fallthrough]];
-		case 2: pt[1] = m[1]; [[fallthrough]];
-		case 1: pt[0] = m[0]; [[fallthrough]];
+		case 7: t |= ((uint64_t)in[6]) << 0x30; [[fallthrough]];
+		case 6: t |= ((uint64_t)in[5]) << 0x28; [[fallthrough]];
+		case 5: t |= ((uint64_t)in[4]) << 0x20; [[fallthrough]];
+		case 4: t |= ((uint64_t)in[3]) << 0x18; [[fallthrough]];
+		case 3: t |= ((uint64_t)in[2]) << 0x10; [[fallthrough]];
+		case 2: t |= ((uint64_t)in[1]) <<    8; [[fallthrough]];
+		case 1: t |= ((uint64_t)in[0]) <<    0; [[fallthrough]];
 		default: break;
 	}
 	b |= t;
@@ -739,10 +735,10 @@ uint64_t datum_siphash(const void *src, uint64_t sz, const unsigned char key[16]
 uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char key[16]) {
 	// use if size is guaranteed to be mod 8 = 0
 	// should save a few cycles
-	uint64_t k0 = (*(const uint64_t *)&key[0]);
-	uint64_t k1 = (*(const uint64_t *)&key[8]);
+	uint64_t k0 = upk_u64le(key, 0);
+	uint64_t k1 = upk_u64le(key, 8);
 	uint64_t b = sz<<56;
-	const uint64_t *in = src;
+	const uint8_t *in = src;
 	uint64_t v0 = k0 ^ 0x736f6d6570736575ULL;
 	uint64_t v1 = k1 ^ 0x646f72616e646f6dULL;
 	uint64_t v2 = k0 ^ 0x6c7967656e657261ULL;
@@ -750,8 +746,8 @@ uint64_t datum_siphash_mod8(const void *src, uint64_t sz, const unsigned char ke
 	uint64_t mi;
 	
 	while (sz >= 8) {
-		mi = *in;
-		in += 1;
+		mi = upk_u64le(in, 0);
+		in += 8;
 		sz -= 8;
 		v3 ^= mi;
 		SIPHASH_DOUBLE_ROUND(v0,v1,v2,v3);
