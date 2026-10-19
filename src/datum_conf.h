@@ -124,6 +124,7 @@ typedef struct {
 	int stratum_v1_vardiff_quickdiff_count;
 	int stratum_v1_vardiff_quickdiff_delta;
 	int stratum_v1_share_stale_seconds;
+	int stratum_v1_extranonce2_size;
 	bool stratum_v1_fingerprint_miners;
 	int stratum_v1_idle_timeout_no_subscribe;
 	int stratum_v1_idle_timeout_no_share;

@@ -106,6 +106,8 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.stratum_v1_vardiff_quickdiff_delta, 	.default_int = 8 },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "share_stale_seconds",		.description = "How many seconds after a job is generated before a share submission is considered stale?",
 		.required = false, .ptr = &datum_config.stratum_v1_share_stale_seconds, 		.default_int = 120 },
+	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "extranonce2_size",		.description = "Default advertised Stratum extranonce2 size in bytes (1 through 8)",
+		.required = false, .ptr = &datum_config.stratum_v1_extranonce2_size, 			.default_int = 8 },
 	{ .var_type = DATUM_CONF_BOOL, 		.category = "stratum", 		.name = "fingerprint_miners",		.description = "Attempt to fingerprint miners for better use of coinbase space",
 		.required = false, .ptr = &datum_config.stratum_v1_fingerprint_miners, 			.default_bool = true },
 	{ .var_type = DATUM_CONF_INT, 		.category = "stratum", 		.name = "idle_timeout_no_subscribe",.description = "Seconds we allow a connection to be idle without seeing a work subscription? (0 disables)",
@@ -731,6 +733,11 @@ int datum_read_config(const char *conffile) {
 	
 	if (datum_config.stratum_v1_share_stale_seconds > 150) {
 		DLOG_FATAL("Stratum server stratum.share_stale_seconds must not exceed 150 (suggest 120)");
+		return 0;
+	}
+	
+	if (datum_config.stratum_v1_extranonce2_size < 1 || datum_config.stratum_v1_extranonce2_size > 8) {
+		DLOG_FATAL("Stratum server stratum.extranonce2_size must be between 1 and 8");
 		return 0;
 	}
 	

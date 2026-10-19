@@ -1070,7 +1070,6 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	
 	const char *username_s;
 	char username_buf[0x100];
-	const char *extranonce2_s;
 	const char *ntime_s;
 	const char *nonce_s;
 	
@@ -1111,15 +1110,12 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// need to get the extranonce together
 	pk_u32le(extranonce_bin, 0, m->sid_inv);
 	extranonce2 = json_array_get(params_obj, 2);
-	if (json_string_length(extranonce2) != 16) {
+	if (!json_is_string(extranonce2) || !datum_pow_decode_hex_exact(json_string_value(extranonce2), m->extranonce2_size, &extranonce_bin[4])) {
 		send_unknown_work_error(c, id);
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
-	extranonce2_s = json_string_value(extranonce2);
-	for(i=0;i<8;i++) {
-		extranonce_bin[i+4] = hex2bin_uchar(&extranonce2_s[i<<1]);
-	}
+	if (m->extranonce2_size < 8) memset(&extranonce_bin[4 + m->extranonce2_size], 0, 8 - m->extranonce2_size);
 	
 	// need to build the full coinbase txn
 	if (empty_work) {
@@ -1447,6 +1443,7 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	T_DATUM_MINER_DATA * const m = c->app_client_data;
 	T_DATUM_STRATUM_COINBASE *cb;
 	char cb1[STRATUM_COINBASE1_MAX_LEN+2];
+	char cb2[17];
 	unsigned int cbselect = 0;
 	char s[512];
 	unsigned char tdiff = 0xFF;
@@ -1553,8 +1550,13 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	}
 	cb1[sizeof(blake2bcoinb1) << 1] = 0;
 	datum_socket_send_string_to_client(c, cb1);
-	// BLAKE2b work_root is blake2b(0x00||coinb1||en); do not attach Bitcoin merkle branches.
-	datum_socket_send_string_to_client(c, "\",\"\",[],");
+	const size_t fixed_extranonce_suffix_size = 8 - m->extranonce2_size;
+	memset(cb2, '0', fixed_extranonce_suffix_size << 1);
+	cb2[fixed_extranonce_suffix_size << 1] = 0;
+	// BLAKE2b work_root is blake2b(0x00||coinb1||en1||en2||coinb2); do not attach Bitcoin merkle branches.
+	datum_socket_send_string_to_client(c, "\",\"");
+	datum_socket_send_string_to_client(c, cb2);
+	datum_socket_send_string_to_client(c, "\",[],");
 	// Do not disclose the consensus target to the hasher. This is the closest
 	// compact target that is not easier than its accepted share target.
 	snprintf(s, sizeof(s), "\"%s\",\"%8.8x\",\"%s\",",
@@ -1596,8 +1598,13 @@ int send_mining_set_difficulty(T_DATUM_CLIENT_DATA *c) {
 	return 0;
 }
 
+static
 void datum_stratum_fingerprint_by_UA(T_DATUM_MINER_DATA *m) {
-	// TODO: Stub for now
+	// Known Obelisk SC1 firmware reports only this generic cgminer version and requires a 32-bit extranonce2
+	if (!strcmp(m->useragent, "cgminer/4.10.0")) {
+		m->extranonce2_size = 4;
+		return;
+	}
 }
 
 int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
@@ -1619,6 +1626,8 @@ int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	
 	// set default diff
 	m->current_diff = datum_config.stratum_v1_vardiff_min;
+	
+	m->extranonce2_size = datum_config.stratum_v1_extranonce2_size;
 	
 	// Sv1 is blind to the generation transaction now, so go as large as we want
 	// TODO: We may want to shrink based on block free space in the future
@@ -1652,7 +1661,7 @@ int client_mining_subscribe(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	// tell them about all of this
 	char idbuf[160];
 	stratum_rpc_id_text(c, id, idbuf, sizeof(idbuf));
-	snprintf(s, sizeof(s), "{\"error\":null,\"id\":%s,\"result\":[[[\"mining.notify\",\"%8.8x1\"],[\"mining.set_difficulty\",\"%8.8x2\"]],\"%8.8x\",8]}\n", idbuf, sid, sid, sid);
+	snprintf(s, sizeof(s), "{\"error\":null,\"id\":%s,\"result\":[[[\"mining.notify\",\"%8.8x1\"],[\"mining.set_difficulty\",\"%8.8x2\"]],\"%8.8x\",%u]}\n", idbuf, sid, sid, sid, m->extranonce2_size);
 	stratum_rpc_id_clear(c);
 	datum_socket_send_string_to_client(c, s);
 	

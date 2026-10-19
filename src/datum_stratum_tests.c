@@ -178,6 +178,7 @@ static void datum_blake2b_h_not_zero_tests(void) {
 	T_DATUM_CLIENT_DATA client = {0};
 	T_DATUM_MINER_DATA miner = {
 		.subscribed = true,
+		.extranonce2_size = 8,
 	};
 	T_DATUM_STRATUM_JOB job = {0};
 	T_DATUM_TEMPLATE_DATA tdata = {0};
@@ -283,7 +284,7 @@ static void datum_stratum_new_thread_job_tests(void) {
 	const global_config_t saved_config = datum_config;
 	const int saved_latest_index = global_latest_stratum_job_index;
 	T_DATUM_STRATUM_JOB * const saved_job = global_cur_stratum_jobs[0];
-	char subscribe[] = "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[]}";
+	char subscribe[] = "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"cgminer/4.10.0\"]}";
 	
 	datum_test(thread != NULL);
 	datum_test(sdata != NULL);
@@ -297,6 +298,8 @@ static void datum_stratum_new_thread_job_tests(void) {
 	datum_config.stratum_v1_max_clients_per_thread = 1;
 	datum_config.stratum_v1_vardiff_target_shares_min = 1;
 	datum_config.stratum_v1_share_stale_seconds = 60;
+	datum_config.stratum_v1_extranonce2_size = 8;
+	datum_config.stratum_v1_fingerprint_miners = true;
 	datum_config.bitcoind_work_update_seconds = 40;
 	
 	// The current job already has its coinbaser, and is older than the 5 second fallback
@@ -333,10 +336,14 @@ static void datum_stratum_new_thread_job_tests(void) {
 	datum_stratum_v1_socket_thread_client_new(client);
 	datum_test(datum_stratum_v1_socket_thread_client_cmd(client, subscribe) == 0);
 	client->w_buffer[client->out_buf] = 0;
+	char expected_subscribe[32];
+	snprintf(expected_subscribe, sizeof(expected_subscribe), ",\"%8.8x\",4]}", miner.sid);
+	datum_test(strstr(client->w_buffer, expected_subscribe) != NULL);
 	
 	// Its first job must use the full coinbase (class 4), not the pool-only one (class 0)
 	const char * const notify = strstr(client->w_buffer, "\"mining.notify\"");
 	datum_test(notify && strstr(notify, "[\"0000000000c0de04\","));
+	datum_test(notify && strstr(notify, "00000000\",\"00000000\",[]"));
 	
 	T_DATUM_STRATUM_DUPES * const dupes = sdata->dupes;
 	if (dupes) free(dupes->ptr);

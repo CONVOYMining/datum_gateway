@@ -229,6 +229,7 @@ typedef struct {
 	bool authorized;
 	bool subscribed;
 	uint64_t subscribe_tsms;
+	uint8_t extranonce2_size;
 	
 	uint64_t last_sent_diff;
 	uint64_t current_diff;
