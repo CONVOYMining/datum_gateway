@@ -207,8 +207,8 @@ size_t datum_expected_n_global_nonstale_shares(const global_config_t * const cfg
 	// bound and not a lower one, and this is the product of three configured values. A zero
 	// or a negative sizes the table at nothing, and nothing is not a table that merely
 	// overflows quickly: the expand grows it by 25%, 25% of zero is zero, and the gateway
-	// takes a share it then has nowhere to put. Sixteen is also the point below which the
-	// same rounding stops the table growing at all.
+	// takes a share it then has nowhere to put. The same rounding stops the table growing
+	// at all below 4 (125% of 3 rounds down to 3), which the floor also keeps clear of.
 	if (c < 16) c = 16;
 	
 	return overflow ? 0 : (size_t)c;
