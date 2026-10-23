@@ -35,6 +35,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -224,9 +225,16 @@ static void datum_utils_tests_executable_path(void) {
 	if (datum_test(stat(path, &st) == 0)) {
 		datum_test(S_ISREG(st.st_mode));
 #ifdef __linux__
-		struct stat executable;
-		if (datum_test(stat("/proc/self/exe", &executable) == 0)) {
-			datum_test(st.st_dev == executable.st_dev && st.st_ino == executable.st_ino);
+		// open+fstat rather than stat: QEMU user emulation redirects opening
+		// /proc/self/exe to the emulated program, but a stat of it reaches the
+		// kernel and describes the emulator, so this failed in cross-arch builds.
+		const int exe_fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
+		if (datum_test(exe_fd >= 0)) {
+			struct stat executable;
+			if (datum_test(fstat(exe_fd, &executable) == 0)) {
+				datum_test(st.st_dev == executable.st_dev && st.st_ino == executable.st_ino);
+			}
+			close(exe_fd);
 		}
 #endif
 	}
