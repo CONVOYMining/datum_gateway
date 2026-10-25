@@ -858,6 +858,7 @@ enum MHD_Result datum_api_client_dashboard(struct MHD_Connection *connection) {
 	double hr;
 	unsigned char astat;
 	double thr = 0.0;
+	uint64_t total_diff_accepted = 0, total_diff_rejected = 0;
 	
 	if (!datum_api_check_admin_password_httponly(connection, datum_api_create_response_authfail_clients)) {
 		return MHD_YES;
@@ -914,6 +915,9 @@ enum MHD_Result datum_api_client_dashboard(struct MHD_Connection *connection) {
 					buf_datum_format_difficulty(&output, datum_pdiff_to_diff(m->share_diff_rejected));
 					buf_printf(&output, " (%"PRIu64") %.2f%%</TD>", m->share_count_rejected, hr);
 					
+					total_diff_accepted += m->share_diff_accepted;
+					total_diff_rejected += m->share_diff_rejected;
+					
 					astat = m->stats.active_index?0:1; // inverted
 					hr = 0.0;
 					if ((m->stats.last_swap_ms > 0) && (m->stats.diff_accepted[astat] > 0)) {
@@ -946,7 +950,15 @@ enum MHD_Result datum_api_client_dashboard(struct MHD_Connection *connection) {
 		}
 	}
 	
-	buf_printf(&output, "</TABLE></form><p class=\"table-footer\">Total active hashrate estimate: %.2f Th/s</p><script>", thr);
+	hr = 0.0;
+	if ((total_diff_accepted + total_diff_rejected) > 0) {
+		hr = ((double)total_diff_rejected / (double)(total_diff_accepted + total_diff_rejected))*100.0;
+	}
+	buf_printf(&output, "</TABLE></form><p class=\"table-footer\">Total active hashrate estimate: %.2f Th/s | Global DiffA (A): ", thr);
+	buf_datum_format_difficulty(&output, datum_pdiff_to_diff(total_diff_accepted));
+	buf_strcat(&output, " &nbsp; DiffR (R): ");
+	buf_datum_format_difficulty(&output, datum_pdiff_to_diff(total_diff_rejected));
+	buf_printf(&output, " (%.2f%%)</p><script>", hr);
 	buf_printf(&output, www_assets_post_js, datum_config.api_csrf_token);
 	buf_strcat(&output, "</script>");
 	buf_append(&output, www_foot_html, www_foot_html_sz);
