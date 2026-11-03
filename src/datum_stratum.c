@@ -1455,7 +1455,6 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	char s[512];
 	unsigned char tdiff = 0xFF;
 	uint32_t share_nbits;
-	unsigned char blake2b_commitment[32];
 	unsigned char blake2bcoinb1[39];
 	int i;
 	
@@ -1548,9 +1547,21 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	// this may look silly, but the send buffer doesn't get emptied until this thread's loop runs. so might as well just utilize it
 	// for code readability purposes at the expense of a few extra calls.
 	datum_socket_send_string_to_client(c, s);
-	if (!datum_stratum_job_blake2b_commitment(j, cb, subsidy_only, tdiff, blake2b_commitment, blake2bcoinb1)) {
+	T_DATUM_JOB_H1 sent_h1;
+	if (!datum_stratum_job_blake2b_commitment_h1(j, cb, subsidy_only, tdiff, blake2bcoinb1, &sent_h1)) {
 		c->out_buf = notify_out_buf_start;
 		return -1;
+	}
+	{
+		// on record for /xbt/job: the id as sent (s holds `"<id>","<prevhash>","`), and this job's pot
+		char sent_id[20];
+		const char * const end = strchr(&s[1], '"');
+		const size_t n = end ? (size_t)(end - &s[1]) : 0;
+		if (n && n < sizeof(sent_id)) {
+			memcpy(sent_id, &s[1], n);
+			sent_id[n] = 0;
+			datum_stratum_sent_h1_record(sent_id, tdiff, &sent_h1);
+		}
 	}
 	for(i=0;i<(int)sizeof(blake2bcoinb1);i++) {
 		uchar_to_hex(&cb1[i << 1], blake2bcoinb1[i]);
@@ -1984,6 +1995,71 @@ bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_
 	return true;
 }
 
+// What mining.notify sent, by job id and pot: every input to h1 and the h2 it made, recorded as it is sent,
+// so /xbt/job answers for the coinbase a miner actually got. Rebuilding from the job later can't always do
+// that: a coinbaser that arrives after its 5 s timeout rewrites every coinbase[] in place (coinbase[0]
+// included), and jobs sent in the meantime carried the coinbase before it. A hash table, one entry a slot:
+// a newer (id, pot) that lands on a slot replaces the older, and a lookup that misses rebuilds as before.
+#define DATUM_SENT_H1_SLOTS 4096
+typedef struct {
+	char id[20]; // as notify sent it: [Q|N] + job id + coinbase byte, NUL-terminated
+	unsigned char pot;
+	T_DATUM_JOB_H1 h1;
+} T_DATUM_SENT_H1;
+static T_DATUM_SENT_H1 datum_sent_h1[DATUM_SENT_H1_SLOTS];
+static pthread_mutex_t datum_sent_h1_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static unsigned int datum_sent_h1_slot(const char *id, unsigned char pot) {
+	uint32_t h = 2166136261u; // FNV-1a
+	for (const char *p = id; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
+	h = (h ^ pot) * 16777619u;
+	return h % DATUM_SENT_H1_SLOTS;
+}
+
+void datum_stratum_sent_h1_record(const char *id, unsigned char pot, const T_DATUM_JOB_H1 *h1) {
+	if (!id || !h1 || strlen(id) >= sizeof(datum_sent_h1[0].id)) return;
+	const unsigned int slot = datum_sent_h1_slot(id, pot);
+	pthread_mutex_lock(&datum_sent_h1_lock);
+	strcpy(datum_sent_h1[slot].id, id);
+	datum_sent_h1[slot].pot = pot;
+	datum_sent_h1[slot].h1 = *h1;
+	pthread_mutex_unlock(&datum_sent_h1_lock);
+}
+
+bool datum_stratum_sent_h1_find(const char *id, unsigned char pot, T_DATUM_JOB_H1 *h1) {
+	bool found = false;
+	if (!id || !h1 || strlen(id) >= sizeof(datum_sent_h1[0].id)) return false;
+	const unsigned int slot = datum_sent_h1_slot(id, pot);
+	pthread_mutex_lock(&datum_sent_h1_lock);
+	if (datum_sent_h1[slot].pot == pot && !strcmp(datum_sent_h1[slot].id, id)) {
+		*h1 = datum_sent_h1[slot].h1;
+		found = true;
+	}
+	pthread_mutex_unlock(&datum_sent_h1_lock);
+	return found;
+}
+
+// Forget every record (tests: a later case reuses an id in another mode).
+void datum_stratum_sent_h1_clear(void) {
+	pthread_mutex_lock(&datum_sent_h1_lock);
+	memset(datum_sent_h1, 0, sizeof(datum_sent_h1));
+	pthread_mutex_unlock(&datum_sent_h1_lock);
+}
+
+// The commitment a notify sends, with every input to it (h1, and h2 in h1->h2), from the coinbase it sends.
+bool datum_stratum_job_blake2b_commitment_h1(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *coinb1, T_DATUM_JOB_H1 *h1) {
+	unsigned char cb_txn[MAX_COINBASE_TXN_SIZE_BYTES];
+	size_t cb_len;
+	
+	if (!h1 || !datum_stratum_job_cb_txn(s, cb, pot, cb_txn, sizeof(cb_txn), &cb_len) ||
+	    !datum_stratum_job_h1_from_txn(s, cb_txn, cb_len, pot, subsidy_only, h1) ||
+	    !datum_blake2b_header_commitment_from_key_hash(h1->h2, h1->version,
+		h1->prevblock, h1->height, h1->merkle_root, h1->time_on_wire, h1->nbits,
+		h1->txcount, h1->flags, h1->clear_bits, h1->xor_key_hash, h1->rhs)) return false;
+	if (coinb1) datum_blake2b_coinb1(coinb1, h1->h2);
+	return true;
+}
+
 // Fill h1 for a job id exactly as mining.notify sent it. False means no such job:
 // never sent in this form, aged out of the ring, or its template slot was reused.
 // Runs on an API thread with no hold on the job, so it checks the job again after
@@ -2001,6 +2077,8 @@ bool datum_stratum_job_h1_for_id(const char *job_id_s, unsigned char pot, T_DATU
 	size_t cb_len;
 	
 	if (!job_id_s || !h1) return false;
+	// what was sent, when it is still on record
+	if (datum_stratum_sent_h1_find(job_id_s, pot, h1)) return true;
 	if (strlen(job_id_s) == 17 && (job_id_s[0] == 'Q' || job_id_s[0] == 'N')) {
 		empty_work = job_id_s[0] == 'N';
 		job_id_s++;
@@ -2023,11 +2101,14 @@ bool datum_stratum_job_h1_for_id(const char *job_id_s, unsigned char pot, T_DATU
 	td = job->block_template;
 	if (!td || td->generation != job->template_generation) return false;
 	
-	// The coinbaser is still writing this job's coinbases.
-	pthread_rwlock_rdlock(&need_coinbaser_rwlocks[job_index]);
-	need_coinbaser = job->need_coinbaser;
-	pthread_rwlock_unlock(&need_coinbaser_rwlocks[job_index]);
-	if (need_coinbaser) return false;
+	// The coinbaser may still be writing this job's full coinbases. An empty job's (N) is made with the job,
+	// before any coinbaser, and never rewritten: it is answered right after a new block whatever the coinbaser does.
+	if (!empty_work) {
+		pthread_rwlock_rdlock(&need_coinbaser_rwlocks[job_index]);
+		need_coinbaser = job->need_coinbaser;
+		pthread_rwlock_unlock(&need_coinbaser_rwlocks[job_index]);
+		if (need_coinbaser) return false;
+	}
 	
 	cb = empty_work ? &job->subsidy_only_coinbase : &job->coinbase[coinbase_index];
 	if (!datum_stratum_job_cb_txn(job, cb, pot, cb_txn, sizeof(cb_txn), &cb_len) ||

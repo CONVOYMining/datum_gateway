@@ -266,9 +266,41 @@ static void datum_blake2b_solo_blind_tests(void) {
 	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
 	tdata.generation = 9;
 	
-	// Neither does a job whose coinbases are still being written.
+	// Neither does a job whose coinbases are still being written, rebuilt from the job...
 	job.need_coinbaser = true;
 	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	// ...but its empty (N) job is: its coinbase is made with the job, before any coinbaser, and goes out first
+	// after a new block. A renter that can't open it ends the rental at every block change.
+	{
+		char nid[32];
+		unsigned char n_h2[32];
+		snprintf(nid, sizeof(nid), "N%sff", job.job_id);
+		datum_test(datum_stratum_job_h1_for_id(nid, 5, &h1));
+		datum_test(datum_stratum_job_blake2b_commitment(&job, &job.subsidy_only_coinbase, true, 5, n_h2, NULL));
+		datum_test(!memcmp(h1.h2, n_h2, 32));
+		datum_test(h1.txcount == 1);
+	}
+	// A full job that went out while the coinbaser was late (sent on coinbase[0] after its 5 s timeout) is
+	// answered as it was sent, from the record notify keeps, and still after the coinbaser rewrites coinbase[0].
+	{
+		T_DATUM_JOB_H1 sent, got;
+		unsigned char was[32];
+		datum_test(datum_stratum_job_blake2b_commitment_h1(&job, &job.coinbase[0], false, 5, NULL, &sent));
+		datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 5, was, NULL));
+		datum_test(!memcmp(sent.h2, was, 32));
+		datum_stratum_sent_h1_record(id, 5, &sent);
+		datum_test(datum_stratum_job_h1_for_id(id, 5, &got));
+		datum_test(!memcmp(got.h2, was, 32));
+		job.coinbase[0].coinb2_bin[0] ^= 0x55; // the late coinbaser's rewrite
+		datum_test(datum_stratum_job_h1_for_id(id, 5, &got));
+		datum_test(!memcmp(got.h2, was, 32));
+		// another pot of the same id was never sent: no record, and the job is still waiting
+		datum_test(!datum_stratum_job_h1_for_id(id, 6, &got));
+		job.coinbase[0].coinb2_bin[0] ^= 0x55;
+		datum_test(!datum_stratum_sent_h1_find("never-sent", 5, &got));
+		datum_stratum_sent_h1_clear();
+		datum_test(!datum_stratum_sent_h1_find(id, 5, &got));
+	}
 	job.need_coinbaser = false;
 	
 	// Pool work says plainly which key it uses.
