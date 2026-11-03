@@ -146,18 +146,166 @@ static void datum_blake2b_client_pot_commitment_tests(void) {
 		&job, cb_txn, cb_len, 14, true, c_from_txn));
 	datum_test(!memcmp(c_from_txn, c_subsidy, 32));
 	
-	// Work without an assignment commits to the null XOR key.
-	tdata.abw_enabled = false;
-	tdata.abw_assignment_id = 0;
+	// Solo work commits to the template's own key whatever ABW says.
 	job.is_datum_job = false;
 	datum_test(datum_stratum_job_blake2b_commitment(
 		&job, &job.coinbase[0], false, 14, c_local, NULL));
 	datum_test(memcmp(c_local, c_pot, sizeof(c_local)) != 0);
 	
 	// Pooled work can also operate without ABW.
+	tdata.abw_enabled = false;
+	tdata.abw_assignment_id = 0;
 	job.is_datum_job = true;
 	datum_test(datum_stratum_job_blake2b_commitment(
 		&job, &job.coinbase[0], false, 14, c_local, NULL));
+}
+
+// What a job at this pot commits to if it uses this key hash and clear_bits.
+static void datum_blake2b_expected_commitment(unsigned char *expected, const T_DATUM_STRATUM_JOB *job,
+	const T_DATUM_STRATUM_COINBASE *cb, unsigned char pot, uint32_t txcount, uint8_t clear_bits, const unsigned char *key_hash) {
+	unsigned char cb_txn[128], merkle[32];
+	const size_t cb_len = (size_t)cb->coinb1_len + 12 + (size_t)cb->coinb2_len;
+	memcpy(cb_txn, cb->coinb1_bin, cb->coinb1_len);
+	memset(cb_txn + cb->coinb1_len, 0, 12);
+	memcpy(cb_txn + cb->coinb1_len + 12, cb->coinb2_bin, cb->coinb2_len);
+	cb_txn[job->target_pot_index] = pot;
+	double_sha256(merkle, cb_txn, cb_len);
+	datum_test(datum_blake2b_header_commitment_from_key_hash(expected, job->block_template->version,
+		job->block_template->previousblockhash_bin, (uint32_t)job->block_template->height, merkle,
+		job->blake2b_time_on_wire, job->block_template->bits_uint, txcount, job->blake2b_flags,
+		clear_bits, key_hash, (const unsigned char[32]){0}));
+}
+
+static void datum_stratum_test_coinbaser_locks(void);
+
+static void datum_blake2b_solo_blind_tests(void) {
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_TEMPLATE_DATA tdata = {0};
+	T_DATUM_JOB_H1 h1;
+	T_DATUM_STRATUM_JOB * const saved_job = global_cur_stratum_jobs[3];
+	const unsigned char key[16] = {1,2,3};
+	unsigned char got[32], want[32], raw[32] = {0}, masked[32];
+	char id[32];
+	
+	datum_stratum_test_coinbaser_locks();
+	tdata.version = 0x20000000;
+	tdata.height = 200;
+	tdata.bits_uint = 0x1d00ffff;
+	tdata.generation = 9;
+	memcpy(tdata.own_xor_key, key, 16);
+	datum_test(datum_blake2b_xor_key_hash(tdata.own_xor_key_hash, key));
+	job.block_template = &tdata;
+	job.template_generation = 9;
+	job.blake2b_time_on_wire = 1000;
+	job.coinbase[0].coinb1_len = 20;
+	job.coinbase[0].coinb2_len = 8;
+	memset(job.coinbase[0].coinb1_bin, 0x11, 20);
+	memset(job.coinbase[0].coinb2_bin, 0x22, 8);
+	job.subsidy_only_coinbase = job.coinbase[0];
+	job.subsidy_only_coinbase.coinb2_bin[0] ^= 0xaa;
+	job.target_pot_index = 4;
+	
+	// Every kind of work commits to the key hash with clear_bits = 32 + pot.
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 0, got, NULL));
+	datum_blake2b_expected_commitment(want, &job, &job.coinbase[0], 0, 1, 32, tdata.own_xor_key_hash);
+	datum_test(!memcmp(got, want, 32));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 5, got, NULL));
+	datum_blake2b_expected_commitment(want, &job, &job.coinbase[0], 5, 1, 37, tdata.own_xor_key_hash);
+	datum_test(!memcmp(got, want, 32));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.subsidy_only_coinbase, true, 5, got, NULL));
+	datum_blake2b_expected_commitment(want, &job, &job.subsidy_only_coinbase, 5, 1, 37, tdata.own_xor_key_hash);
+	datum_test(!memcmp(got, want, 32));
+	
+	// A raw hash at the target is no block once masked, and is never read raw.
+	memset(job.block_target, 0, sizeof(job.block_target));
+	datum_test(!datum_stratum_share_is_unmasked_block(&job, raw));
+	datum_test(!datum_stratum_own_key_share_is_block(&job, raw, 0, masked));
+	datum_test(memcmp(masked, raw, 32) != 0);
+	datum_test(!memcmp(masked + 28, raw + 28, 4)); // the top 32 bits stay clear
+	memset(job.block_target, 0xff, sizeof(job.block_target));
+	datum_test(datum_stratum_own_key_share_is_block(&job, raw, 0, masked));
+	
+	// The job id as notify sends it. Anything else is an unknown job.
+	snprintf(job.job_id, sizeof(job.job_id), "%8.8x%2.2x%4.4x", 0x69052bd0U, 4U, (unsigned int)(3 ^ STRATUM_JOB_INDEX_XOR));
+	global_cur_stratum_jobs[3] = &job;
+	
+	snprintf(id, sizeof(id), "%s00", job.job_id);
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!strcmp(h1.mode, "solo"));
+	datum_test(h1.clear_bits == 37);
+	datum_test(h1.txcount == 1);
+	datum_test(h1.version == 0xa0000000);
+	datum_test(!memcmp(h1.xor_key_hash, tdata.own_xor_key_hash, 32));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 5, got, NULL));
+	datum_test(!memcmp(h1.h2, got, 32));
+	
+	snprintf(id, sizeof(id), "Q%s00", job.job_id);
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!memcmp(h1.h2, got, 32));
+	
+	snprintf(id, sizeof(id), "N%sff", job.job_id);
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.subsidy_only_coinbase, true, 5, got, NULL));
+	datum_test(!memcmp(h1.h2, got, 32));
+	
+	snprintf(id, sizeof(id), "N%s00", job.job_id);
+	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	snprintf(id, sizeof(id), "%sff", job.job_id);
+	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	snprintf(id, sizeof(id), "%s06", job.job_id);
+	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!datum_stratum_job_h1_for_id("", 5, &h1));
+	datum_test(!datum_stratum_job_h1_for_id("zzzzzzzzzzzzzzzz", 5, &h1));
+	snprintf(id, sizeof(id), "%s00", job.job_id);
+	id[9] ^= 1; // a digit stratum_get_job doesn't compare
+	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	
+	// A reused template slot no longer describes the job.
+	snprintf(id, sizeof(id), "%s00", job.job_id);
+	tdata.generation = 10;
+	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	tdata.generation = 9;
+	
+	// Neither does a job whose coinbases are still being written.
+	job.need_coinbaser = true;
+	datum_test(!datum_stratum_job_h1_for_id(id, 5, &h1));
+	job.need_coinbaser = false;
+	
+	// Pool work says plainly which key it uses.
+	job.is_datum_job = true;
+	job.pool_key = true;
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!strcmp(h1.mode, "pool-key"));
+	datum_test(h1.clear_bits == 37);
+	datum_test(!memcmp(h1.xor_key_hash, tdata.own_xor_key_hash, 32));
+	datum_test(datum_stratum_job_blake2b_commitment(&job, &job.coinbase[0], false, 5, got, NULL));
+	datum_test(!memcmp(h1.h2, got, 32));
+	snprintf(id, sizeof(id), "N%sff", job.job_id);
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!strcmp(h1.mode, "pool-key"));
+	datum_test(h1.clear_bits == 37);
+	datum_test(h1.txcount == 1);
+	snprintf(id, sizeof(id), "%s00", job.job_id);
+	memset(job.block_target, 0xff, sizeof(job.block_target));
+	datum_test(!datum_stratum_share_is_unmasked_block(&job, raw));
+	datum_test(datum_stratum_own_key_share_is_block(&job, raw, 0, masked));
+	memset(job.block_target, 0, sizeof(job.block_target));
+	datum_test(!datum_stratum_own_key_share_is_block(&job, raw, 0, masked));
+	job.pool_key = false;
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!strcmp(h1.mode, "pool-null"));
+	datum_test(h1.clear_bits == 0);
+	datum_test(datum_blake2b_xor_key_hash(want, (const unsigned char[16]){0}));
+	datum_test(!memcmp(h1.xor_key_hash, want, 32));
+	tdata.abw_enabled = true;
+	tdata.abw_assignment_id = 1;
+	memset(tdata.xor_key_hash, 0x5a, 32);
+	datum_test(datum_stratum_job_h1_for_id(id, 5, &h1));
+	datum_test(!strcmp(h1.mode, "abw"));
+	datum_test(h1.clear_bits == 37);
+	datum_test(!memcmp(h1.xor_key_hash, tdata.xor_key_hash, 32));
+	
+	global_cur_stratum_jobs[3] = saved_job;
 }
 
 static void datum_blake2b_unmasked_block_tests(void) {
@@ -167,7 +315,7 @@ static void datum_blake2b_unmasked_block_tests(void) {
 	
 	job.block_template = &block_template;
 	memset(job.block_target, 0xff, sizeof(job.block_target));
-	datum_test(datum_stratum_share_is_unmasked_block(&job, hash));
+	datum_test(!datum_stratum_share_is_unmasked_block(&job, hash));
 	job.is_datum_job = true;
 	datum_test(datum_stratum_share_is_unmasked_block(&job, hash));
 	block_template.abw_enabled = true;
@@ -700,6 +848,7 @@ void datum_stratum_tests(void) {
 	datum_stratum_new_thread_empty_work_tests();
 	datum_blake2b_h_not_zero_tests();
 	datum_blake2b_client_pot_commitment_tests();
+	datum_blake2b_solo_blind_tests();
 	datum_blake2b_unmasked_block_tests();
 	datum_stratum_abw_block_request_tests();
 	datum_blake2b_refresh_time_offset_tests();

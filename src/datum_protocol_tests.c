@@ -132,6 +132,7 @@ static void datum_protocol_hello_framing_offer_tests(void) {
 			datum_test(!memcmp(p, "DRS\x01", 4));
 			p = &p[4];
 			datum_test((*p & DATUM_DRS_FRAMING_V2_FLAG) != 0);
+			datum_test((*p & DATUM_DRS_GATEWAY_KEY_FLAG) != 0);
 		}
 	}
 	datum_test(!datum_framing_v2);
@@ -631,7 +632,23 @@ static void datum_protocol_config_v3_tests(void) {
 	datum_test(datum_protocol_is_active());
 	memset(&block_template, 0, sizeof(block_template));
 	datum_test(!datum_protocol_abw_apply_active(&block_template));
+	datum_test(!datum_protocol_gateway_key_supported());
+	// The marker follows the end byte, after DBF if the pool sends that too.
+	memcpy(payload + i, DATUM_CONFIG_MARKER_GATEWAY_KEY, 4);
+	datum_test(datum_protocol_client_configure((int)i + 4, payload));
+	datum_test(datum_protocol_gateway_key_supported());
+	datum_test(!datum_protocol_abw_required());
+	memcpy(payload + i, "DBF\x01", 4);
+	datum_test(datum_protocol_client_configure((int)i + 4, payload));
+	datum_test(!datum_protocol_gateway_key_supported());
+	memcpy(payload + i + 4, DATUM_CONFIG_MARKER_GATEWAY_KEY, 4);
+	datum_test(datum_protocol_client_configure((int)i + 8, payload));
+	datum_test(datum_protocol_gateway_key_supported());
+	// It means nothing alongside ABW.
 	payload[config_flags] = 0;
+	memcpy(payload + i, DATUM_CONFIG_MARKER_GATEWAY_KEY, 4);
+	datum_test(datum_protocol_client_configure((int)i + 4, payload));
+	datum_test(!datum_protocol_gateway_key_supported());
 	datum_test(datum_protocol_client_configure((int)i, payload));
 	datum_test(datum_protocol_abw_required());
 	datum_test(!datum_protocol_is_active());
@@ -1420,6 +1437,28 @@ static void datum_pow_recycled_protocol_job_test(void) {
 	memset(datum_jobs, 0, sizeof(datum_jobs));
 	datum_protocol_next_job_idx = 0;
 	pow.datum_job_id = datum_protocol_setup_new_job_idx(&jobs[0]);
+	
+	// Under the gateway's own key: section 0x06 on every share, the key only on a block.
+	pow.pool_key = true;
+	pow.pool_key_clear_bits = 33;
+	memset(pow.pool_key_hash, 0xab, sizeof(pow.pool_key_hash));
+	memset(pow.pool_xor_key, 0xcd, sizeof(pow.pool_xor_key));
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 174);
+	datum_test(msg[62] == 0x06 && msg[63] == 33 && msg[64] == 0xab && msg[95] == 0xab);
+	datum_test(msg[96] == 0x01);
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	datum_protocol_next_job_idx = 0;
+	pow.datum_job_id = datum_protocol_setup_new_job_idx(&jobs[0]);
+	pow.is_block = true;
+	datum_test(datum_protocol_pow_build_message(&pow, msg, sizeof(msg)) == 191);
+	datum_test(msg[96] == 0x07 && msg[97] == 0xcd && msg[112] == 0xcd);
+	datum_test(msg[113] == 0x01);
+	pow.is_block = false;
+	pow.pool_key = false;
+	memset(datum_jobs, 0, sizeof(datum_jobs));
+	datum_protocol_next_job_idx = 0;
+	pow.datum_job_id = datum_protocol_setup_new_job_idx(&jobs[0]);
+	
 	pow.abw_assignment_id = 1;
 	
 	// First use registers job 0 and its coinbase in remote slot 0.

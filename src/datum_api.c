@@ -1789,6 +1789,160 @@ enum MHD_Result datum_api_testnet_fastforward(struct MHD_Connection * const conn
 	return datum_api_OK(connection);
 }
 
+static enum MHD_Result datum_api_json_response(struct MHD_Connection * const connection, const unsigned int status_code, const char * const json, const size_t len) {
+	struct MHD_Response * const response = MHD_create_response_from_buffer(len, (void *)json, MHD_RESPMEM_MUST_COPY);
+	MHD_add_response_header(response, "Content-Type", "application/json");
+	return datum_api_submit_uncached_response(connection, status_code, response);
+}
+
+static enum MHD_Result datum_api_json_error(struct MHD_Connection * const connection, const unsigned int status_code, const char * const message) {
+	char json[128];
+	const int len = snprintf(json, sizeof(json), "{\"error\":\"%s\"}", message);
+	return datum_api_json_response(connection, status_code, json, (size_t)len);
+}
+
+// A client's address as its family and bytes, with an IPv4 client on a dual-stack socket as IPv4.
+static bool datum_api_client_addr(const struct sockaddr * const sa, int * const family, unsigned char * const addr) {
+	if (sa->sa_family == AF_INET) {
+		*family = AF_INET;
+		memcpy(addr, &((const struct sockaddr_in *)sa)->sin_addr, 4);
+		return true;
+	}
+	if (sa->sa_family == AF_INET6) {
+		const struct in6_addr * const a = &((const struct sockaddr_in6 *)sa)->sin6_addr;
+		if (IN6_IS_ADDR_V4MAPPED(a)) {
+			*family = AF_INET;
+			memcpy(addr, &a->s6_addr[12], 4);
+		} else {
+			*family = AF_INET6;
+			memcpy(addr, a->s6_addr, 16);
+		}
+		return true;
+	}
+	return false;
+}
+
+// One api.xbt_job_allow entry: an address, or a CIDR with a prefix of at least 1.
+// IPv4 is written as IPv4, since a client's mapped address is compared as IPv4.
+static bool datum_api_allow_entry(const char * const entry, const size_t len, int * const family, unsigned char * const addr, unsigned int * const prefix) {
+	char text[INET6_ADDRSTRLEN + 5];
+	if (!len || len >= sizeof(text)) return false;
+	memcpy(text, entry, len);
+	text[len] = 0;
+	
+	char * const slash = strchr(text, '/');
+	if (slash) *slash = 0;
+	struct in6_addr a6;
+	if (inet_pton(AF_INET, text, addr) == 1) {
+		*family = AF_INET;
+		*prefix = 32;
+	} else if (inet_pton(AF_INET6, text, &a6) == 1 && !IN6_IS_ADDR_V4MAPPED(&a6)) {
+		*family = AF_INET6;
+		*prefix = 128;
+		memcpy(addr, a6.s6_addr, 16);
+	} else {
+		return false;
+	}
+	if (slash) {
+		const char * const p = &slash[1];
+		const size_t p_len = strlen(p);
+		if (!p_len || p_len > 3 || strspn(p, "0123456789") != p_len) return false;
+		const unsigned int bits = (unsigned int)atoi(p);
+		if (!bits || bits > *prefix) return false;
+		*prefix = bits;
+	}
+	return true;
+}
+
+bool datum_api_xbt_job_allow_valid(const char * const allow) {
+	int family;
+	unsigned char addr[16];
+	unsigned int prefix;
+	if (!allow[0]) return true;
+	for (const char *p = allow; ; ) {
+		const char * const comma = strchr(p, ',');
+		const size_t len = comma ? (size_t)(comma - p) : strlen(p);
+		if (!datum_api_allow_entry(p, len, &family, addr, &prefix)) return false;
+		if (!comma) return true;
+		p = &comma[1];
+	}
+}
+
+// Is this client on the loopback or in the list? A bad list matches nothing past its first bad entry.
+bool datum_api_xbt_job_client_allowed(const struct sockaddr * const sa, const char * const allow) {
+	int family, entry_family;
+	unsigned char addr[16], entry[16];
+	unsigned int prefix;
+	
+	if (!sa || !datum_api_client_addr(sa, &family, addr)) return false;
+	if (family == AF_INET && addr[0] == 127) return true;
+	if (family == AF_INET6 && !memcmp(addr, in6addr_loopback.s6_addr, 16)) return true;
+	if (!allow || !allow[0]) return false;
+	for (const char *p = allow; ; ) {
+		const char * const comma = strchr(p, ',');
+		const size_t len = comma ? (size_t)(comma - p) : strlen(p);
+		if (!datum_api_allow_entry(p, len, &entry_family, entry, &prefix)) return false;
+		if (entry_family == family) {
+			const unsigned int whole = prefix / 8, rest = prefix % 8;
+			if (!memcmp(addr, entry, whole) && (!rest || !((addr[whole] ^ entry[whole]) & (0xff << (8 - rest))))) return true;
+		}
+		if (!comma) return false;
+		p = &comma[1];
+	}
+}
+
+static void datum_api_hex32(char * const out, const unsigned char * const in, const bool reverse) {
+	for (int i = 0; i < 32; ++i) {
+		uchar_to_hex(&out[i << 1], in[reverse ? 31 - i : i]);
+	}
+	out[64] = 0;
+}
+
+// GET /xbt/job?id=<job id as in mining.notify>&pot=<pot>: every input to h1 for
+// that job, and the h2 they make, so the renter can check the job against coinb1
+// without trusting this gateway. Never the key. Loopback and api.xbt_job_allow
+// only, since the answer holds the consensus target a hasher isn't told.
+enum MHD_Result datum_api_xbt_job(struct MHD_Connection * const connection) {
+	char prevblock[65], merkle_root[65], xor_key_hash[65], rhs[65], h2[65];
+	char json[1024];
+	T_DATUM_JOB_H1 h1;
+	
+	const union MHD_ConnectionInfo * const client = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
+	if (!client || !datum_api_xbt_job_client_allowed(client->client_addr, datum_config.api_xbt_job_allow)) {
+		return datum_api_json_error(connection, MHD_HTTP_FORBIDDEN, "not an allowed caller");
+	}
+	
+	const char * const id = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "id");
+	const char * const pot_s = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "pot");
+	if (!id || !id[0] || !pot_s || !pot_s[0] || strlen(pot_s) > 2 || strspn(pot_s, "0123456789") != strlen(pot_s) || atoi(pot_s) > 63) {
+		// floorPoT of a 64-bit difficulty is at most 63
+		return datum_api_json_error(connection, MHD_HTTP_BAD_REQUEST, "need id and pot (0 to 63)");
+	}
+	const int pot = atoi(pot_s);
+	
+	if (!datum_stratum_job_h1_for_id(id, (unsigned char)pot, &h1)) {
+		return datum_api_json_error(connection, MHD_HTTP_NOT_FOUND, "unknown job");
+	}
+	
+	datum_api_hex32(prevblock, h1.prevblock, true);
+	datum_api_hex32(merkle_root, h1.merkle_root, false);
+	datum_api_hex32(xor_key_hash, h1.xor_key_hash, false);
+	datum_api_hex32(rhs, h1.rhs, false);
+	datum_api_hex32(h2, h1.h2, false);
+	
+	const int len = snprintf(json, sizeof(json),
+		"{\"id\":\"%s\",\"pot\":%d,\"mode\":\"%s\",\"null_key\":%s,"
+		"\"version\":%"PRIu32",\"prevblock\":\"%s\",\"prevblock_order\":\"display\","
+		"\"height\":%"PRIu32",\"merkle_root\":\"%s\",\"time_on_wire\":%"PRIu32","
+		"\"nbits\":%"PRIu32",\"txcount\":%"PRIu32",\"flags\":%u,\"clear_bits\":%u,"
+		"\"xor_key_hash\":\"%s\",\"rhs\":\"%s\",\"h2\":\"%s\"}",
+		id, pot, h1.mode, strcmp(h1.mode, "pool-null") ? "false" : "true",
+		h1.version, prevblock, h1.height, merkle_root, h1.time_on_wire,
+		h1.nbits, h1.txcount, (unsigned)h1.flags, (unsigned)h1.clear_bits,
+		xor_key_hash, rhs, h2);
+	return datum_api_json_response(connection, MHD_HTTP_OK, json, (size_t)len);
+}
+
 struct ConnectionInfo {
 	char *data;
 	size_t data_size;
@@ -1960,6 +2114,13 @@ enum MHD_Result datum_api_answer(void *cls, struct MHD_Connection *connection, c
 			break;
 		}
 		
+		case 'x': {
+			if (int_method == 1 && !strcmp(url, "/xbt/job")) {
+				return datum_api_xbt_job(connection);
+			}
+			break;
+		}
+		
 #ifdef DATUM_API_FOR_UMBREL
 		case 'u': {
 			if (!strcmp(url, "/umbrel-api")) {
@@ -2020,6 +2181,9 @@ void *datum_api_thread(void *ptr) {
 	}
 	
 	DLOG_INFO("API listening on address %s port %d", datum_config.api_listen_addr[0] ? datum_config.api_listen_addr : "(any)", datum_config.api_listen_port);
+	if (datum_config.api_xbt_job_allow[0]) {
+		DLOG_WARN("/xbt/job also answers %s, and its answers hold the consensus target: a hashmaker must not be able to reach it from there", datum_config.api_xbt_job_allow);
+	}
 	
 	while(1) {
 		sleep(3);

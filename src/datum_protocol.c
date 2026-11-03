@@ -171,6 +171,7 @@ static bool datum_requested_resume = false;
 atomic_bool datum_framing_v2 = false;
 static bool datum_connection_configured = false;
 static atomic_bool datum_pool_abw_enabled = true;
+static atomic_bool datum_pool_gateway_key = false;
 
 extern DATUM_QUEUE pow_queue;
 
@@ -1521,8 +1522,13 @@ err:
 	}
 	const bool pool_abw_enabled =
 		!(config_flags & DATUM_CONFIG_FLAG_ABW_DISABLED);
+	const bool pool_bulk_marker = i + 6 <= len && !memcmp(data + i + 2, "DBF\x01", 4);
+	const int gateway_key_marker = i + 2 + (pool_bulk_marker ? 4 : 0);
+	const bool pool_gateway_key = !pool_abw_enabled && gateway_key_marker + 4 <= len &&
+		!memcmp(data + gateway_key_marker, DATUM_CONFIG_MARKER_GATEWAY_KEY, 4);
 	const bool abw_policy_changed = pool_abw_enabled !=
-		atomic_load(&datum_pool_abw_enabled);
+		atomic_load(&datum_pool_abw_enabled) ||
+		pool_gateway_key != atomic_load(&datum_pool_gateway_key);
 	if (first_configuration && !resumed) datum_protocol_clear_validation_context();
 	if ((first_configuration && !resumed) || abw_policy_changed) {
 		datum_queue_clear(&pow_queue);
@@ -1530,9 +1536,9 @@ err:
 		datum_protocol_abw_reset();
 	}
 	atomic_store(&datum_pool_abw_enabled, pool_abw_enabled);
+	atomic_store(&datum_pool_gateway_key, pool_gateway_key);
 	datum_connection_configured = true;
-	atomic_store(&datum_protocol_bulk_enabled, i + 6 <= len &&
-		!memcmp(data + i + 2, "DBF\x01", 4));
+	atomic_store(&datum_protocol_bulk_enabled, pool_bulk_marker);
 	
 	memset(msg, 0, (datum_config.override_mining_pool_scriptpubkey_len << 1) + 2);
 	for(i = 0; i < datum_config.override_mining_pool_scriptpubkey_len; ++i) {
@@ -1550,6 +1556,19 @@ err:
 	}
 	DLOG_DEBUG("DATUM Pool ABW:              %s",
 		pool_abw_enabled ? "enabled" : "disabled");
+	DLOG_DEBUG("DATUM Pool gateway keys:     %s",
+		pool_gateway_key ? "yes" : "no");
+	if (first_configuration || abw_policy_changed) {
+		if (pool_gateway_key) {
+			DLOG_INFO("DATUM pool takes gateway-held xor keys: pool jobs are blinded with this gateway's key");
+		} else if (!pool_abw_enabled) {
+			DLOG_WARN("*****************************************************************************");
+			DLOG_WARN("*** DATUM pool has no ABW and no gateway keys: jobs use the NULL xor key. ***");
+			DLOG_WARN("*** A hasher can see winning shares and withhold them.                    ***");
+			DLOG_WARN("*** /xbt/job reports these jobs as mode pool-null.                        ***");
+			DLOG_WARN("*****************************************************************************");
+		}
+	}
 	
 	const bool became_ready = datum_state != 3;
 	datum_state = 3; // fully ready to make work
@@ -2372,7 +2391,7 @@ int datum_protocol_send_hello(int sockfd) {
 	
 	memcpy(&hello_msg[i], "DRS\x01", 4); i += 4;
 	datum_requested_resume = datum_has_resume_token;
-	const uint8_t drs_flags = DATUM_DRS_FRAMING_V2_FLAG | (datum_requested_resume ? DATUM_DRS_RESUME_TOKEN_FLAG : 0);
+	const uint8_t drs_flags = DATUM_DRS_FRAMING_V2_FLAG | DATUM_DRS_GATEWAY_KEY_FLAG | (datum_requested_resume ? DATUM_DRS_RESUME_TOKEN_FLAG : 0);
 	hello_msg[i++] = drs_flags;
 	if (datum_requested_resume) {
 		memcpy(&hello_msg[i], datum_resume_token, DATUM_RESUME_TOKEN_SIZE);
@@ -2682,7 +2701,7 @@ int datum_protocol_pow_submit(
 	if (!job || !job->block_template || !block_header || !full_cb_tx ||
 	    !raw_pow_hash || job->target_pot_index < 0 ||
 	    (size_t)job->target_pot_index >= full_cb_tx_size ||
-	    (job->block_template->abw_enabled &&
+	    (!job->pool_key && job->block_template->abw_enabled &&
 	     !job->block_template->abw_assignment_id)) return -1;
 	memset(&pow, 0, sizeof(pow));
 	pow.datum_job_id = job->datum_job_idx;
@@ -2698,8 +2717,14 @@ int datum_protocol_pow_submit(
 	pow.sjob = (T_DATUM_STRATUM_JOB *)job;
 	memcpy(pow.stratum_job_id, job->job_id, sizeof(pow.stratum_job_id));
 	pow.blake2b_use_time_offset = (job->blake2b_flags & DATUM_BLAKE2B_USE_TIME_OFFSET) != 0;
-	pow.abw_assignment_id = job->block_template->abw_enabled ?
+	pow.abw_assignment_id = (!job->pool_key && job->block_template->abw_enabled) ?
 		job->block_template->abw_assignment_id : 0;
+	if (job->pool_key) {
+		pow.pool_key = true;
+		pow.pool_key_clear_bits = datum_blake2b_abw_clear_bits(pow.target_byte);
+		memcpy(pow.pool_key_hash, job->block_template->own_xor_key_hash, sizeof(pow.pool_key_hash));
+		if (was_block) memcpy(pow.pool_xor_key, job->block_template->own_xor_key, sizeof(pow.pool_xor_key));
+	}
 	memcpy(pow.raw_pow_hash, raw_pow_hash, sizeof(pow.raw_pow_hash));
 	pow.ntime = upk_u64le(block_header, 40);
 	pow.nonce = upk_u64le(block_header, 32);
@@ -2795,7 +2820,8 @@ static int datum_protocol_pow_build_message_mode(
 	i += 4;
 
 	const size_t pow_extension_size = 23 +
-		(pow->abw_assignment_id ? 2 : 0);
+		(pow->abw_assignment_id ? 2 : 0) +
+		(pow->pool_key ? 34 + (pow->is_block ? 17 : 0) : 0);
 	if ((size_t)i + pow_extension_size >= msg_size) return 0;
 	msg[i++] = 0x03;
 	msg[i++] = DATUM_POW_BLAKE2B;
@@ -2806,6 +2832,15 @@ static int datum_protocol_pow_build_message_mode(
 	if (pow->abw_assignment_id) {
 		msg[i++] = 0x05;
 		msg[i++] = pow->abw_assignment_id - 1;
+	}
+	if (pow->pool_key) {
+		msg[i++] = 0x06;
+		msg[i++] = pow->pool_key_clear_bits;
+		memcpy(&msg[i], pow->pool_key_hash, 32); i += 32;
+		if (pow->is_block) {
+			msg[i++] = 0x07;
+			memcpy(&msg[i], pow->pool_xor_key, 16); i += 16;
+		}
 	}
 
 	pthread_rwlock_rdlock(&datum_jobs_rwlock);
@@ -2970,6 +3005,10 @@ bool datum_protocol_is_active(void) {
 
 bool datum_protocol_abw_required(void) {
 	return atomic_load(&datum_pool_abw_enabled);
+}
+
+bool datum_protocol_gateway_key_supported(void) {
+	return atomic_load(&datum_pool_gateway_key);
 }
 
 void *datum_protocol_client(void *args) {

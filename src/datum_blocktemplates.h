@@ -167,6 +167,12 @@ typedef struct {
 	// Internal token is the compact wire slot plus one.
 	uint8_t		abw_assignment_id;
 	uint8_t		xor_key_hash[32];
+	// This gateway's own xor_key, fresh per template and secret until a block
+	// carries it, so a hasher can't tell a win. Solo jobs use it, and pool jobs
+	// when the pool takes gateway keys. Kept apart from xor_key_hash above,
+	// which holds the pool's ABW assignment.
+	uint8_t		own_xor_key[16];
+	uint8_t		own_xor_key_hash[32];
 	
 	char		bits[9]; //
 	char		dummy[7]; // unused, possibly for alignment
