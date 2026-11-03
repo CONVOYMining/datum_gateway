@@ -40,6 +40,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "datum_stratum.h"
 
@@ -180,6 +181,8 @@ unsigned char datum_protocol_setup_new_job_idx(void *sx);
 int datum_protocol_pow_build_message(T_DATUM_PROTOCOL_POW *pow, unsigned char *msg, size_t msg_size);
 bool datum_protocol_abw_apply_active(T_DATUM_TEMPLATE_DATA *block_template);
 bool datum_protocol_abw_health_ok(void);
+bool datum_protocol_abw_pool_ignored(char hash[65], time_t *at, unsigned int *count);
+uint8_t datum_protocol_abw_retention_gap(unsigned int *slots);
 
 extern uint64_t datum_accepted_share_count;
 extern uint64_t datum_accepted_share_diff;
