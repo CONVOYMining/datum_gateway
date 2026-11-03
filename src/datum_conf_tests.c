@@ -38,7 +38,10 @@
 #include <string.h>
 
 #include <jansson.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
+#include "datum_api.h"
 #include "datum_conf.h"
 #include "datum_jsonrpc.h"
 #include "datum_utils.h"
@@ -297,7 +300,69 @@ void datum_conf_username_mods_tests() {
 	});
 }
 
+#ifdef ENABLE_API
+static bool datum_conf_xbt_allowed4(const char * const ip, const char * const allow) {
+	struct sockaddr_in sa = {.sin_family = AF_INET};
+	datum_test(inet_pton(AF_INET, ip, &sa.sin_addr) == 1);
+	return datum_api_xbt_job_client_allowed((const struct sockaddr *)&sa, allow);
+}
+
+static bool datum_conf_xbt_allowed6(const char * const ip, const char * const allow) {
+	struct sockaddr_in6 sa = {.sin6_family = AF_INET6};
+	datum_test(inet_pton(AF_INET6, ip, &sa.sin6_addr) == 1);
+	return datum_api_xbt_job_client_allowed((const struct sockaddr *)&sa, allow);
+}
+
+static void datum_conf_xbt_job_allow_tests(void) {
+	// Loopback only by default.
+	datum_test(datum_conf_xbt_allowed4("127.0.0.1", ""));
+	datum_test(datum_conf_xbt_allowed4("127.9.9.9", ""));
+	datum_test(datum_conf_xbt_allowed6("::1", ""));
+	datum_test(datum_conf_xbt_allowed6("::ffff:127.0.0.1", ""));
+	datum_test(!datum_conf_xbt_allowed4("172.17.0.5", ""));
+	datum_test(!datum_conf_xbt_allowed6("::ffff:172.17.0.5", ""));
+	datum_test(!datum_conf_xbt_allowed6("fd00::1", ""));
+	
+	// Addresses and CIDRs, in either family, on any prefix boundary.
+	const char * const allow = "172.17.0.0/16,10.1.2.3,192.168.1.128/25,fd00:1::/32";
+	datum_test(datum_api_xbt_job_allow_valid(allow));
+	datum_test(datum_conf_xbt_allowed4("172.17.200.1", allow));
+	datum_test(!datum_conf_xbt_allowed4("172.18.0.1", allow));
+	datum_test(datum_conf_xbt_allowed4("10.1.2.3", allow));
+	datum_test(!datum_conf_xbt_allowed4("10.1.2.4", allow));
+	datum_test(datum_conf_xbt_allowed4("192.168.1.128", allow));
+	datum_test(!datum_conf_xbt_allowed4("192.168.1.127", allow));
+	datum_test(datum_conf_xbt_allowed6("::ffff:172.17.0.5", allow));
+	datum_test(!datum_conf_xbt_allowed6("::ffff:172.18.0.5", allow));
+	datum_test(datum_conf_xbt_allowed6("fd00:1:ffff::1", allow));
+	datum_test(!datum_conf_xbt_allowed6("fd00:2::1", allow));
+	datum_test(datum_conf_xbt_allowed4("127.0.0.1", allow));
+	
+	// Allow-everything and anything unreadable are refused at start.
+	datum_test(datum_api_xbt_job_allow_valid(""));
+	datum_test(datum_api_xbt_job_allow_valid("10.0.0.1/32"));
+	datum_test(datum_api_xbt_job_allow_valid("fd00::1/128"));
+	datum_test(!datum_api_xbt_job_allow_valid("0.0.0.0/0"));
+	datum_test(!datum_api_xbt_job_allow_valid("::/0"));
+	datum_test(!datum_api_xbt_job_allow_valid("10.0.0.1/33"));
+	datum_test(!datum_api_xbt_job_allow_valid("fd00::1/129"));
+	datum_test(!datum_api_xbt_job_allow_valid("10.0.0.1/"));
+	datum_test(!datum_api_xbt_job_allow_valid("10.0.0.1/x"));
+	datum_test(!datum_api_xbt_job_allow_valid("example.com"));
+	datum_test(!datum_api_xbt_job_allow_valid("10.0.0.1, 10.0.0.2"));
+	datum_test(!datum_api_xbt_job_allow_valid("10.0.0.1,"));
+	datum_test(!datum_api_xbt_job_allow_valid(",10.0.0.1"));
+	datum_test(!datum_api_xbt_job_allow_valid("::ffff:10.0.0.1"));
+	
+	// A list that somehow holds a bad entry stops there, and never allows more.
+	datum_test(!datum_conf_xbt_allowed4("10.0.0.2", "nonsense,10.0.0.2"));
+}
+#endif
+
 void datum_conf_tests(void) {
+#ifdef ENABLE_API
+	datum_conf_xbt_job_allow_tests();
+#endif
 	datum_conf_difficulty_tests();
 	datum_conf_test_expected_n_global_nonstale_shares();
 	datum_conf_username_mods_tests();

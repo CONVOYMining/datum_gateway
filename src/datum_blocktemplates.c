@@ -54,6 +54,7 @@
 #include "datum_conf.h"
 #include "datum_stratum.h"
 #include "datum_pow.h"
+#include <sodium.h>
 #include "datum_protocol.h"
 
 volatile sig_atomic_t new_notify = 0;
@@ -102,6 +103,13 @@ const char *datum_blocktemplates_error = NULL;
 int datum_template_init(void) {
 	char *temp = NULL, *ptr = NULL;
 	int i,j;
+	
+	// Template keys come from libsodium, and a gateway with no pool never gets
+	// as far as datum_protocol_init's call.
+	if (sodium_init() < 0) {
+		DLOG_FATAL("libsodium initialization failed");
+		return -1;
+	}
 	
 	template_data = (T_DATUM_TEMPLATE_DATA *)calloc(sizeof(T_DATUM_TEMPLATE_DATA),MAX_TEMPLATES_IN_MEMORY+1);
 	if (!template_data) {
@@ -188,6 +196,9 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 		DLOG_ERROR("Could not get a template pointer.");
 		return NULL;
 	}
+	
+	randombytes_buf(tdata->own_xor_key, sizeof(tdata->own_xor_key));
+	datum_blake2b_xor_key_hash(tdata->own_xor_key_hash, tdata->own_xor_key);
 	
 	tdata->height = json_integer_value(json_object_get(gbt, "height"));
 	if (!tdata->height) {

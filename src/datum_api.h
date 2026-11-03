@@ -60,4 +60,8 @@ typedef struct {
 
 int datum_api_init(void);
 
+struct sockaddr;
+bool datum_api_xbt_job_allow_valid(const char *allow);
+bool datum_api_xbt_job_client_allowed(const struct sockaddr *sa, const char *allow);
+
 #endif

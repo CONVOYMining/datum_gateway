@@ -51,6 +51,9 @@
 #include "datum_jsonrpc.h"
 #include "datum_utils.h"
 #include "datum_sockets.h"
+#ifdef ENABLE_API
+#include "datum_api.h"
+#endif
 
 global_config_t datum_config;
 
@@ -144,6 +147,8 @@ const T_DATUM_CONFIG_ITEM datum_config_options[] = {
 		.required = false, .ptr = &datum_config.api_allow_insecure_auth,				.default_bool = false },
 	{ .var_type = DATUM_CONF_STRING, 	.category = "api", 			.name = "listen_addr",					.description = "IP address to listen for API/dashboard requests",
 		.required = false, .ptr = datum_config.api_listen_addr,				.default_string[0] = "", .max_string_len = sizeof(datum_config.api_listen_addr) },
+	{ .var_type = DATUM_CONF_STRING, 	.category = "api", 			.name = "xbt_job_allow",				.description = "Comma-separated IP addresses or CIDRs, besides loopback, that may read /xbt/job. It discloses the consensus target: never list anything a hashmaker can reach it from",
+		.required = false, .ptr = datum_config.api_xbt_job_allow,				.default_string[0] = "", .max_string_len = sizeof(datum_config.api_xbt_job_allow) },
 	{ .var_type = DATUM_CONF_INT, 		.category = "api",	 		.name = "listen_port",				.description = "Port to listen for API/dashboard requests (0=disabled)",
 		.example = "7152",
 		.required = false, .ptr = &datum_config.api_listen_port, 						.default_int = 0 },
@@ -665,6 +670,10 @@ int datum_read_config(const char *conffile) {
 	}
 	
 #ifdef ENABLE_API
+	if (!datum_api_xbt_job_allow_valid(datum_config.api_xbt_job_allow)) {
+		DLOG_FATAL("api.xbt_job_allow must be comma-separated IP addresses or CIDRs with no spaces, and none may have a /0 prefix");
+		return 0;
+	}
 	datum_config.api_admin_password_len = strlen(datum_config.api_admin_password);
 	if (datum_config.api_admin_password_len) {
 		static const char hash_tag[] = "DATUM Anti-CSRF Token";

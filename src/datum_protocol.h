@@ -64,6 +64,7 @@
 // an incompatible trailer layout requires a new DRS version.
 #define DATUM_DRS_RESUME_TOKEN_FLAG 0x01
 #define DATUM_DRS_FRAMING_V2_FLAG 0x02
+#define DATUM_DRS_GATEWAY_KEY_FLAG 0x80 // this gateway can hold the xor key on pool jobs
 
 // Protocol command 6 carries sequential DBF1 fragments. Only one small
 // fragment is admitted after the primary send queue drains.
@@ -132,6 +133,12 @@ typedef struct {
 	bool blake2b_use_time_offset;
 	// Internal token is wire slot + 1 so zero remains an unset sentinel.
 	uint8_t abw_assignment_id;
+	// A job under this gateway's own key: section 0x06 on every share, and the
+	// key in section 0x07 on a block only.
+	bool pool_key;
+	uint8_t pool_key_clear_bits;
+	unsigned char pool_key_hash[32];
+	unsigned char pool_xor_key[16];
 	unsigned char raw_pow_hash[32];
 	unsigned char target_byte;
 	uint16_t target_byte_index;
@@ -145,6 +152,7 @@ int datum_protocol_init(void);
 int datum_encrypt_generate_keys(DATUM_ENC_KEYS *keys);
 bool datum_protocol_is_active(void);
 bool datum_protocol_abw_required(void);
+bool datum_protocol_gateway_key_supported(void);
 void datum_increment_session_nonce(void *s);
 int datum_protocol_fetch_coinbaser(uint64_t value);
 int datum_protocol_coinbaser_fetch(void *s);
@@ -187,6 +195,10 @@ extern uint64_t datum_rejected_share_count;
 extern uint64_t datum_rejected_share_diff;
 
 #define DATUM_CONFIG_FLAG_ABW_DISABLED 0x01
+// Follows the configuration's end byte (after any DBF marker), and only counts
+// with ABW disabled: the pool takes gateway-held xor keys (DRS flag 0x80,
+// share sections 0x06/0x07).
+#define DATUM_CONFIG_MARKER_GATEWAY_KEY "DGK\x01"
 
 #define DATUM_REJECT_BAD_JOB_ID 10
 #define DATUM_REJECT_BAD_COINBASE_ID 11

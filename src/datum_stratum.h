@@ -122,6 +122,23 @@ typedef struct {
 	int sigops;
 } T_DATUM_TXN_OUTPUT;
 
+// Every input to h1 for one job at one pot, then h2 (what coinb1[3..35] carries).
+typedef struct {
+	const char *mode; // "solo", "pool-key", "abw" or "pool-null"
+	uint32_t version; // as hashed: bit 31 set
+	unsigned char prevblock[32]; // internal order; h1 hashes it reversed (display order)
+	uint32_t height;
+	unsigned char merkle_root[32]; // internal order, as hashed
+	uint32_t time_on_wire;
+	uint32_t nbits;
+	uint32_t txcount;
+	uint8_t flags;
+	uint8_t clear_bits;
+	unsigned char xor_key_hash[32]; // never the key
+	unsigned char rhs[32];
+	unsigned char h2[32];
+} T_DATUM_JOB_H1;
+
 typedef struct T_DATUM_STRATUM_JOB {
 	int global_index;
 	
@@ -140,6 +157,8 @@ typedef struct T_DATUM_STRATUM_JOB {
 	uint8_t blake2b_flags;
 	
 	T_DATUM_TEMPLATE_DATA *block_template;
+	uint64_t template_generation; // the slot's generation when this job took it
+	bool pool_key; // a pool job blinded with this gateway's own key
 	
 	unsigned char merklebranch_count;
 	unsigned char merklebranches_bin[24][32];
@@ -275,6 +294,13 @@ bool datum_stratum_job_blake2b_commitment_from_txn(const T_DATUM_STRATUM_JOB *s,
 bool datum_stratum_job_blake2b_commitment(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *commitment, unsigned char *coinb1);
 bool datum_stratum_share_is_unmasked_block(
 	const T_DATUM_STRATUM_JOB *job, const unsigned char *share_hash);
+bool datum_stratum_own_key_share_is_block(const T_DATUM_STRATUM_JOB *job,
+	const unsigned char *share_hash, unsigned char target_pot, unsigned char *block_hash_le);
+bool datum_stratum_job_h1_for_id(const char *job_id_s, unsigned char pot, T_DATUM_JOB_H1 *h1);
+bool datum_stratum_job_blake2b_commitment_h1(T_DATUM_STRATUM_JOB *s, const T_DATUM_STRATUM_COINBASE *cb, bool subsidy_only, unsigned char pot, unsigned char *coinb1, T_DATUM_JOB_H1 *h1);
+void datum_stratum_sent_h1_record(const char *id, unsigned char pot, const T_DATUM_JOB_H1 *h1);
+bool datum_stratum_sent_h1_find(const char *id, unsigned char pot, T_DATUM_JOB_H1 *h1);
+void datum_stratum_sent_h1_clear(void);
 unsigned int datum_stratum_coinbase_index(const T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const T_DATUM_MINER_DATA *miner, bool new_block);
 void stratum_job_merkle_root_calc(T_DATUM_STRATUM_JOB *s, unsigned char *coinbase_txn_hash, unsigned char *merkle_root_output);
 int assembleBlockAndSubmit(uint8_t *block_header, uint8_t *coinbase_txn, size_t coinbase_txn_size, T_DATUM_STRATUM_JOB *job, T_DATUM_STRATUM_THREADPOOL_DATA *sdata, const char *block_hash_hex, bool empty_work, const unsigned char *extranonce);
