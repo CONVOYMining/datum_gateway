@@ -89,6 +89,8 @@ void datum_protocol_replay_mark_responded_legacy(
 
 void datum_protocol_abw_reset(void);
 void datum_protocol_abw_saturate_pending_for_tests(uint8_t assignment_id);
+void datum_protocol_abw_clear_pool_ignored_for_tests(void);
+void datum_protocol_abw_set_gap_for_tests(uint8_t assignment_id);
 bool datum_protocol_abw_assignment_revealed(uint8_t assignment_id);
 bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	const unsigned char *full_cb_tx, size_t full_cb_tx_size,

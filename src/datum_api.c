@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <microhttpd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -131,14 +132,39 @@ bool datum_api_var_DATUM_CONNECTION_STATUS(struct buf * const buf, const T_DATUM
 	const char *colour = "lime";
 	const char *s, *s2 = "";
 	const char * const bt_err = datum_blocktemplates_error;
-	if (!datum_protocol_abw_health_ok()) {
+	char detail[256];
+	char ignored_hash[65] = {0};
+	time_t ignored_at = 0;
+	unsigned int ignored_count = 0;
+	uint8_t retention_gap = 0;
+	unsigned int gap_slots = 0;
+	if (datum_protocol_abw_pool_ignored(ignored_hash, &ignored_at, &ignored_count)) {
+		struct tm tm;
+		char when[32] = "unknown time";
+		if (ignored_at && gmtime_r(&ignored_at, &tm)) {
+			strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S UTC", &tm);
+		}
 		colour = "red";
 		s = "CRITICAL: ";
-		s2 = "DATUM pool ignored a valid block";
+		if (ignored_count > 1) {
+			snprintf(detail, sizeof(detail), "DATUM pool ignored %u valid blocks; the latest was %s at %s", ignored_count, ignored_hash, when);
+		} else {
+			snprintf(detail, sizeof(detail), "DATUM pool ignored a valid block, %s at %s", ignored_hash, when);
+		}
+		s2 = detail;
 	} else if (bt_err) {
 		colour = "red";
 		s = "ERROR: ";
 		s2 = bt_err;
+	} else if ((retention_gap = datum_protocol_abw_retention_gap(&gap_slots))) {
+		colour = "orange";
+		s = "WARNING: ";
+		if (gap_slots > 1) {
+			snprintf(detail, sizeof(detail), "Withholding check incomplete for ABW assignment slot %u and %u other%s (shares could not be retained for checking); shares still go to the pool", (unsigned)(retention_gap - 1), gap_slots - 1, gap_slots > 2 ? "s" : "");
+		} else {
+			snprintf(detail, sizeof(detail), "Withholding check incomplete for ABW assignment slot %u (shares could not be retained for checking); shares still go to the pool", (unsigned)(retention_gap - 1));
+		}
+		s2 = detail;
 	} else if (!vardata->sjob) {
 		colour = "silver";
 		s = "Initialising...";

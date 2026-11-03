@@ -45,6 +45,7 @@
 #include <inttypes.h>
 #include <curl/curl.h>
 #include <stdatomic.h>
+#include <sodium.h>
 #include <signal.h>
 
 #include "datum_gateway.h"
@@ -131,7 +132,20 @@ int datum_template_init(void) {
 	return 1;
 }
 
+void datum_template_set_content_hash(T_DATUM_TEMPLATE_DATA *p) {
+	crypto_hash_sha256_state st;
+	unsigned char count[4];
+	crypto_hash_sha256_init(&st);
+	pk_u32le(count, 0, p->txn_count);
+	crypto_hash_sha256_update(&st, count, sizeof(count));
+	for (uint32_t i = 0; p->txns && i < p->txn_count; ++i) {
+		crypto_hash_sha256_update(&st, p->txns[i].hash_bin, 32);
+	}
+	crypto_hash_sha256_final(&st, p->txn_content_hash);
+}
+
 void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
+	memset(p->txn_content_hash, 0, sizeof(p->txn_content_hash));
 	p->coinbasevalue = 0;
 	p->txn_count = 0;
 	p->txn_total_size = 0;
@@ -382,6 +396,7 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 		}
 	}
 	
+	datum_template_set_content_hash(tdata);
 	return tdata;
 }
 
