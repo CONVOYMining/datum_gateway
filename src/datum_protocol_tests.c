@@ -48,6 +48,7 @@
 
 extern DATUM_QUEUE pow_queue;
 extern atomic_int new_notify_threadsafe;
+extern atomic_int notify_refresh;
 extern volatile char new_notify_blockhash[256];
 extern DATUM_ENC_KEYS local_datum_keys, session_datum_keys;
 extern DATUM_ENC_KEYS session_remote_datum_keys, pool_keys;
@@ -498,17 +499,24 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_blake2b_xor_key_hash(notice + 4, xor_key));
 	notice[36] = 0xFE;
 	atomic_store(&new_notify_threadsafe, 0);
+	atomic_store(&notify_refresh, 0);
 	
+	/* An assignment that is not active changes no work. */
 	datum_test(datum_protocol_mining_cmd5(&header, notice));
 	datum_test(!datum_protocol_abw_apply_active(&block_template));
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(!atomic_load(&notify_refresh));
 	
+	/* The first activation asks for work, as a work update and not a block notification. */
 	header.cmd_len = sizeof(activation);
 	datum_test(datum_protocol_mining_cmd5(&header, activation));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 1);
-	datum_test(atomic_load(&new_notify_threadsafe));
-	atomic_store(&new_notify_threadsafe, 0);
+	datum_test(atomic_exchange(&notify_refresh, 0));
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	/* The same assignment activated again changes nothing. */
+	datum_test(datum_protocol_mining_cmd5(&header, activation));
+	datum_test(!atomic_load(&notify_refresh));
 	
 	block_template.height++;
 	datum_test(datum_protocol_abw_apply_active(&block_template));
@@ -521,15 +529,18 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_protocol_mining_cmd5(&header, notice));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 1);
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(!atomic_load(&notify_refresh));
 	
+	/* Moving to the next assignment asks for work at once, so the current job does
+	   not stay on the old one until the next work update, past its disclosure. */
 	activation[2] = 1;
 	header.cmd_len = sizeof(activation);
 	datum_test(datum_protocol_mining_cmd5(&header, activation));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 2);
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(atomic_exchange(&notify_refresh, 0));
 	
+	/* So does an assignment notice that is active on arrival. */
 	notice[2] = DATUM_ABW_ASSIGNMENT_ACTIVE;
 	notice[3] = 2;
 	xor_key[0] ^= 2;
@@ -538,9 +549,29 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_protocol_mining_cmd5(&header, notice));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 3);
+	datum_test(atomic_exchange(&notify_refresh, 0));
 	datum_test(!atomic_load(&new_notify_threadsafe));
 	
+	/* Disclosing the active assignment leaves none active, so work is held; the
+	   next activation, of one already assigned, asks for work again. */
+	{
+		unsigned char reveal[20] = {0xA9, DATUM_ABW_DRAFT_REVISION, 2};
+		memcpy(reveal + 3, xor_key, sizeof(xor_key));
+		reveal[19] = 0xFE;
+		header.cmd_len = sizeof(reveal);
+		datum_test(datum_protocol_mining_cmd5(&header, reveal) == 1);
+		datum_test(!datum_protocol_abw_apply_active(&block_template));
+		datum_test(!atomic_load(&notify_refresh));
+		activation[2] = 1;
+		header.cmd_len = sizeof(activation);
+		datum_test(datum_protocol_mining_cmd5(&header, activation));
+		datum_test(datum_protocol_abw_apply_active(&block_template));
+		datum_test(block_template.abw_assignment_id == 2);
+		datum_test(atomic_exchange(&notify_refresh, 0));
+	}
+	
 	atomic_store(&new_notify_threadsafe, 0);
+	atomic_store(&notify_refresh, 0);
 	datum_protocol_abw_reset();
 }
 
@@ -1186,6 +1217,7 @@ static void datum_protocol_abw_cache_tests(void) {
 	
 	datum_protocol_abw_reset();
 	datum_protocol_replay_clear();
+	datum_protocol_abw_clear_pool_ignored_for_tests();
 	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal));
 	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
 	datum_test(datum_protocol_abw_assignment_notice(sizeof(notice), notice));
@@ -1266,6 +1298,18 @@ static void datum_protocol_abw_cache_tests(void) {
 	atomic_store(&new_notify_threadsafe, 0);
 	new_notify_blockhash[0] = '\0';
 	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == -1);
+	{
+		/* A real non-disclosure is recorded with its block and time. */
+		char ignored_hash[65] = {0};
+		time_t ignored_at = 0;
+		unsigned int ignored_count = 0;
+		datum_test(datum_protocol_abw_pool_ignored(ignored_hash, &ignored_at, &ignored_count));
+		datum_test(ignored_count == 1);
+		datum_test(ignored_at > 0);
+		datum_test(!strcmp(ignored_hash,
+			"0000000000000000000000000000000000000000000000000000000000000000"));
+		datum_test(!datum_protocol_abw_health_ok());
+	}
 	datum_test(atomic_load(&new_notify_threadsafe));
 	datum_test(!strcmp((const char *)new_notify_blockhash,
 		"0000000000000000000000000000000000000000000000000000000000000000"));
@@ -1305,6 +1349,180 @@ static void datum_protocol_abw_cache_tests(void) {
 	datum_test(datum_protocol_test_pow_handler_count == 1);
 	datum_test(datum_queue_free(&pow_queue) == 0);
 	
+	datum_protocol_abw_reset();
+	datum_protocol_replay_clear();
+	datum_protocol_abw_clear_pool_ignored_for_tests();
+}
+
+/*
+ * The template cache is keyed by content, and a share that cannot be retained is a
+ * gap for its assignment, not a pool alarm. Keyed by template generation, every work
+ * update took a slot of its own, and the 257th update within one assignment found the
+ * cache full; from then on every share went unchecked and the dashboard said the pool
+ * had ignored a valid block, until the Gateway was restarted.
+ */
+static void datum_protocol_abw_retention_tests(void) {
+	unsigned char xor_key[16];
+	unsigned char key_hash[32];
+	unsigned char raw_hash[32];
+	unsigned char coinbase[16] = {1, 0, 0, 0, 1};
+	char txn_hex[] = "00";
+	T_DATUM_TEMPLATE_TXN txn = {0};
+	T_DATUM_TEMPLATE_DATA block_template = {0};
+	T_DATUM_STRATUM_JOB job = {0};
+	T_DATUM_PROTOCOL_POW pow = {0};
+	for (size_t i = 0; i < sizeof(xor_key); ++i) {
+		xor_key[i] = (unsigned char)(i + 1);
+	}
+	datum_test(datum_blake2b_xor_key_hash(key_hash, xor_key));
+	unsigned char active_notice[36] = {
+		DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 3,
+	};
+	memcpy(active_notice + 3, key_hash, sizeof(key_hash));
+	active_notice[35] = 0xFE;
+
+	datum_protocol_abw_reset();
+	datum_protocol_replay_clear();
+	datum_protocol_abw_clear_pool_ignored_for_tests();
+	const bool saved_verify_all = datum_config.mining_abw_verify_all_shares_on_disclosure;
+	datum_config.mining_abw_verify_all_shares_on_disclosure = false;
+	datum_test(datum_protocol_abw_assignment_notice(sizeof(active_notice), active_notice));
+	datum_test(datum_protocol_abw_apply_active(&block_template));
+	datum_test(block_template.abw_assignment_id == 4);
+	datum_test(datum_protocol_abw_health_ok());
+
+	block_template.version = UINT32_C(0x20000000);
+	block_template.height = 42;
+	block_template.bits_uint = UINT32_C(0x1d00ffff);
+	txn.size = 1;
+	txn.txn_data_hex = txn_hex;
+	block_template.txns = &txn;
+	block_template.txn_count = 1;
+	block_template.txn_total_size = 1;
+	datum_template_set_content_hash(&block_template);
+	job.block_template = &block_template;
+	job.version_uint = block_template.version;
+	job.height = block_template.height;
+	job.nbits_uint = block_template.bits_uint;
+	job.target_pot_index = 4;
+	job.blake2b_time_on_wire = 1000;
+	pow.sjob = &job;
+	pow.datum_job_id = 2;
+	pow.abw_assignment_id = 4;
+	pow.target_byte = 10;
+	pow.ntime = 1000;
+	// High hashes, so no retained share reads as a block when the key is revealed.
+	memset(raw_hash, 0xff, sizeof(raw_hash));
+
+	/* 300 work updates with unchanged transactions: one cached template, no gap. */
+	bool all_cached = true;
+	for (uint32_t i = 0; i < 300; ++i) {
+		block_template.generation = 1000 + i;
+		pow.nonce = i;
+		pk_u32le(raw_hash, 0, i);
+		all_cached &= datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash);
+	}
+	datum_test(all_cached);
+	datum_test(datum_protocol_abw_retention_gap(NULL) == 0);
+
+	/* Distinct transactions each need a slot, so enough of them fill the cache. */
+	int first_failure = -1;
+	for (uint32_t i = 0; i < 300 && first_failure < 0; ++i) {
+		pk_u32le(txn.hash_bin, 0, i + 1);
+		datum_template_set_content_hash(&block_template);
+		block_template.generation = 5000 + i;
+		pow.nonce = 1000 + i;
+		pk_u32le(raw_hash, 0, 1000 + i);
+		if (!datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash)) {
+			first_failure = (int)i;
+		}
+	}
+	datum_test(first_failure > 0);
+
+	/* A share that cannot be retained still reaches the pool, and is a gap for this
+	   assignment: a warning, not the pool alarm. */
+	unsigned char header[DATUM_BLAKE2B_BLOCK_HEADER_SIZE] = {0};
+	unsigned char extranonce[12] = {0};
+	job.datum_job_idx = 2;
+	job.target_pot_index = 0;
+	memcpy(job.job_id, "retention-gap", sizeof("retention-gap"));
+	pk_u32le(txn.hash_bin, 0, UINT32_C(0xfffffff0));
+	datum_template_set_content_hash(&block_template);
+	pk_u32le(raw_hash, 0, UINT32_C(0xfffffff0));
+	datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
+		datum_protocol_test_pow_handler) == 0);
+	datum_protocol_test_pow_handler_count = 0;
+	// A full-template share: subsidy-only shares need no cached template.
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, false,
+		false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+		extranonce, 0xff) == 0);
+	datum_test(datum_queue_process(&pow_queue) == 1);
+	datum_test(datum_protocol_test_pow_handler_count == 1);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	datum_test(datum_protocol_abw_retention_gap(NULL) == 4);
+	datum_test(!datum_protocol_abw_health_ok());
+	datum_test(!datum_protocol_abw_pool_ignored(NULL, NULL, NULL));
+
+	/* Disclosing the assignment ends the gap. */
+	unsigned char reveal[19] = {DATUM_ABW_DRAFT_REVISION, 3};
+	memcpy(reveal + 2, xor_key, sizeof(xor_key));
+	reveal[18] = 0xFE;
+	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == 1);
+	datum_test(datum_protocol_abw_retention_gap(NULL) == 0);
+	datum_test(!datum_protocol_abw_pool_ignored(NULL, NULL, NULL));
+	datum_test(datum_protocol_abw_health_ok());
+
+	/* A share under the disclosed assignment is stale: the pool cannot credit it.
+	   It is not queued, and says so apart from a failed submission. */
+	datum_protocol_test_pow_handler_count = 0;
+	datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
+		datum_protocol_test_pow_handler) == 0);
+	pk_u32le(raw_hash, 0, UINT32_C(0xfffffff1));
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, false,
+		false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+		extranonce, 0xff) == DATUM_POW_SUBMIT_ASSIGNMENT_DISCLOSED);
+	datum_test(datum_queue_process(&pow_queue) == 0);
+	datum_test(datum_protocol_test_pow_handler_count == 0);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	datum_test(datum_protocol_abw_retention_gap(NULL) == 0);
+	datum_test(datum_protocol_abw_health_ok());
+
+	/* Reusing a slot for a new assignment, and a fresh session configuration, each
+	   end a gap. Set one, then end it each way. */
+	unsigned int gap_slots = 0;
+	for (int way = 0; way < 2; ++way) {
+		datum_protocol_abw_reset();
+		datum_test(datum_protocol_abw_assignment_notice(sizeof(active_notice), active_notice));
+		datum_test(datum_protocol_abw_apply_active(&block_template));
+		datum_protocol_abw_saturate_pending_for_tests(4);
+		datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
+			datum_protocol_test_pow_handler) == 0);
+		datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, false,
+			false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+			extranonce, 0xff) == 0);
+		datum_test(datum_queue_process(&pow_queue) == 1);
+		datum_test(datum_queue_free(&pow_queue) == 0);
+		datum_test(datum_protocol_abw_retention_gap(&gap_slots) == 4 && gap_slots == 1);
+		if (way == 0) {
+			datum_protocol_abw_reset();
+		} else {
+			// Reveal, then install a new assignment in the same slot. The reveal
+			// already ends this gap, so reinstall is checked on a gap set directly
+			// after it: under the new key, before any share.
+			datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == 1);
+			unsigned char next_key[16];
+			for (size_t i = 0; i < sizeof(next_key); ++i) next_key[i] = (unsigned char)(0x40 + i);
+			unsigned char next_notice[36] = {DATUM_ABW_DRAFT_REVISION, DATUM_ABW_ASSIGNMENT_ACTIVE, 3};
+			datum_test(datum_blake2b_xor_key_hash(next_notice + 3, next_key));
+			next_notice[35] = 0xFE;
+			datum_protocol_abw_set_gap_for_tests(4);
+			datum_test(datum_protocol_abw_retention_gap(NULL) == 4);
+			datum_test(datum_protocol_abw_assignment_notice(sizeof(next_notice), next_notice));
+		}
+		datum_test(datum_protocol_abw_retention_gap(&gap_slots) == 0 && gap_slots == 0);
+	}
+
+	datum_config.mining_abw_verify_all_shares_on_disclosure = saved_verify_all;
 	datum_protocol_abw_reset();
 	datum_protocol_replay_clear();
 }
@@ -1642,6 +1860,7 @@ void datum_protocol_tests(void) {
 	datum_protocol_bulk_tests();
 	datum_protocol_resume_tests();
 	datum_protocol_abw_cache_tests();
+	datum_protocol_abw_retention_tests();
 	datum_pow_response_large_difficulty_test();
 	datum_pow_recycled_protocol_job_test();
 	datum_protocol_stxlist_byid_tests();

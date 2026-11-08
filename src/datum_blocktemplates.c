@@ -45,6 +45,7 @@
 #include <inttypes.h>
 #include <curl/curl.h>
 #include <stdatomic.h>
+#include <sodium.h>
 #include <signal.h>
 
 #include "datum_gateway.h"
@@ -83,6 +84,15 @@ void datum_blocktemplates_notifynew(const char * const prevhash, const int heigh
 
 void datum_blocktemplates_notify_othercause() {
 	notify_othercause = 1;
+}
+
+// A work update on the current tip, now rather than at the end of the update interval.
+// Unlike notifynew it is no block notification: the template thread fetches a template
+// at once and, if the tip is unchanged, sends it as a standard job, without clean_jobs.
+atomic_int notify_refresh = 0;
+
+void datum_blocktemplates_notify_refresh(void) {
+	atomic_store(&notify_refresh, 1);
 }
 
 bool datum_blocktemplates_abw_ready(T_DATUM_TEMPLATE_DATA *block_template,
@@ -131,7 +141,20 @@ int datum_template_init(void) {
 	return 1;
 }
 
+void datum_template_set_content_hash(T_DATUM_TEMPLATE_DATA *p) {
+	crypto_hash_sha256_state st;
+	unsigned char count[4];
+	crypto_hash_sha256_init(&st);
+	pk_u32le(count, 0, p->txn_count);
+	crypto_hash_sha256_update(&st, count, sizeof(count));
+	for (uint32_t i = 0; p->txns && i < p->txn_count; ++i) {
+		crypto_hash_sha256_update(&st, p->txns[i].hash_bin, 32);
+	}
+	crypto_hash_sha256_final(&st, p->txn_content_hash);
+}
+
 void datum_template_clear(T_DATUM_TEMPLATE_DATA* p) {
+	memset(p->txn_content_hash, 0, sizeof(p->txn_content_hash));
 	p->coinbasevalue = 0;
 	p->txn_count = 0;
 	p->txn_total_size = 0;
@@ -382,6 +405,7 @@ T_DATUM_TEMPLATE_DATA *datum_gbt_parser(json_t *gbt) {
 		}
 	}
 	
+	datum_template_set_content_hash(tdata);
 	return tdata;
 }
 
@@ -480,6 +504,11 @@ void *datum_gateway_template_thread(void *args) {
 	
 	while(1) {
 		i++;
+		
+		// The template fetched below answers any refresh asked for so far. Not while a
+		// block notification is being chased, since that can end without a job; the
+		// request then stands and ends the next wait at once.
+		if (!was_notified) atomic_store(&notify_refresh, 0);
 		
 		// fetch latest template
 		snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
@@ -623,6 +652,10 @@ void *datum_gateway_template_thread(void *args) {
 					was_notified = 1;
 					wnc = 0;
 					DLOG_INFO("NEW NETWORK BLOCK NOTIFICATION RECEIVED");
+					break;
+				}
+				if (atomic_load(&notify_refresh)) {
+					DLOG_DEBUG("Work update requested before the update interval");
 					break;
 				}
 			}

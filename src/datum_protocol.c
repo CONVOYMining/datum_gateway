@@ -685,7 +685,7 @@ typedef struct {
 
 typedef struct {
 	uint8_t assignment_id;
-	uint64_t source_generation;
+	unsigned char content_hash[32];
 	uint32_t transaction_count;
 	char *transactions_hex;
 	size_t transactions_hex_size;
@@ -714,11 +714,60 @@ static unsigned char datum_abw_active_key_hash[32] = {0};
 static T_DATUM_ABW_ASSIGNMENT datum_abw_assignments[DATUM_ABW_ASSIGNMENT_SLOTS] = {{0}};
 static T_DATUM_ABW_PENDING datum_abw_pending[DATUM_ABW_PENDING_CACHE] = {{0}};
 static T_DATUM_ABW_TEMPLATE datum_abw_templates[DATUM_ABW_TEMPLATE_CACHE] = {{0}};
-static atomic_bool datum_abw_health_latched = true;
+/*
+ * Two conditions that the dashboard used to report as one, "DATUM pool ignored a
+ * valid block".
+ *
+ * The first is exactly that: a reveal showed that a block found here was one the
+ * pool had not handled. It latches until restart, and records which block and when,
+ * so an operator can look it up.
+ *
+ * The second is local. A share could not be kept for checking against its
+ * assignment's reveal (the candidate cache was full, or the share could not be
+ * copied), so a block withheld among that assignment's shares would go unnoticed.
+ * It says nothing about the pool. It ends when that assignment is disclosed or its
+ * slot is reused, because the next assignment is checked from a fresh start.
+ */
+_Static_assert(DATUM_ABW_ASSIGNMENT_SLOTS <= 32, "one gap bit per assignment slot");
+static atomic_bool datum_abw_pool_ignored = false;
+static char datum_abw_ignored_hash[65] = {0};          // guarded by datum_abw_mutex
+static time_t datum_abw_ignored_at = 0;                 // guarded by datum_abw_mutex
+static unsigned int datum_abw_ignored_count = 0;        // guarded by datum_abw_mutex
+// Written under datum_abw_mutex, read without it so the dashboard never waits on the cache.
+static atomic_uint_least32_t datum_abw_retention_gaps = 0;
+static uint32_t datum_abw_unretained[DATUM_ABW_ASSIGNMENT_SLOTS] = {0}; // guarded by datum_abw_mutex
 
-bool datum_protocol_abw_health_ok(void) {
-	return atomic_load(&datum_abw_health_latched);
+bool datum_protocol_abw_pool_ignored(char hash[65], time_t *at, unsigned int *count) {
+	if (!atomic_load(&datum_abw_pool_ignored)) return false;
+	pthread_mutex_lock(&datum_abw_mutex);
+	if (hash) memcpy(hash, datum_abw_ignored_hash, sizeof(datum_abw_ignored_hash));
+	if (at) *at = datum_abw_ignored_at;
+	if (count) *count = datum_abw_ignored_count;
+	pthread_mutex_unlock(&datum_abw_mutex);
+	return true;
 }
+
+// The lowest assignment slot (1-based) with a gap, or 0; `slots` gets how many have one.
+uint8_t datum_protocol_abw_retention_gap(unsigned int *slots) {
+	const uint32_t gaps = (uint32_t)atomic_load(&datum_abw_retention_gaps);
+	if (slots) *slots = (unsigned int)__builtin_popcount(gaps);
+	return gaps ? (uint8_t)(__builtin_ctz(gaps) + 1) : 0;
+}
+
+// Used by the tests; the dashboard reads the two conditions separately.
+bool datum_protocol_abw_health_ok(void) {
+	return !atomic_load(&datum_abw_pool_ignored) && !datum_protocol_abw_retention_gap(NULL);
+}
+
+// Caller holds datum_abw_mutex. Returns how many shares went unchecked.
+static uint32_t datum_protocol_abw_close_gap_locked(uint8_t assignment_id) {
+	if (!assignment_id || assignment_id > DATUM_ABW_ASSIGNMENT_SLOTS) return 0;
+	const uint32_t missed = datum_abw_unretained[assignment_id - 1];
+	datum_abw_unretained[assignment_id - 1] = 0;
+	atomic_fetch_and(&datum_abw_retention_gaps, ~(UINT32_C(1) << (assignment_id - 1)));
+	return missed;
+}
+
 
 static bool datum_protocol_abw_active(void) {
 	bool active;
@@ -759,9 +808,25 @@ void datum_protocol_abw_reset(void) {
 		memset(&datum_abw_templates[i], 0, sizeof(datum_abw_templates[i]));
 	}
 	memset(datum_abw_assignments, 0, sizeof(datum_abw_assignments));
+	atomic_store(&datum_abw_retention_gaps, 0);
+	memset(datum_abw_unretained, 0, sizeof(datum_abw_unretained));
 	datum_abw_active_assignment_id = 0;
 	memset(datum_abw_active_key_hash, 0, sizeof(datum_abw_active_key_hash));
 	pthread_mutex_unlock(&datum_abw_mutex);
+}
+
+void datum_protocol_abw_clear_pool_ignored_for_tests(void) {
+	pthread_mutex_lock(&datum_abw_mutex);
+	memset(datum_abw_ignored_hash, 0, sizeof(datum_abw_ignored_hash));
+	datum_abw_ignored_at = 0;
+	datum_abw_ignored_count = 0;
+	pthread_mutex_unlock(&datum_abw_mutex);
+	atomic_store(&datum_abw_pool_ignored, false);
+}
+
+void datum_protocol_abw_set_gap_for_tests(uint8_t assignment_id) {
+	if (!assignment_id || assignment_id > DATUM_ABW_ASSIGNMENT_SLOTS) return;
+	atomic_fetch_or(&datum_abw_retention_gaps, UINT32_C(1) << (assignment_id - 1));
 }
 
 void datum_protocol_abw_saturate_pending_for_tests(uint8_t assignment_id) {
@@ -817,6 +882,7 @@ static bool datum_protocol_abw_install_assignment_locked(
 	entry->id = assignment_id;
 	memcpy(entry->key_hash, key_hash, 32);
 	entry->revealed = false;
+	datum_protocol_abw_close_gap_locked(assignment_id);
 	return true;
 }
 
@@ -849,9 +915,10 @@ bool datum_protocol_abw_apply_active(T_DATUM_TEMPLATE_DATA *block_template) {
 
 static bool datum_protocol_abw_template_matches_source(
 	const T_DATUM_ABW_TEMPLATE *block_template,
-	const T_DATUM_TEMPLATE_DATA *source, bool needs_witness) {
+	const T_DATUM_TEMPLATE_DATA *source, bool needs_witness,
+	const unsigned char content_hash[32]) {
 	if (!block_template || !source ||
-	    block_template->source_generation != source->generation ||
+	    sodium_memcmp(block_template->content_hash, content_hash, 32) != 0 ||
 	    block_template->transaction_count != source->txn_count ||
 	    block_template->transactions_hex_size !=
 		(size_t)source->txn_total_size * 2 ||
@@ -906,6 +973,15 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 		free(coinbase);
 		return false;
 	}
+	/*
+	 * Cached templates are matched by content, not by generation. Every work update
+	 * is a new generation even when its transactions are unchanged, so keyed by
+	 * generation each update with a share took a slot until the assignment was
+	 * disclosed, and an assignment that outlived 256 such updates ran out. The
+	 * hash covers the count and ordered wtxids, which commit to each transaction's
+	 * full serialization; it is computed once, when the template is built.
+	 */
+	const unsigned char *const content_hash = source->txn_content_hash;
 	if (pow->subsidy_only) {
 		memcpy(merkle, coinbase_hash, sizeof(merkle));
 	} else {
@@ -938,7 +1014,7 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 	     i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
 		if (datum_abw_templates[i].assignment_id == pow->abw_assignment_id &&
 		    datum_protocol_abw_template_matches_source(
-			&datum_abw_templates[i], source, needs_witness)) {
+			&datum_abw_templates[i], source, needs_witness, content_hash)) {
 			block_template = &datum_abw_templates[i];
 			break;
 		}
@@ -1011,7 +1087,7 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 		for (size_t i = 0; i < DATUM_ABW_TEMPLATE_CACHE; ++i) {
 			if (datum_abw_templates[i].assignment_id == pow->abw_assignment_id &&
 			    datum_protocol_abw_template_matches_source(
-				&datum_abw_templates[i], source, needs_witness)) {
+				&datum_abw_templates[i], source, needs_witness, content_hash)) {
 				block_template = &datum_abw_templates[i];
 				break;
 			}
@@ -1025,7 +1101,7 @@ bool datum_protocol_abw_cache_candidate(const T_DATUM_PROTOCOL_POW *pow,
 			}
 			if (block_template) {
 				block_template->assignment_id = pow->abw_assignment_id;
-				block_template->source_generation = source->generation;
+				memcpy(block_template->content_hash, content_hash, 32);
 				block_template->transaction_count = source->txn_count;
 				block_template->transactions_hex = transactions_hex;
 				block_template->transactions_hex_size = transactions_hex_size;
@@ -1110,6 +1186,21 @@ int datum_protocol_abw_candidate_release(int len, unsigned char *data) {
 	return 1;
 }
 
+// Work is stamped with the assignment active when its template is fetched. The pool can
+// disclose an assignment soon after it moves on to the next, and waiting for the next
+// work update to pick that up left the current job on the old assignment for up to the
+// whole update interval (40 s by default); every share on it after the disclosure was
+// work the pool can no longer credit. So a change of active assignment asks for a work
+// update now: a standard job on the same tip, without clean_jobs, so the miner does not
+// drop work in flight on the previous job. The same request serves the first
+// assignment, and the next one after a disclosure left none active, when the template
+// thread has been holding its current work.
+static void datum_protocol_abw_active_changed(uint8_t assignment_id) {
+	DLOG_DEBUG("ABW assignment slot %u is now active; requesting a work update",
+		(unsigned)(assignment_id - 1));
+	datum_blocktemplates_notify_refresh();
+}
+
 int datum_protocol_abw_activation(int len, unsigned char *data) {
 	if (len != 3 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[2] != 0xFE) {
@@ -1122,10 +1213,10 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	const T_DATUM_ABW_ASSIGNMENT *assignment =
 		&datum_abw_assignments[assignment_id - 1];
 	if (assignment->id == assignment_id && !assignment->revealed) {
-		const bool first_abw = !datum_abw_active_assignment_id;
+		const bool changed = datum_abw_active_assignment_id != assignment_id;
 		datum_abw_active_assignment_id = assignment_id;
 		memcpy(datum_abw_active_key_hash, assignment->key_hash, 32);
-		if (first_abw) datum_blocktemplates_notifynew(NULL, 0);
+		if (changed) datum_protocol_abw_active_changed(assignment_id);
 		activated = true;
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
@@ -1145,10 +1236,10 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	pthread_mutex_lock(&datum_abw_mutex);
 	installed = datum_protocol_abw_install_assignment_locked(assignment_id, data + 3);
 	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
-		const bool first_abw = !datum_abw_active_assignment_id;
+		const bool changed = datum_abw_active_assignment_id != assignment_id;
 		datum_abw_active_assignment_id = assignment_id;
 		memcpy(datum_abw_active_key_hash, data + 3, 32);
-		if (first_abw) datum_blocktemplates_notifynew(NULL, 0);
+		if (changed) datum_protocol_abw_active_changed(assignment_id);
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!installed) {
@@ -1277,7 +1368,12 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 		}
 		if (pool_ignored) {
 			ignored_block = true;
-			atomic_store(&datum_abw_health_latched, false);
+			pthread_mutex_lock(&datum_abw_mutex);
+			memcpy(datum_abw_ignored_hash, block_hash, sizeof(datum_abw_ignored_hash));
+			datum_abw_ignored_at = time(NULL);
+			++datum_abw_ignored_count;
+			pthread_mutex_unlock(&datum_abw_mutex);
+			atomic_store(&datum_abw_pool_ignored, true);
 			for (int warning = 0; warning < 8; ++warning) {
 				DLOG_ERROR("CRITICAL ABW FAILURE: pool ignored valid block %s",
 					block_hash);
@@ -1287,6 +1383,13 @@ int datum_protocol_abw_reveal(int len, unsigned char *data) {
 	if (!submitted) {
 		DLOG_INFO("DATUM server retired ABW assignment slot %u",
 			(unsigned)(assignment_id - 1));
+	}
+	pthread_mutex_lock(&datum_abw_mutex);
+	const uint32_t unchecked = datum_protocol_abw_close_gap_locked(assignment_id);
+	pthread_mutex_unlock(&datum_abw_mutex);
+	if (unchecked) {
+		DLOG_WARN("ABW assignment slot %u was disclosed with %" PRIu32 " share(s) that could not be retained, so they were not checked for a withheld block",
+			(unsigned)(assignment_id - 1), unchecked);
 	}
 	return ignored_block ? -1 : 1;
 }
@@ -2707,13 +2810,39 @@ int datum_protocol_pow_submit(
 	pow.version = job->version_uint;
 	if (pow.abw_assignment_id &&
 	    datum_protocol_abw_assignment_revealed(pow.abw_assignment_id)) {
-		DLOG_ERROR("Could not submit POW for a disclosed anti-withholding assignment");
-		return -1;
+		// With the key disclosed the pool cannot credit work under this assignment:
+		// the share is stale, like one for replaced work. Nothing is wrong with the
+		// pool link, so it is not an error.
+		DLOG_DEBUG("Share for job %s is stale: its ABW assignment slot %u was already disclosed",
+			job->job_id, (unsigned)(pow.abw_assignment_id - 1));
+		return DATUM_POW_SUBMIT_ASSIGNMENT_DISCLOSED;
 	}
 	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
 		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {
-		atomic_store(&datum_abw_health_latched, false);
-		DLOG_ERROR("Could not retain anti-withholding candidate; non-disclosure detection is compromised");
+		bool first = false, open = false;
+		pthread_mutex_lock(&datum_abw_mutex);
+		// Only while the assignment is still open: once disclosed there is nothing
+		// left to check, and a gap recorded then would outlive it.
+		if (datum_protocol_abw_assignment_available_locked(pow.abw_assignment_id)) {
+			const uint32_t bit = UINT32_C(1) << (pow.abw_assignment_id - 1);
+			open = true;
+			first = !(atomic_fetch_or(&datum_abw_retention_gaps, bit) & bit);
+			++datum_abw_unretained[pow.abw_assignment_id - 1];
+		}
+		pthread_mutex_unlock(&datum_abw_mutex);
+		static atomic_bool noted_closed = false;
+		if (!open && !atomic_exchange(&noted_closed, true)) {
+			// Typically a job stamped before a session reset, finishing after it.
+			DLOG_INFO("Could not retain an anti-withholding candidate for ABW assignment slot %u, which is no longer open; such shares are not checked (noted once)",
+				(unsigned)(pow.abw_assignment_id - 1));
+		}
+		if (first) {
+			DLOG_WARN("Could not retain anti-withholding candidates for ABW assignment slot %u; until it is disclosed, a block withheld among its shares would go unnoticed. Shares still go to the pool as usual.",
+				(unsigned)(pow.abw_assignment_id - 1));
+		} else {
+			DLOG_DEBUG("Could not retain anti-withholding candidate for ABW assignment slot %u",
+				(unsigned)(pow.abw_assignment_id - 1));
+		}
 	}
 	
 	//DLOG_DEBUG("ADD: DATUM POW: time %d nonce %8.8X", pow.ntime, pow.nonce);
