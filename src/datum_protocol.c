@@ -1186,6 +1186,21 @@ int datum_protocol_abw_candidate_release(int len, unsigned char *data) {
 	return 1;
 }
 
+// Work is stamped with the assignment active when its template is fetched. The pool can
+// disclose an assignment soon after it moves on to the next, and waiting for the next
+// work update to pick that up left the current job on the old assignment for up to the
+// whole update interval (40 s by default); every share on it after the disclosure was
+// work the pool can no longer credit. So a change of active assignment asks for a work
+// update now: a standard job on the same tip, without clean_jobs, so the miner does not
+// drop work in flight on the previous job. The same request serves the first
+// assignment, and the next one after a disclosure left none active, when the template
+// thread has been holding its current work.
+static void datum_protocol_abw_active_changed(uint8_t assignment_id) {
+	DLOG_DEBUG("ABW assignment slot %u is now active; requesting a work update",
+		(unsigned)(assignment_id - 1));
+	datum_blocktemplates_notify_refresh();
+}
+
 int datum_protocol_abw_activation(int len, unsigned char *data) {
 	if (len != 3 || data[0] != DATUM_ABW_DRAFT_REVISION ||
 	    data[1] >= DATUM_ABW_ASSIGNMENT_SLOTS || data[2] != 0xFE) {
@@ -1198,10 +1213,10 @@ int datum_protocol_abw_activation(int len, unsigned char *data) {
 	const T_DATUM_ABW_ASSIGNMENT *assignment =
 		&datum_abw_assignments[assignment_id - 1];
 	if (assignment->id == assignment_id && !assignment->revealed) {
-		const bool first_abw = !datum_abw_active_assignment_id;
+		const bool changed = datum_abw_active_assignment_id != assignment_id;
 		datum_abw_active_assignment_id = assignment_id;
 		memcpy(datum_abw_active_key_hash, assignment->key_hash, 32);
-		if (first_abw) datum_blocktemplates_notifynew(NULL, 0);
+		if (changed) datum_protocol_abw_active_changed(assignment_id);
 		activated = true;
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
@@ -1221,10 +1236,10 @@ int datum_protocol_abw_assignment_notice(int len, unsigned char *data) {
 	pthread_mutex_lock(&datum_abw_mutex);
 	installed = datum_protocol_abw_install_assignment_locked(assignment_id, data + 3);
 	if (installed && (data[1] & DATUM_ABW_ASSIGNMENT_ACTIVE)) {
-		const bool first_abw = !datum_abw_active_assignment_id;
+		const bool changed = datum_abw_active_assignment_id != assignment_id;
 		datum_abw_active_assignment_id = assignment_id;
 		memcpy(datum_abw_active_key_hash, data + 3, 32);
-		if (first_abw) datum_blocktemplates_notifynew(NULL, 0);
+		if (changed) datum_protocol_abw_active_changed(assignment_id);
 	}
 	pthread_mutex_unlock(&datum_abw_mutex);
 	if (!installed) {
@@ -2795,8 +2810,12 @@ int datum_protocol_pow_submit(
 	pow.version = job->version_uint;
 	if (pow.abw_assignment_id &&
 	    datum_protocol_abw_assignment_revealed(pow.abw_assignment_id)) {
-		DLOG_ERROR("Could not submit POW for a disclosed anti-withholding assignment");
-		return -1;
+		// With the key disclosed the pool cannot credit work under this assignment:
+		// the share is stale, like one for replaced work. Nothing is wrong with the
+		// pool link, so it is not an error.
+		DLOG_DEBUG("Share for job %s is stale: its ABW assignment slot %u was already disclosed",
+			job->job_id, (unsigned)(pow.abw_assignment_id - 1));
+		return DATUM_POW_SUBMIT_ASSIGNMENT_DISCLOSED;
 	}
 	if (pow.abw_assignment_id && !datum_protocol_abw_cache_candidate(
 		&pow, full_cb_tx, full_cb_tx_size, raw_pow_hash)) {

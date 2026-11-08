@@ -48,6 +48,7 @@
 
 extern DATUM_QUEUE pow_queue;
 extern atomic_int new_notify_threadsafe;
+extern atomic_int notify_refresh;
 extern volatile char new_notify_blockhash[256];
 extern DATUM_ENC_KEYS local_datum_keys, session_datum_keys;
 extern DATUM_ENC_KEYS session_remote_datum_keys, pool_keys;
@@ -498,17 +499,24 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_blake2b_xor_key_hash(notice + 4, xor_key));
 	notice[36] = 0xFE;
 	atomic_store(&new_notify_threadsafe, 0);
+	atomic_store(&notify_refresh, 0);
 	
+	/* An assignment that is not active changes no work. */
 	datum_test(datum_protocol_mining_cmd5(&header, notice));
 	datum_test(!datum_protocol_abw_apply_active(&block_template));
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(!atomic_load(&notify_refresh));
 	
+	/* The first activation asks for work, as a work update and not a block notification. */
 	header.cmd_len = sizeof(activation);
 	datum_test(datum_protocol_mining_cmd5(&header, activation));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 1);
-	datum_test(atomic_load(&new_notify_threadsafe));
-	atomic_store(&new_notify_threadsafe, 0);
+	datum_test(atomic_exchange(&notify_refresh, 0));
+	datum_test(!atomic_load(&new_notify_threadsafe));
+	
+	/* The same assignment activated again changes nothing. */
+	datum_test(datum_protocol_mining_cmd5(&header, activation));
+	datum_test(!atomic_load(&notify_refresh));
 	
 	block_template.height++;
 	datum_test(datum_protocol_abw_apply_active(&block_template));
@@ -521,15 +529,18 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_protocol_mining_cmd5(&header, notice));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 1);
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(!atomic_load(&notify_refresh));
 	
+	/* Moving to the next assignment asks for work at once, so the current job does
+	   not stay on the old one until the next work update, past its disclosure. */
 	activation[2] = 1;
 	header.cmd_len = sizeof(activation);
 	datum_test(datum_protocol_mining_cmd5(&header, activation));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 2);
-	datum_test(!atomic_load(&new_notify_threadsafe));
+	datum_test(atomic_exchange(&notify_refresh, 0));
 	
+	/* So does an assignment notice that is active on arrival. */
 	notice[2] = DATUM_ABW_ASSIGNMENT_ACTIVE;
 	notice[3] = 2;
 	xor_key[0] ^= 2;
@@ -538,9 +549,29 @@ static void datum_protocol_abw_activation_state_test(void) {
 	datum_test(datum_protocol_mining_cmd5(&header, notice));
 	datum_test(datum_protocol_abw_apply_active(&block_template));
 	datum_test(block_template.abw_assignment_id == 3);
+	datum_test(atomic_exchange(&notify_refresh, 0));
 	datum_test(!atomic_load(&new_notify_threadsafe));
 	
+	/* Disclosing the active assignment leaves none active, so work is held; the
+	   next activation, of one already assigned, asks for work again. */
+	{
+		unsigned char reveal[20] = {0xA9, DATUM_ABW_DRAFT_REVISION, 2};
+		memcpy(reveal + 3, xor_key, sizeof(xor_key));
+		reveal[19] = 0xFE;
+		header.cmd_len = sizeof(reveal);
+		datum_test(datum_protocol_mining_cmd5(&header, reveal) == 1);
+		datum_test(!datum_protocol_abw_apply_active(&block_template));
+		datum_test(!atomic_load(&notify_refresh));
+		activation[2] = 1;
+		header.cmd_len = sizeof(activation);
+		datum_test(datum_protocol_mining_cmd5(&header, activation));
+		datum_test(datum_protocol_abw_apply_active(&block_template));
+		datum_test(block_template.abw_assignment_id == 2);
+		datum_test(atomic_exchange(&notify_refresh, 0));
+	}
+	
 	atomic_store(&new_notify_threadsafe, 0);
+	atomic_store(&notify_refresh, 0);
 	datum_protocol_abw_reset();
 }
 
@@ -1439,6 +1470,21 @@ static void datum_protocol_abw_retention_tests(void) {
 	datum_test(datum_protocol_abw_reveal(sizeof(reveal), reveal) == 1);
 	datum_test(datum_protocol_abw_retention_gap(NULL) == 0);
 	datum_test(!datum_protocol_abw_pool_ignored(NULL, NULL, NULL));
+	datum_test(datum_protocol_abw_health_ok());
+
+	/* A share under the disclosed assignment is stale: the pool cannot credit it.
+	   It is not queued, and says so apart from a failed submission. */
+	datum_protocol_test_pow_handler_count = 0;
+	datum_test(datum_queue_prep(&pow_queue, 2, sizeof(T_DATUM_PROTOCOL_POW),
+		datum_protocol_test_pow_handler) == 0);
+	pk_u32le(raw_hash, 0, UINT32_C(0xfffffff1));
+	datum_test(datum_protocol_pow_submit(NULL, &job, "test", false, false,
+		false, header, 2, coinbase, sizeof(coinbase), raw_hash, NULL,
+		extranonce, 0xff) == DATUM_POW_SUBMIT_ASSIGNMENT_DISCLOSED);
+	datum_test(datum_queue_process(&pow_queue) == 0);
+	datum_test(datum_protocol_test_pow_handler_count == 0);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	datum_test(datum_protocol_abw_retention_gap(NULL) == 0);
 	datum_test(datum_protocol_abw_health_ok());
 
 	/* Reusing a slot for a new assignment, and a fresh session configuration, each

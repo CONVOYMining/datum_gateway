@@ -1316,13 +1316,22 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	}
 	
 	// work accepted
-	if (job->is_datum_job && !was_block && datum_protocol_pow_submit(c, job,
-		username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
-		full_cb_txn_size, share_hash, cb, extranonce_bin,
-		coinbase_index) != 0) {
-		send_unknown_work_error(c, id);
-		stratum_note_share(m, false, job_diff);
-		return 0;
+	if (job->is_datum_job && !was_block) {
+		const int submitted = datum_protocol_pow_submit(c, job,
+			username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
+			full_cb_txn_size, share_hash, cb, extranonce_bin,
+			coinbase_index);
+		if (submitted == DATUM_POW_SUBMIT_ASSIGNMENT_DISCLOSED) {
+			// Work the pool can no longer credit, as for a replaced job.
+			send_rejected_stale(c, id);
+			stratum_note_share(m, false, job_diff);
+			return 0;
+		}
+		if (submitted != 0) {
+			send_unknown_work_error(c, id);
+			stratum_note_share(m, false, job_diff);
+			return 0;
+		}
 	}
 	
 	char s[256];

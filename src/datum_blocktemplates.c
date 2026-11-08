@@ -86,6 +86,15 @@ void datum_blocktemplates_notify_othercause() {
 	notify_othercause = 1;
 }
 
+// A work update on the current tip, now rather than at the end of the update interval.
+// Unlike notifynew it is no block notification: the template thread fetches a template
+// at once and, if the tip is unchanged, sends it as a standard job, without clean_jobs.
+atomic_int notify_refresh = 0;
+
+void datum_blocktemplates_notify_refresh(void) {
+	atomic_store(&notify_refresh, 1);
+}
+
 bool datum_blocktemplates_abw_ready(T_DATUM_TEMPLATE_DATA *block_template,
 	bool datum_active, bool abw_required) {
 	if (!block_template) return false;
@@ -496,6 +505,11 @@ void *datum_gateway_template_thread(void *args) {
 	while(1) {
 		i++;
 		
+		// The template fetched below answers any refresh asked for so far. Not while a
+		// block notification is being chased, since that can end without a job; the
+		// request then stands and ends the next wait at once.
+		if (!was_notified) atomic_store(&notify_refresh, 0);
+		
 		// fetch latest template
 		snprintf(gbt_req, sizeof(gbt_req), "{\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"blake2b\"]}],\"id\":%"PRIu64"}",(uint64_t)((uint64_t)time(NULL)<<(uint64_t)8)|(uint64_t)(i&255));
 		gbt = bitcoind_json_rpc_call(tcurl, &datum_config, gbt_req);
@@ -638,6 +652,10 @@ void *datum_gateway_template_thread(void *args) {
 					was_notified = 1;
 					wnc = 0;
 					DLOG_INFO("NEW NETWORK BLOCK NOTIFICATION RECEIVED");
+					break;
+				}
+				if (atomic_load(&notify_refresh)) {
+					DLOG_DEBUG("Work update requested before the update interval");
 					break;
 				}
 			}

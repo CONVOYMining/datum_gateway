@@ -158,6 +158,9 @@ bool datum_protocol_take_connect_endpoint(
 	size_t pubkey_size
 );
 bool datum_protocol_migration_expired(uint64_t now_ms);
+// datum_protocol_pow_submit returns 0 once the share is queued for the pool, and this
+// when the pool has already disclosed the share's ABW assignment, so the share is stale.
+#define DATUM_POW_SUBMIT_ASSIGNMENT_DISCLOSED (-2)
 int datum_protocol_pow_submit(
 	const T_DATUM_CLIENT_DATA *c,
 	const T_DATUM_STRATUM_JOB *job,
