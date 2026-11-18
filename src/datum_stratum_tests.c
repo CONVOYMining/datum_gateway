@@ -37,10 +37,13 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <jansson.h>
 
 #include "datum_conf.h"
 #include "datum_jsonrpc.h"
 #include "datum_pow.h"
+#include "datum_protocol.h"
+#include "datum_queue.h"
 #include "datum_stratum.h"
 #include "datum_stratum_dupes.h"
 #include "datum_utils.h"
@@ -690,7 +693,163 @@ void datum_stratum_mod_username_tests() {
 	datum_test(0 == strcmp(res, "def.ghi"));
 }
 
+
+// A connection with its own thread data, for tests that drive one client directly.
+static T_DATUM_CLIENT_DATA *datum_stratum_test_client(void) {
+	T_DATUM_MINER_DATA * const m = calloc(1, sizeof(T_DATUM_MINER_DATA));
+	T_DATUM_STRATUM_THREADPOOL_DATA * const sd = calloc(1, sizeof(T_DATUM_STRATUM_THREADPOOL_DATA));
+	T_DATUM_CLIENT_DATA * const c = calloc(1, sizeof(T_DATUM_CLIENT_DATA));
+	T_DATUM_THREAD_DATA * const t = calloc(1, sizeof(T_DATUM_THREAD_DATA));
+	assert(m && sd && c && t);
+	m->sdata = sd;
+	c->app_client_data = m;
+	c->datum_thread = t;
+	c->cid = 1;
+	t->app_thread_data = sd;
+	return c;
+}
+
+static void datum_stratum_test_client_free(T_DATUM_CLIENT_DATA *c) {
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	free(c->datum_thread);
+	free(m->sdata);
+	free(m);
+	free(c);
+}
+
+static const char *datum_stratum_test_take(T_DATUM_CLIENT_DATA *c) {
+	c->w_buffer[c->out_buf] = 0;
+	c->out_buf = 0;
+	return c->w_buffer;
+}
+
+// The job of the share tests: pooled, without anti-withholding, a two-byte coinb1 (0xff 0xff)
+// whose first byte is the coinbase target byte, any ntime accepted, and no block. A share for
+// it needs a work hash whose top 32 bits are zero (H-not-zero), about 2^32 hashes to find, so
+// the tests use nonces found for this job, extranonce2 deadbeef00000000 and ntime 0, one for
+// each target byte they need.
+#define SHARE_EXTRANONCE2 "deadbeef00000000"
+#define SHARE_NONCE_POT0 "abbcc51400000007"
+static T_DATUM_STRATUM_JOB *datum_stratum_test_share_job(void) {
+	T_DATUM_STRATUM_JOB * const j = calloc(1, sizeof(*j));
+	T_DATUM_TEMPLATE_DATA * const t = calloc(1, sizeof(*t));
+	assert(j && t);
+	j->is_datum_job = true;
+	j->block_template = t;
+	j->target_pot_index = 0;
+	j->coinbase[0].coinb1_len = 2;
+	j->coinbase[0].coinb1_bin[0] = j->coinbase[0].coinb1_bin[1] = 0xff;
+	strcpy(j->job_id, "0000000000c0de00");
+	return j;
+}
+
+static void datum_stratum_test_share_job_free(T_DATUM_STRATUM_JOB *j) {
+	free(j->block_template);
+	free(j);
+}
+
+// Captures what client_mining_submit sends to the pool, via the real POW queue.
+extern DATUM_QUEUE pow_queue;
+static int datum_stratum_test_pow_handler(void *arg) { (void)arg; return 0; }
+
+static int datum_stratum_test_pow_count(void) {
+	return pow_queue.queue_next[pow_queue.active_buffer];
+}
+
+// Settings an accepted share needs (vardiff runs on each one).
+static void datum_stratum_test_submit_config(void) {
+	datum_config.stratum_v1_share_stale_seconds = 120;
+	datum_config.bitcoind_work_update_seconds = 40;
+	datum_config.stratum_v1_vardiff_min = 1;
+	datum_config.stratum_v1_vardiff_target_shares_min = 8;
+	datum_config.stratum_v1_vardiff_quickdiff_count = 8;
+	datum_config.stratum_v1_vardiff_quickdiff_delta = 8;
+}
+
+// A subscribed connection on job index 0, served difficulty 1, ready for client_mining_submit.
+static T_DATUM_CLIENT_DATA *datum_stratum_test_submit_client(T_DATUM_STRATUM_JOB *job) {
+	T_DATUM_CLIENT_DATA * const c = datum_stratum_test_client();
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	datum_stratum_dupes_init(m->sdata);
+	m->sdata->loop_tsms = 1000000;
+	job->tsms = m->sdata->loop_tsms;
+	m->subscribed = true;
+	m->current_diff = m->last_sent_diff = 1;
+	m->stratum_job_diffs[0] = 1;
+	datum_test(datum_blake2b_share_target(m->stratum_job_targets[0], 0));
+	return c;
+}
+
+static void datum_stratum_test_submit_client_free(T_DATUM_CLIENT_DATA *c) {
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	T_DATUM_STRATUM_DUPES * const dupes = m->sdata->dupes;
+	free(dupes->ptr);
+	free(dupes);
+	datum_stratum_test_client_free(c);
+}
+
+// A fresh dupe table, so the same share can be submitted again.
+static void datum_stratum_test_fresh_dupes(T_DATUM_CLIENT_DATA *c) {
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	T_DATUM_STRATUM_DUPES * const dupes = m->sdata->dupes;
+	free(dupes->ptr);
+	free(dupes);
+	datum_stratum_dupes_init(m->sdata);
+}
+
+static int datum_stratum_test_submit(T_DATUM_CLIENT_DATA *c, const char *job_id, const char *nonce) {
+	char req[200];
+	snprintf(req, sizeof(req), "[\"w\", \"%s\", \"" SHARE_EXTRANONCE2 "\", \"0000000000000000\", \"%s\"]", job_id, nonce);
+	json_error_t err;
+	json_t * const params = json_loads(req, 0, &err);
+	assert(params);
+	const int ret = client_mining_submit(c, 1, params);
+	json_decref(params);
+	return ret;
+}
+
+// A share for an older job, once a harder difficulty is served, gets the served difficulty if
+// it meets it and nothing otherwise.
+static void datum_stratum_share_credit_tests(void) {
+	uint8_t t_easy[32], t_hard[32];
+	datum_test(datum_blake2b_share_target(t_easy, floorPoT(1024)));
+	datum_test(datum_blake2b_share_target(t_hard, floorPoT(16384)));
+	datum_test(datum_stratum_share_credit_diff(t_hard, 1024, 16384) == 16384);
+	datum_test(datum_stratum_share_credit_diff(t_easy, 1024, 16384) == 0);
+	datum_test(datum_stratum_share_credit_diff(t_easy, 1024, 1024) == 1024);
+	datum_test(datum_stratum_share_credit_diff(t_hard, 16384, 1024) == 16384);
+	
+	// Through client_mining_submit: credited at the job's difficulty, and after a step up to a
+	// difficulty the share doesn't meet, accepted and credited at nothing.
+	const global_config_t saved = datum_config;
+	datum_stratum_test_submit_config();
+	T_DATUM_STRATUM_JOB * const job = datum_stratum_test_share_job();
+	T_DATUM_STRATUM_JOB * const saved_job0 = global_cur_stratum_jobs[0];
+	global_cur_stratum_jobs[0] = job;
+	datum_test(datum_queue_prep(&pow_queue, 16, sizeof(T_DATUM_PROTOCOL_POW), datum_stratum_test_pow_handler) == 0);
+	T_DATUM_CLIENT_DATA * const c = datum_stratum_test_submit_client(job);
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	
+	datum_test(datum_stratum_test_submit(c, "0000000000c0de00", SHARE_NONCE_POT0) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+	datum_test(m->share_count_accepted == 1 && m->share_diff_accepted == 1);
+	datum_test(datum_stratum_test_pow_count() == 1);
+	
+	datum_stratum_test_fresh_dupes(c);
+	m->current_diff = m->last_sent_diff = UINT64_C(1) << 22;
+	datum_test(datum_stratum_test_submit(c, "0000000000c0de00", SHARE_NONCE_POT0) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+	datum_test(m->share_count_accepted == 2 && m->share_diff_accepted == 1);
+	
+	datum_stratum_test_submit_client_free(c);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	global_cur_stratum_jobs[0] = saved_job0;
+	datum_stratum_test_share_job_free(job);
+	datum_config = saved;
+}
+
 void datum_stratum_tests(void) {
+	datum_stratum_share_credit_tests();
 	datum_stratum_mod_username_tests();
 	datum_stratum_minimum_difficulty_configure_tests();
 	datum_stratum_string_request_id_tests();
