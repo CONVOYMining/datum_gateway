@@ -136,6 +136,8 @@ Note that the API/web admin password is also used for preventing CSRF attacks, s
 You should review the [documentation on usernames](doc/usernames.md) next.
 Once you have everything running, you can point miners at the Gateway.
 
+If your pool's minimum difficulty is far above what suits your miners (common behind a busy Gateway, or with rented rigs), enable `stratum.vardiff_below_pool_min` and see [its documentation](doc/vardiff_below_pool_min.md).
+
 ## Docker
 
 The DATUM Gateway is also available as a Docker image.
