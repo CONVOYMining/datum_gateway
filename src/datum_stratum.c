@@ -1123,6 +1123,9 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	
+	// A Q share not bound to the current quickdiff: for another job, or with no quickdiff sent.
+	const bool q_unbound = quickdiff && (!m->quickdiff_value || g_job_index != m->quickdiff_job_index);
+	
 	// construct block header
 	
 	// 36 - 67 = merkle root
@@ -1233,6 +1236,14 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		stratum_note_share(m, false, job_diff);
 		return 0;
 	}
+	// An unbound Q share was rebuilt above with the current quickdiff's target byte, which need
+	// not be the one its work carried, so it usually fails H-not-zero. Answer that as the unknown
+	// work it is, not as a fault in the miner's hashing.
+	if (q_unbound && upk_u32le(share_hash, 28) != 0) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, m->last_sent_diff);
+		return 0;
+	}
 	if (upk_u32le(share_hash, 28) != 0) {
 		send_rejected_hnotzero_error(c, id);
 		stratum_note_share(m, false, job_diff);
@@ -1282,6 +1293,16 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		if (i) {
 			datum_blocktemplates_notifynew(new_notify_blockhash, job->height + 1);
 		}
+	}
+	
+	// A quickdiff share is only for the job its quickdiff notify was sent for. Checked after the
+	// block check, like the rejections below, so a block the Gateway can recognise in one is still
+	// submitted. Under anti-withholding it cannot recognise a block itself, so a block in such a
+	// share is not submitted.
+	if (q_unbound) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, m->last_sent_diff);
+		return 0;
 	}
 	
 	// For ABW work the XOR key is withheld, so only Apex can classify a
@@ -1549,6 +1570,10 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		m->quickdiff_active = true;
 		m->quickdiff_value = m->last_sent_diff;
 		datum_blake2b_share_target(m->quickdiff_target, floorPoT(m->quickdiff_value));
+	}
+	if (quickdiff) {
+		// The job this quickdiff is for; Q shares for any other are refused.
+		m->quickdiff_job_index = j->global_index;
 	}
 	tdiff = floorPoT(m->last_sent_diff);
 	share_nbits = datum_blake2b_share_nbits(tdiff);

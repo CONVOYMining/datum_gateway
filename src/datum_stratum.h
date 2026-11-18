@@ -254,6 +254,7 @@ typedef struct {
 	bool quickdiff_active;
 	uint64_t quickdiff_value;
 	uint8_t quickdiff_target[32];
+	uint16_t quickdiff_job_index;
 	
 	uint64_t forced_high_min_diff;
 	
