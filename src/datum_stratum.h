@@ -282,6 +282,7 @@ const char *datum_stratum_mod_username(const char *username_s, char *username_bu
 void reset_vardiff_stats(T_DATUM_CLIENT_DATA *c);
 void stratum_update_vardiff(T_DATUM_CLIENT_DATA *c, bool no_quick);
 void datum_stratum_count_vardiff_share(T_DATUM_MINER_DATA *m, uint64_t credit_diff);
+int client_datum_capabilities(T_DATUM_CLIENT_DATA *c, uint64_t id);
 bool datum_stratum_share_forwardable(const uint8_t *share_hash, unsigned char commit_pot);
 uint64_t datum_stratum_share_credit_diff(const uint8_t *share_hash, uint64_t job_diff, uint64_t served_diff);
 

@@ -1469,6 +1469,38 @@ int client_mining_configure(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_
 	return 0;
 }
 
+// datum.capabilities: what this Gateway supports and which of it is switched on, for tools
+// that point miners at it. Not a Stratum standard method; a Gateway without it answers
+// "Method not found". A feature listed as false is supported but off. pool_min_diff is DATUM's
+// integer difficulty (mining.set_difficulty sends 65535/65536 of it), and 0 when not mining
+// pooled. Built in place, without the heap.
+int client_datum_capabilities(T_DATUM_CLIENT_DATA *c, uint64_t id) {
+	char s[512];
+	char idbuf[160];
+	const bool pooled = datum_protocol_is_active();
+	const uint64_t pool_min = pooled ? datum_config.override_vardiff_min : 0;
+	
+	stratum_rpc_id_text(c, id, idbuf, sizeof(idbuf));
+	// The release only, not the exact commit: the stratum port is often public.
+	const int n = snprintf(s, sizeof(s),
+		"{\"error\":null,\"id\":%s,\"result\":{"
+		"\"gateway\":\"%s\",\"algo\":\"blake2b\","
+		"\"features\":{\"vardiff_below_pool_min\":%s,\"reject_tls_probe\":true},"
+		"\"pooled\":%s,\"pool_min_diff\":%" PRIu64 "}}\n",
+		idbuf,
+		DATUM_PROTOCOL_VERSION,
+		datum_config.stratum_v1_vardiff_below_pool_min ? "true" : "false",
+		pooled ? "true" : "false",
+		pool_min);
+	if (n < 0 || (size_t)n >= sizeof(s)) {
+		send_error_to_client(c, id, "[-1,\"Capabilities response too large\",null]");
+		return 0;
+	}
+	datum_socket_send_string_to_client(c, s);
+	stratum_rpc_id_clear(c);
+	return 0;
+}
+
 int client_mining_authorize(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj) {
 	char s[256];
 	const char *username_s;
@@ -1873,6 +1905,14 @@ int datum_stratum_v1_socket_thread_client_cmd(T_DATUM_CLIENT_DATA *c, char *line
 			}
 			if (!strcmp(method, "mining.authorize")) {
 				i = client_mining_authorize(c, id, params_obj);
+				json_decref(j);
+				return i;
+			}
+			[[fallthrough]];
+		}
+		case 'd': {
+			if (!strcmp(method, "datum.capabilities")) {
+				i = client_datum_capabilities(c, id);
 				json_decref(j);
 				return i;
 			}

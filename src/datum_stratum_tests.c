@@ -1370,7 +1370,48 @@ static void datum_stratum_repeat_quickdiff_tests(void) {
 	datum_config = saved;
 }
 
+// datum.capabilities reports the features this Gateway has and whether each is on, as valid
+// JSON, for an integer or a string request id.
+static void datum_stratum_capabilities_tests(void) {
+	const global_config_t saved = datum_config;
+	T_DATUM_CLIENT_DATA * const c = datum_stratum_test_client();
+	// Not mining pooled, a pool minimum still held from before is reported as 0.
+	datum_config.override_vardiff_min = UINT64_C(1) << 20;
+	for (int on = 0; on <= 1; ++on) {
+		char req[] = "{\"id\":7,\"method\":\"datum.capabilities\",\"params\":[]}";
+		datum_config.stratum_v1_vardiff_below_pool_min = on;
+		datum_test(datum_stratum_v1_socket_thread_client_cmd(c, req) == 0);
+		const char * const out = datum_stratum_test_take(c);
+		json_error_t err;
+		json_t * const reply = json_loads(out, JSON_DISABLE_EOF_CHECK, &err);
+		datum_test(reply != NULL);
+		json_t * const result = reply ? json_object_get(reply, "result") : NULL;
+		json_t * const feats = result ? json_object_get(result, "features") : NULL;
+		datum_test(reply && json_integer_value(json_object_get(reply, "id")) == 7);
+		datum_test(reply && json_is_null(json_object_get(reply, "error")));
+		datum_test(feats && json_is_true(json_object_get(feats, "reject_tls_probe")));
+		datum_test(feats && json_is_boolean(json_object_get(feats, "vardiff_below_pool_min")) &&
+			json_boolean_value(json_object_get(feats, "vardiff_below_pool_min")) == (bool)on);
+		datum_test(result && json_string_value(json_object_get(result, "algo")) &&
+			!strcmp(json_string_value(json_object_get(result, "algo")), "blake2b"));
+		datum_test(result && json_string_value(json_object_get(result, "gateway")) &&
+			!strcmp(json_string_value(json_object_get(result, "gateway")), DATUM_PROTOCOL_VERSION));
+		datum_test(result && json_is_false(json_object_get(result, "pooled")));
+		datum_test(result && json_is_integer(json_object_get(result, "pool_min_diff")) &&
+			json_integer_value(json_object_get(result, "pool_min_diff")) == 0);
+		json_decref(reply);
+	}
+	{
+		char req[] = "{\"id\":\"caps\",\"method\":\"datum.capabilities\",\"params\":[]}";
+		datum_test(datum_stratum_v1_socket_thread_client_cmd(c, req) == 0);
+		datum_test(strncmp(datum_stratum_test_take(c), "{\"error\":null,\"id\":\"caps\",\"result\":{", 36) == 0);
+	}
+	datum_stratum_test_client_free(c);
+	datum_config = saved;
+}
+
 void datum_stratum_tests(void) {
+	datum_stratum_capabilities_tests();
 	datum_stratum_repeat_quickdiff_tests();
 	datum_stratum_vardiff_below_pool_min_tests();
 	datum_stratum_submit_forwarding_tests();
