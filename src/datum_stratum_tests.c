@@ -1281,7 +1281,97 @@ static void datum_stratum_submit_forwarding_tests(void) {
 	datum_config = saved;
 }
 
+// A quickdiff on the job the miner holds, when that work is committed at the pool minimum and
+// the quickdiff would carry the same target byte, sends only the new difficulty: a Q job would be
+// the same work. It is sent whenever its work would differ, and always with the option off.
+static void datum_stratum_repeat_quickdiff_tests(void) {
+	const global_config_t saved = datum_config;
+	datum_stratum_test_submit_config();
+	datum_config.stratum_v1_vardiff_below_pool_min = true;
+	datum_config.override_vardiff_min = UINT64_C(1) << 20;
+	T_DATUM_STRATUM_JOB * const job = datum_stratum_test_share_job();
+	T_DATUM_STRATUM_JOB * const saved_job0 = global_cur_stratum_jobs[0];
+	global_cur_stratum_jobs[0] = job;
+	T_DATUM_CLIENT_DATA * const c = datum_stratum_test_submit_client(job);
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	m->sdata->cur_stratum_job = job;
+	const char *out;
+	
+	// Served-only: just the new difficulty, and the job's entries stay as they were...
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	(void)datum_stratum_test_take(c);
+	m->current_diff = 16384;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "\"mining.set_difficulty\",\"params\":[16383.75]") != NULL);
+	datum_test(strstr(out, "mining.notify") == NULL);
+	datum_test(m->quickdiff_active && !m->quickdiff_value);
+	datum_test(m->stratum_job_diffs[0] == 1 && m->stratum_job_commit_pots[0] == 20);
+	
+	// ...so a share the miner had in flight for it is still accepted (and kept local).
+	{
+		datum_test(datum_queue_prep(&pow_queue, 16, sizeof(T_DATUM_PROTOCOL_POW), datum_stratum_test_pow_handler) == 0);
+		datum_test(datum_stratum_test_submit(c, "0000000000c0de00", SHARE_NONCE_POT20) == 0);
+		datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+		datum_test(datum_stratum_test_pow_count() == 0);
+		datum_test(datum_queue_free(&pow_queue) == 0);
+	}
+	
+	// The next regular notify carries the new difficulty, still committed at the minimum.
+	datum_test(send_mining_notify(c, false, false, false) == 0);
+	datum_test(datum_stratum_test_notify_is(datum_stratum_test_take(c), job, 20, 14));
+	datum_test(!m->quickdiff_active && m->stratum_job_diffs[0] == 16384);
+	
+	// Served exactly at the minimum: committed at its own difficulty, which is the same byte.
+	m->current_diff = UINT64_C(1) << 20;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "mining.notify") == NULL);
+	
+	// Above the minimum: a different byte, so a Q job, after which the miner holds work that
+	// isn't committed apart, and a further quickdiff is sent as before.
+	m->current_diff = UINT64_C(1) << 22;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"mining.notify\",\"params\":[\"Q") != NULL);
+	datum_test(m->last_sent_commit_pot == 0);
+	
+	// The same job index with a different job ID (the table wrapped) is different work.
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	(void)datum_stratum_test_take(c);
+	job->job_id[7] = '1';
+	m->current_diff = 16384;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"mining.notify\",\"params\":[\"Q0000000100c0de00\"") != NULL);
+	job->job_id[7] = '0';
+	
+	// After the subsidy-only work of a new block, the full coinbase is different work.
+	job->subsidy_only_coinbase = job->coinbase[0];
+	job->subsidy_only_coinbase.coinb1_bin[1] ^= 0xaa;
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, true) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"mining.notify\",\"params\":[\"N") != NULL);
+	datum_test(m->last_sent_commit_pot == 20);
+	m->current_diff = 16384;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"mining.notify\",\"params\":[\"Q") != NULL);
+	
+	// With the option off, a quickdiff is sent as before.
+	datum_config.stratum_v1_vardiff_below_pool_min = false;
+	m->current_diff = UINT64_C(1) << 20;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	(void)datum_stratum_test_take(c);
+	m->current_diff = UINT64_C(1) << 22;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"mining.notify\",\"params\":[\"Q") != NULL);
+	
+	datum_stratum_test_submit_client_free(c);
+	global_cur_stratum_jobs[0] = saved_job0;
+	datum_stratum_test_share_job_free(job);
+	datum_config = saved;
+}
+
 void datum_stratum_tests(void) {
+	datum_stratum_repeat_quickdiff_tests();
 	datum_stratum_vardiff_below_pool_min_tests();
 	datum_stratum_submit_forwarding_tests();
 	datum_stratum_pending_job_quickdiff_tests();

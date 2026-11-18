@@ -1606,6 +1606,21 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		if (m->last_sent_diff < pool_min_diff) commit_pot = floorPoT(pool_min_diff);
 	}
 	
+	// vardiff_below_pool_min: a quickdiff job is new work only through its target byte, and so its
+	// work commitment. After work committed at the pool minimum, a quickdiff on the same job and
+	// coinbase that would carry the same byte (still below the minimum, or served exactly at it)
+	// would resend work the miner already has, which it would redo and resubmit as duplicates.
+	// Send only the new difficulty (done above) and leave the job and quickdiff entries as they
+	// were, so its in-flight shares still validate; quickdiff_active stays set until the next
+	// regular notify. This only follows work committed with the option on.
+	// (A job with another index has already been handled above, as one still pending.)
+	if (quickdiff && m->last_sent_commit_pot && m->last_sent_job_id == upk_u64le(j->job_id, 0) &&
+		m->last_sent_cbselect == datum_stratum_coinbase_index(sdata, m, false) &&
+		m->last_sent_commit_pot == (commit_pot ? commit_pot : floorPoT(m->last_sent_diff))) {
+		m->quickdiff_active = true;
+		return 0;
+	}
+	
 	// if this is a quick diff change, the job is likely identical to one we've already sent
 	// in which case, we don't want to clobber the normal target table and reject shares that we shouldn't
 	if (!quickdiff) {
@@ -1675,6 +1690,10 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	}
 	
 	m->last_sent_stratum_job_index = j->global_index;
+	// The work this notify went out with, to tell a repeat of it (see above).
+	m->last_sent_job_id = upk_u64le(j->job_id, 0);
+	m->last_sent_cbselect = (unsigned char)cbselect;
+	m->last_sent_commit_pot = commit_pot;
 	
 	return 0;
 }

@@ -263,6 +263,10 @@ typedef struct {
 	uint64_t forced_high_min_diff;
 	
 	int last_sent_stratum_job_index;
+	// vardiff_below_pool_min: the work the last notify went out with, to tell a repeat of it.
+	uint64_t last_sent_job_id;
+	unsigned char last_sent_cbselect;
+	uint8_t last_sent_commit_pot;
 	
 	T_DATUM_STRATUM_USER_STATS stats;
 	
