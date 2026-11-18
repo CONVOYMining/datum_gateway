@@ -730,6 +730,7 @@ static const char *datum_stratum_test_take(T_DATUM_CLIENT_DATA *c) {
 // each target byte they need.
 #define SHARE_EXTRANONCE2 "deadbeef00000000"
 #define SHARE_NONCE_POT0 "abbcc51400000007"
+#define SHARE_NONCE_POT20 "1cbc299806000000"
 static T_DATUM_STRATUM_JOB *datum_stratum_test_share_job(void) {
 	T_DATUM_STRATUM_JOB * const j = calloc(1, sizeof(*j));
 	T_DATUM_TEMPLATE_DATA * const t = calloc(1, sizeof(*t));
@@ -1086,7 +1087,203 @@ static void datum_stratum_pending_job_quickdiff_tests(void) {
 	datum_config = saved;
 }
 
+// The coinb1 hex a miner must be sent for the share job at this committed target byte.
+static void datum_stratum_test_coinb1_hex(T_DATUM_STRATUM_JOB *j, unsigned char pot, char *hex) {
+	unsigned char commitment[32], coinb1[39];
+	hex[0] = 0;
+	if (!datum_stratum_job_blake2b_commitment(j, &j->coinbase[0], false, pot, commitment, coinb1)) return;
+	for (size_t i = 0; i < sizeof(coinb1); ++i) uchar_to_hex(&hex[i << 1], coinb1[i]);
+	hex[sizeof(coinb1) << 1] = 0;
+}
+
+// The notify for the share job as sent: its coinb1 commits to 2^commit_pot, and its nbits hint
+// is the served target 2^served_pot.
+static bool datum_stratum_test_notify_is(const char *out, T_DATUM_STRATUM_JOB *j, unsigned char commit_pot, unsigned char served_pot) {
+	char coinb1[128], nbits[16];
+	datum_stratum_test_coinb1_hex(j, commit_pot, coinb1);
+	snprintf(nbits, sizeof(nbits), "\"%8.8x\"", datum_blake2b_share_nbits(served_pot));
+	return coinb1[0] && strstr(out, coinb1) && strstr(out, nbits);
+}
+
+// A connection to pooled work whose pool minimum, 2^20, is far above the local floor (1).
+static void datum_stratum_vardiff_below_pool_min_tests(void) {
+	const global_config_t saved = datum_config;
+	datum_stratum_test_submit_config();
+	datum_config.override_vardiff_min = UINT64_C(1) << 20;
+	T_DATUM_STRATUM_JOB * const job = datum_stratum_test_share_job();
+	T_DATUM_STRATUM_JOB * const saved_job0 = global_cur_stratum_jobs[0];
+	global_cur_stratum_jobs[0] = job;
+	T_DATUM_CLIENT_DATA * const c = datum_stratum_test_submit_client(job);
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	m->sdata->cur_stratum_job = job;
+	const char *out;
+	
+	// Off (the default): the miner is raised to the pool minimum and committed there, as before,
+	// with no separate commitment, for a job or a quickdiff.
+	datum_config.stratum_v1_vardiff_below_pool_min = false;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "\"mining.set_difficulty\",\"params\":[1048560]") != NULL);
+	datum_test(datum_stratum_test_notify_is(out, job, 20, 20));
+	datum_test(m->stratum_job_diffs[0] == (UINT64_C(1) << 20) && m->stratum_job_commit_pots[0] == 0);
+	m->current_diff = UINT64_C(1) << 22;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "\"mining.notify\",\"params\":[\"Q") != NULL);
+	datum_test(datum_stratum_test_notify_is(out, job, 22, 22));
+	datum_test(m->quickdiff_commit_pot == 0);
+	
+	// On: the miner keeps its own difficulty, and the work is still committed to the minimum.
+	// nbits, a hint to the hasher, is the served target.
+	datum_config.stratum_v1_vardiff_below_pool_min = true;
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "1048560") == NULL);
+	datum_test(datum_stratum_test_notify_is(out, job, 20, 0));
+	datum_test(m->stratum_job_diffs[0] == 1 && m->stratum_job_commit_pots[0] == 20);
+	
+	// Served exactly at the minimum: committed at its own difficulty, with no separate commitment.
+	m->current_diff = UINT64_C(1) << 20;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	datum_test(datum_stratum_test_notify_is(datum_stratum_test_take(c), job, 20, 20));
+	datum_test(m->stratum_job_commit_pots[0] == 0);
+	
+	// Served above the minimum: committed at the served difficulty, as without the option.
+	m->current_diff = UINT64_C(1) << 22;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	datum_test(datum_stratum_test_notify_is(datum_stratum_test_take(c), job, 22, 22));
+	datum_test(m->stratum_job_commit_pots[0] == 0);
+	
+	// A quickdiff that lifts the miner above the minimum is committed at its own difficulty,
+	// though the job it is for was committed at the minimum.
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	(void)datum_stratum_test_take(c);
+	datum_test(m->stratum_job_commit_pots[0] == 20);
+	m->current_diff = UINT64_C(1) << 22;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "\"mining.notify\",\"params\":[\"Q") != NULL);
+	datum_test(datum_stratum_test_notify_is(out, job, 22, 22));
+	datum_test(m->quickdiff_commit_pot == 0 && m->stratum_job_commit_pots[0] == 20);
+	
+	// A new pool minimum applies from the next job, and from a quickdiff below it, which is
+	// then new work committed at the new minimum.
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	(void)datum_stratum_test_take(c);
+	datum_config.override_vardiff_min = UINT64_C(1) << 21;
+	m->current_diff = 16384;
+	datum_test(send_mining_notify(c, true, true, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "\"mining.notify\",\"params\":[\"Q") != NULL);
+	datum_test(datum_stratum_test_notify_is(out, job, 21, 14));
+	datum_test(m->quickdiff_commit_pot == 21 && m->stratum_job_commit_pots[0] == 20);
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	datum_test(datum_stratum_test_notify_is(datum_stratum_test_take(c), job, 21, 0));
+	datum_test(m->stratum_job_commit_pots[0] == 21);
+	datum_config.override_vardiff_min = UINT64_C(1) << 20;
+	
+	// Switched off at runtime: the next job is raised to the minimum, with no separate
+	// commitment, and so is the next quickdiff.
+	datum_config.stratum_v1_vardiff_below_pool_min = false;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	out = datum_stratum_test_take(c);
+	datum_test(strstr(out, "\"mining.set_difficulty\",\"params\":[1048560]") != NULL);
+	datum_test(datum_stratum_test_notify_is(out, job, 20, 20));
+	datum_test(m->stratum_job_commit_pots[0] == 0);
+	
+	// Solo work is never committed apart from the served difficulty.
+	datum_config.stratum_v1_vardiff_below_pool_min = true;
+	job->is_datum_job = false;
+	m->current_diff = 1;
+	datum_test(send_mining_notify(c, true, false, false) == 0);
+	(void)datum_stratum_test_take(c);
+	datum_test(m->stratum_job_diffs[0] == 1 && m->stratum_job_commit_pots[0] == 0);
+	
+	// The forwarding decision.
+	{
+		uint8_t served[32], committed[32];
+		datum_test(datum_blake2b_share_target(served, 0));
+		datum_test(datum_blake2b_share_target(committed, 20));
+		datum_test(datum_stratum_share_forwardable(served, 0));
+		datum_test(datum_stratum_share_forwardable(committed, 20));
+		datum_test(!datum_stratum_share_forwardable(served, 20));
+	}
+	
+	datum_stratum_test_submit_client_free(c);
+	global_cur_stratum_jobs[0] = saved_job0;
+	datum_stratum_test_share_job_free(job);
+	datum_config = saved;
+}
+
+// Through client_mining_submit, with a share found for the job committed at 2^20. Served at 1,
+// it is accepted, credited at 1, and kept local; served at the minimum (committed there, with
+// no separate commitment), it is accepted and sent to the pool with target byte 20. The share
+// found for the job at target byte 0 is not work for the job committed at 2^20.
+static void datum_stratum_submit_forwarding_tests(void) {
+	const global_config_t saved = datum_config;
+	datum_stratum_test_submit_config();
+	datum_config.stratum_v1_vardiff_below_pool_min = true;
+	datum_config.override_vardiff_min = UINT64_C(1) << 20;
+	T_DATUM_STRATUM_JOB * const job = datum_stratum_test_share_job();
+	T_DATUM_STRATUM_JOB * const saved_job0 = global_cur_stratum_jobs[0];
+	global_cur_stratum_jobs[0] = job;
+	datum_test(datum_queue_prep(&pow_queue, 16, sizeof(T_DATUM_PROTOCOL_POW), datum_stratum_test_pow_handler) == 0);
+	T_DATUM_CLIENT_DATA * const c = datum_stratum_test_submit_client(job);
+	T_DATUM_MINER_DATA * const m = c->app_client_data;
+	
+	m->stratum_job_commit_pots[0] = 20;
+	datum_test(datum_stratum_test_submit(c, "0000000000c0de00", SHARE_NONCE_POT0) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "[23,\"H-not-zero\",null]") != NULL);
+	datum_test(datum_stratum_test_submit(c, "0000000000c0de00", SHARE_NONCE_POT20) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+	datum_test(m->share_count_accepted == 1 && m->share_diff_accepted == 1);
+	datum_test(datum_stratum_test_pow_count() == 0);
+	
+	// A Q share committed at the minimum likewise.
+	datum_stratum_test_fresh_dupes(c);
+	m->quickdiff_value = 1;
+	m->quickdiff_commit_pot = 20;
+	m->quickdiff_job_index = 0;
+	datum_test(datum_blake2b_share_target(m->quickdiff_target, 0));
+	datum_test(datum_stratum_test_submit(c, "Q0000000000c0de00", SHARE_NONCE_POT20) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+	datum_test(m->share_count_accepted == 2 && datum_stratum_test_pow_count() == 0);
+	
+	// A Q share's commitment is its own, not its job's: a quickdiff committed at its own
+	// difficulty, for a job committed at the minimum, rebuilds with the quickdiff's byte.
+	datum_stratum_test_fresh_dupes(c);
+	m->stratum_job_commit_pots[0] = 20;
+	m->quickdiff_commit_pot = 0;
+	datum_test(datum_stratum_test_submit(c, "Q0000000000c0de00", SHARE_NONCE_POT0) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+	datum_test(m->share_count_accepted == 3 && datum_stratum_test_pow_count() == 1);
+	(void)datum_queue_free(&pow_queue);
+	datum_test(datum_queue_prep(&pow_queue, 16, sizeof(T_DATUM_PROTOCOL_POW), datum_stratum_test_pow_handler) == 0);
+	
+	// Served at the minimum. (Its target is opened up: no share meeting 2^20 can be found in a
+	// test.)
+	datum_stratum_test_fresh_dupes(c);
+	m->stratum_job_commit_pots[0] = 0;
+	m->current_diff = m->last_sent_diff = m->stratum_job_diffs[0] = UINT64_C(1) << 20;
+	datum_test(datum_stratum_test_submit(c, "0000000000c0de00", SHARE_NONCE_POT20) == 0);
+	datum_test(strstr(datum_stratum_test_take(c), "\"result\":true") != NULL);
+	datum_test(m->share_count_accepted == 4);
+	datum_test(datum_stratum_test_pow_count() == 1 && datum_stratum_test_pow_last()->target_byte == 20);
+	
+	datum_stratum_test_submit_client_free(c);
+	datum_test(datum_queue_free(&pow_queue) == 0);
+	global_cur_stratum_jobs[0] = saved_job0;
+	datum_stratum_test_share_job_free(job);
+	datum_config = saved;
+}
+
 void datum_stratum_tests(void) {
+	datum_stratum_vardiff_below_pool_min_tests();
+	datum_stratum_submit_forwarding_tests();
 	datum_stratum_pending_job_quickdiff_tests();
 	datum_stratum_quickdiff_job_tests();
 	datum_stratum_quickdiff_job_index_tests();

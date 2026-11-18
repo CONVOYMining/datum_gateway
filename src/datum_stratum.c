@@ -1180,6 +1180,11 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	// our variable difficulty work (subject to the DATUM server provided global minimum)
 	
 	full_cb_txn[job->target_pot_index] = floorPoT(job_diff);
+	// vardiff_below_pool_min: work committed above the served difficulty carries that commitment.
+	const unsigned char commit_pot = quickdiff ? m->quickdiff_commit_pot : m->stratum_job_commit_pots[g_job_index];
+	if (commit_pot) {
+		full_cb_txn[job->target_pot_index] = commit_pot;
+	}
 	
 	// time offset
 	ntime = json_array_get(params_obj, 3);
@@ -1354,8 +1359,17 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 		return 0;
 	}
 	
+	// vardiff_below_pool_min: a share kept from the pool is still refused when the pool would take
+	// no share for its job at all, as it would have been when forwarded.
+	const bool forward = datum_stratum_share_forwardable(share_hash, commit_pot);
+	if (job->is_datum_job && !was_block && !forward && datum_protocol_pow_job_check(job) != 0) {
+		send_unknown_work_error(c, id);
+		stratum_note_share(m, false, job_diff);
+		return 0;
+	}
+	
 	// work accepted
-	if (job->is_datum_job && !was_block && datum_protocol_pow_submit(c, job,
+	if (job->is_datum_job && !was_block && forward && datum_protocol_pow_submit(c, job,
 		username_s, false, empty_work, quickdiff, block_header, job_diff, full_cb_txn,
 		full_cb_txn_size, share_hash, cb, extranonce_bin,
 		coinbase_index) != 0) {
@@ -1382,6 +1396,15 @@ int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj
 	stratum_update_vardiff(c,false);
 	
 	return 0;
+}
+
+// Whether an accepted share may be sent to the pool: always, unless vardiff_below_pool_min
+// committed its work above the served difficulty (to 2^commit_pot) and the share doesn't meet it.
+bool datum_stratum_share_forwardable(const uint8_t *share_hash, unsigned char commit_pot) {
+	if (!commit_pot) return true;
+	uint8_t commit_target[32];
+	if (!datum_blake2b_share_target(commit_target, commit_pot)) return false;
+	return compare_hashes(share_hash, commit_target) <= 0;
 }
 
 // The difficulty to credit an accepted share at. Normally the job's. When a harder difficulty
@@ -1547,7 +1570,10 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		stratum_update_vardiff(c, true);
 	}
 	
-	if (j->is_datum_job) {
+	// Read once: the raise below and the commitment must agree on it.
+	const bool below_pool_min = datum_config.stratum_v1_vardiff_below_pool_min;
+	
+	if (j->is_datum_job && !below_pool_min) {
 		// check if our client meets of exceeds the minimum datum diff
 		if (m->current_diff < datum_config.override_vardiff_min) {
 			m->current_diff = datum_config.override_vardiff_min;
@@ -1570,6 +1596,16 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		return 0;
 	}
 	
+	// vardiff_below_pool_min: pooled work served below the pool minimum is committed at the minimum,
+	// as the power of two in the coinbase target byte, and so in the work commitment and its ABW
+	// bits, that the pool checks a share against. 0 means it is committed at the served difficulty,
+	// as without the option.
+	unsigned char commit_pot = 0;
+	if (below_pool_min && j->is_datum_job) {
+		const uint64_t pool_min_diff = datum_config.override_vardiff_min;
+		if (m->last_sent_diff < pool_min_diff) commit_pot = floorPoT(pool_min_diff);
+	}
+	
 	// if this is a quick diff change, the job is likely identical to one we've already sent
 	// in which case, we don't want to clobber the normal target table and reject shares that we shouldn't
 	if (!quickdiff) {
@@ -1584,10 +1620,16 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 	if (quickdiff) {
 		// The job this quickdiff is for; Q shares for any other are refused.
 		m->quickdiff_job_index = j->global_index;
+		m->quickdiff_commit_pot = commit_pot;
+	} else {
+		m->stratum_job_commit_pots[j->global_index] = commit_pot;
 	}
 	tdiff = floorPoT(m->last_sent_diff);
 	share_nbits = datum_blake2b_share_nbits(tdiff);
 	if (!share_nbits) return -1;
+	// vardiff_below_pool_min: the commitment carries the pool minimum; nbits, a hint to the hasher
+	// that is not hashed, stays the target the miner is asked for.
+	if (commit_pot) tdiff = commit_pot;
 	
 	// We'll use the client's send buffer for sanity, since in this environment it wont result in a partial send and we can just build up the string in the output buffer
 	const int notify_out_buf_start = c->out_buf;

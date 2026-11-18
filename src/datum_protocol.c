@@ -2660,6 +2660,19 @@ void datum_protocol_pow_queue_submits(void) {
 	datum_queue_process(&pow_queue);
 }
 
+// Whether the pool would still take a share for this job at all, whatever the share, by the
+// job-level checks datum_protocol_pow_submit makes: 0 if so, DATUM_POW_JOB_UNUSABLE without a
+// template, or without an assignment under anti-withholding, and DATUM_POW_JOB_DISCLOSED once
+// the job's assignment has been disclosed (the pool cannot credit work under it any more).
+int datum_protocol_pow_job_check(const T_DATUM_STRATUM_JOB *job) {
+	if (!job || !job->block_template) return DATUM_POW_JOB_UNUSABLE;
+	if (!job->block_template->abw_enabled) return 0;
+	const uint8_t id = job->block_template->abw_assignment_id;
+	if (!id) return DATUM_POW_JOB_UNUSABLE;
+	if (datum_protocol_abw_assignment_revealed(id)) return DATUM_POW_JOB_DISCLOSED;
+	return 0;
+}
+
 int datum_protocol_pow_submit(
 	const T_DATUM_CLIENT_DATA *c,
 	const T_DATUM_STRATUM_JOB *job,

@@ -157,6 +157,11 @@ bool datum_protocol_take_connect_endpoint(
 	size_t pubkey_size
 );
 bool datum_protocol_migration_expired(uint64_t now_ms);
+enum {
+	DATUM_POW_JOB_UNUSABLE = 1,
+	DATUM_POW_JOB_DISCLOSED = 2,
+};
+int datum_protocol_pow_job_check(const T_DATUM_STRATUM_JOB *job);
 int datum_protocol_pow_submit(
 	const T_DATUM_CLIENT_DATA *c,
 	const T_DATUM_STRATUM_JOB *job,

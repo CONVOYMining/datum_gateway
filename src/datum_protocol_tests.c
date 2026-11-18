@@ -39,11 +39,14 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <jansson.h>
 
 #include "datum_conf.h"
 #include "datum_pow.h"
 #include "datum_protocol_internal.h"
 #include "datum_queue.h"
+#include "datum_stratum.h"
+#include "datum_stratum_dupes.h"
 #include "datum_utils.h"
 
 extern DATUM_QUEUE pow_queue;
@@ -55,6 +58,7 @@ extern unsigned char session_nonce_receiver[crypto_box_NONCEBYTES];
 extern uint64_t datum_protocol_mainloop_tsms;
 extern uint64_t datum_last_accepted_share_tsms;
 extern uint64_t latest_server_msg_tsms;
+int client_mining_submit(T_DATUM_CLIENT_DATA *c, uint64_t id, json_t *params_obj);
 extern pthread_mutex_t submitblock_mutex;
 extern int submit_block_triggered;
 extern const char *submitblock_ptr;
@@ -1273,6 +1277,92 @@ static void datum_protocol_abw_cache_tests(void) {
 	atomic_store(&new_notify_threadsafe, 0);
 	new_notify_blockhash[0] = '\0';
 	datum_test(datum_protocol_abw_assignment_revealed(4));
+	{
+		// The job-level check that also covers shares the Gateway keeps to itself.
+		static T_DATUM_TEMPLATE_DATA check_template;
+		static T_DATUM_STRATUM_JOB check_job;
+		memset(&check_template, 0, sizeof(check_template));
+		memset(&check_job, 0, sizeof(check_job));
+		datum_test(datum_protocol_pow_job_check(NULL) == DATUM_POW_JOB_UNUSABLE);
+		datum_test(datum_protocol_pow_job_check(&check_job) == DATUM_POW_JOB_UNUSABLE);
+		check_job.block_template = &check_template;
+		datum_test(datum_protocol_pow_job_check(&check_job) == 0);
+		check_template.abw_enabled = true;
+		datum_test(datum_protocol_pow_job_check(&check_job) == DATUM_POW_JOB_UNUSABLE);
+		check_template.abw_assignment_id = 4;
+		datum_test(datum_protocol_pow_job_check(&check_job) == DATUM_POW_JOB_DISCLOSED);
+		check_template.abw_assignment_id = 9;
+		datum_test(!datum_protocol_abw_assignment_revealed(9));
+		datum_test(datum_protocol_pow_job_check(&check_job) == 0);
+	}
+	{
+		// Through client_mining_submit with vardiff_below_pool_min: a share served at 1 for work
+		// committed at 2^20, under anti-withholding, is accepted but kept local under an
+		// assignment not yet disclosed, and refused as unknown work under a disclosed one, as it
+		// would have been when forwarded. The nonce was found for this job, extranonce2
+		// deadbeef00000000 and ntime 0 (about 2^32 hashes); the assignment isn't part of the work.
+		static T_DATUM_TEMPLATE_DATA kept_template;
+		static T_DATUM_STRATUM_JOB kept_job;
+		static T_DATUM_MINER_DATA kept_miner;
+		static T_DATUM_STRATUM_THREADPOOL_DATA kept_sdata;
+		static T_DATUM_CLIENT_DATA kept_client;
+		const global_config_t saved_config = datum_config;
+		T_DATUM_STRATUM_JOB * const saved_job0 = global_cur_stratum_jobs[0];
+		memset(&kept_template, 0, sizeof(kept_template));
+		memset(&kept_job, 0, sizeof(kept_job));
+		memset(&kept_miner, 0, sizeof(kept_miner));
+		memset(&kept_sdata, 0, sizeof(kept_sdata));
+		memset(&kept_client, 0, sizeof(kept_client));
+		datum_config.stratum_v1_share_stale_seconds = 120;
+		datum_config.bitcoind_work_update_seconds = 40;
+		datum_config.stratum_v1_vardiff_min = 1;
+		datum_config.stratum_v1_vardiff_target_shares_min = 8;
+		datum_config.stratum_v1_vardiff_quickdiff_count = 8;
+		datum_config.stratum_v1_vardiff_quickdiff_delta = 8;
+		kept_template.abw_enabled = true;
+		kept_template.abw_assignment_id = 9;
+		datum_test(datum_blake2b_xor_key_hash(kept_template.xor_key_hash, (const unsigned char[16]){0}));
+		kept_job.is_datum_job = true;
+		kept_job.block_template = &kept_template;
+		kept_job.coinbase[0].coinb1_len = 2;
+		kept_job.coinbase[0].coinb1_bin[0] = kept_job.coinbase[0].coinb1_bin[1] = 0xff;
+		strcpy(kept_job.job_id, "0000000000c0de");
+		global_cur_stratum_jobs[0] = &kept_job;
+		datum_stratum_dupes_init(&kept_sdata);
+		kept_sdata.loop_tsms = 1000000;
+		kept_job.tsms = kept_sdata.loop_tsms;
+		kept_miner.sdata = &kept_sdata;
+		kept_miner.subscribed = true;
+		kept_miner.current_diff = kept_miner.last_sent_diff = 1;
+		kept_miner.stratum_job_diffs[0] = 1;
+		kept_miner.stratum_job_commit_pots[0] = 20;
+		datum_test(datum_blake2b_share_target(kept_miner.stratum_job_targets[0], 0));
+		kept_client.app_client_data = &kept_miner;
+		json_error_t err;
+		json_t * const params = json_loads("[\"w\", \"0000000000c0de00\", \"deadbeef00000000\", \"0000000000000000\", \"82d371c403000000\"]", 0, &err);
+		datum_test(params != NULL);
+		
+		datum_test(client_mining_submit(&kept_client, 1, params) == 0);
+		kept_client.w_buffer[kept_client.out_buf] = 0;
+		datum_test(strstr(kept_client.w_buffer, "\"result\":true") != NULL);
+		datum_test(kept_miner.share_count_accepted == 1 && kept_miner.share_count_rejected == 0);
+		
+		kept_client.out_buf = 0;
+		free(((T_DATUM_STRATUM_DUPES *)kept_sdata.dupes)->ptr);
+		free(kept_sdata.dupes);
+		datum_stratum_dupes_init(&kept_sdata);
+		kept_template.abw_assignment_id = 4;
+		datum_test(client_mining_submit(&kept_client, 1, params) == 0);
+		kept_client.w_buffer[kept_client.out_buf] = 0;
+		datum_test(strstr(kept_client.w_buffer, "[20,\"unknown-work\",null]") != NULL);
+		datum_test(kept_miner.share_count_accepted == 1 && kept_miner.share_count_rejected == 1);
+		
+		json_decref(params);
+		free(((T_DATUM_STRATUM_DUPES *)kept_sdata.dupes)->ptr);
+		free(kept_sdata.dupes);
+		global_cur_stratum_jobs[0] = saved_job0;
+		datum_config = saved_config;
+	}
 	datum_test(!datum_protocol_abw_cache_candidate(&pow, coinbase, sizeof(coinbase), raw_hash));
 	reveal[18] = 0;
 	datum_test(!datum_protocol_abw_reveal(sizeof(reveal), reveal));
