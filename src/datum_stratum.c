@@ -1560,6 +1560,16 @@ int send_mining_notify(T_DATUM_CLIENT_DATA *c, bool clean, bool quickdiff, bool 
 		send_mining_set_difficulty(c);
 	}
 	
+	// A quickdiff for a job the miner hasn't been sent yet: that job is on its way as a regular
+	// notify (paced, or held for the coinbaser), at the difficulty current when it goes out, and
+	// a quickdiff job differs from it only by job ID, so the miner would redo the same work. Send
+	// just the new difficulty (done above) and leave the miner on the job it holds, whose stored
+	// target still accepts its in-flight shares. quickdiff_active stays set until that notify.
+	if (quickdiff && m->last_sent_stratum_job_index != j->global_index) {
+		m->quickdiff_active = true;
+		return 0;
+	}
+	
 	// if this is a quick diff change, the job is likely identical to one we've already sent
 	// in which case, we don't want to clobber the normal target table and reject shares that we shouldn't
 	if (!quickdiff) {

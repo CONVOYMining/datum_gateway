@@ -1044,7 +1044,50 @@ static void datum_stratum_unbound_quickdiff_tests(void) {
 	datum_config = saved;
 }
 
+// A quickdiff for a job the miner hasn't been sent yet sends only the difficulty. The job then
+// arrives once, as a regular job at the new difficulty, and the job the miner holds keeps its
+// stored target for shares in flight.
+static void datum_stratum_pending_job_quickdiff_tests(void) {
+	const global_config_t saved = datum_config;
+	datum_stratum_test_submit_config();
+	T_DATUM_STRATUM_JOB * const job0 = datum_stratum_test_share_job();
+	T_DATUM_STRATUM_JOB * const job1 = datum_stratum_test_share_job();
+	strcpy(job1->job_id, "0000000000c0df");
+	job1->global_index = 1;
+	T_DATUM_STRATUM_JOB * const saved_job0 = global_cur_stratum_jobs[0];
+	T_DATUM_STRATUM_JOB * const saved_job1 = global_cur_stratum_jobs[1];
+	global_cur_stratum_jobs[0] = job0;
+	global_cur_stratum_jobs[1] = job1;
+	for (int solo = 0; solo <= 1; ++solo) {
+		T_DATUM_CLIENT_DATA * const c = datum_stratum_test_submit_client(job0);
+		T_DATUM_MINER_DATA * const m = c->app_client_data;
+		job0->is_datum_job = job1->is_datum_job = !solo;
+		m->sdata->cur_stratum_job = job1;
+		m->last_sent_stratum_job_index = 0;
+		m->current_diff = 16384;
+		datum_test(send_mining_notify(c, true, true, false) == 0);
+		const char *out = datum_stratum_test_take(c);
+		datum_test(strstr(out, "\"mining.set_difficulty\",\"params\":[16383.75]") != NULL);
+		datum_test(strstr(out, "mining.notify") == NULL);
+		datum_test(m->quickdiff_active && !m->quickdiff_value);
+		datum_test(m->stratum_job_diffs[0] == 1 && m->stratum_job_diffs[1] == 0);
+		datum_test(send_mining_notify(c, false, false, false) == 0);
+		out = datum_stratum_test_take(c);
+		datum_test(strstr(out, "\"mining.notify\",\"params\":[\"0000000000c0df00\"") != NULL);
+		datum_test(!m->quickdiff_active);
+		datum_test(m->last_sent_stratum_job_index == 1 && m->stratum_job_diffs[1] == 16384);
+		datum_test(m->stratum_job_diffs[0] == 1);
+		datum_stratum_test_submit_client_free(c);
+	}
+	global_cur_stratum_jobs[0] = saved_job0;
+	global_cur_stratum_jobs[1] = saved_job1;
+	datum_stratum_test_share_job_free(job0);
+	datum_stratum_test_share_job_free(job1);
+	datum_config = saved;
+}
+
 void datum_stratum_tests(void) {
+	datum_stratum_pending_job_quickdiff_tests();
 	datum_stratum_quickdiff_job_tests();
 	datum_stratum_quickdiff_job_index_tests();
 	datum_stratum_unbound_quickdiff_tests();
